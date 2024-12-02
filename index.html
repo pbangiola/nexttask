@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Sorter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .task-box {
+            margin: 10px 0;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Task Sorter</h1>
+    <div id="taskInput">
+        <h2>Enter Your Tasks</h2>
+        <textarea id="tasks" rows="10" cols="30" placeholder="Enter one task per line"></textarea>
+        <br>
+        <button id="startSort">Start Sorting</button>
+    </div>
+    <div id="taskCompare" class="hidden">
+        <h2>Which task is more important?</h2>
+        <button id="task1"></button>
+        <button id="task2"></button>
+    </div>
+    <div id="taskResult" class="hidden">
+        <h2>Sorted Task List</h2>
+        <ol id="sortedTasks"></ol>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
