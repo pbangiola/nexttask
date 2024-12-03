@@ -3,7 +3,6 @@ let sortedTasks = [];
 let remainingTime = 0;
 let timerInterval = null;
 let nextTask = null;
-let deadline = Date.now();
 
 // Step 1: Start Sorting (Input Task List and Sort)
 document.getElementById('startSort').addEventListener('click', () => {
@@ -57,12 +56,6 @@ function displaySortedTasks() {
         }
     });
     taskResult.appendChild(getToWorkBtn);
-
-    // Add "Download Task List" button
-    const downloadBtn = document.createElement('button');
-    downloadBtn.textContent = 'Download Task List';
-    downloadBtn.addEventListener('click', downloadTaskList);
-    taskResult.appendChild(downloadBtn);
 }
 
 // Step 3: Deadline Setting Page
@@ -95,7 +88,6 @@ function startDeadlineSetting() {
             alert('Please enter a valid time between 1 and 60 minutes.');
         }
     });
-    deadline = Date.now() + remainingTime
     deadlinePage.appendChild(startButton);
 
     document.body.appendChild(deadlinePage);
@@ -104,7 +96,7 @@ function startDeadlineSetting() {
 // Step 4: Focus Screen (Countdown and Task Handling)
 function startFocusScreen() {
     const deadlinePage = document.getElementById('deadlinePage');
-    deadlinePage.remove();
+    if (deadlinePage) deadlinePage.remove();
 
     const focusScreen = document.createElement('div');
     focusScreen.id = 'focusScreen';
@@ -118,25 +110,19 @@ function startFocusScreen() {
     focusScreen.appendChild(timerDisplay);
 
     function updateTimer() {
-        const now = Math.floor(Date.now() / 1000); // Current timestamp in seconds
-        const timeRemaining = deadline - now; // Calculate the time difference
-
-        // Set the text and color based on remaining time
-        if (timeRemaining >= 0) {
-            timerDisplay.style.color = 'green';
-        } else {
-            timerDisplay.style.color = 'red';
+        const minutes = Math.floor(remainingTime / 60);
+        const seconds = remainingTime % 60;
+        timerDisplay.textContent = `Time Remaining: ${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+        if (remainingTime <= 0) {
+            clearInterval(timerInterval);
         }
-
-        const absTime = Math.abs(timeRemaining);
-        const minutes = Math.floor(absTime / 60);
-        const seconds = absTime % 60;
-        timerDisplay.textContent = `Time Remaining: ${timeRemaining >= 0 ? '' : '-'}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
     }
 
-    updateTimer(); // Initial timer update
+    updateTimer();
     timerInterval = setInterval(() => {
+        remainingTime--;
         updateTimer();
+        if (remainingTime <= 0) clearInterval(timerInterval);
     }, 1000);
 
     const doneNext = document.createElement('button');
@@ -146,7 +132,7 @@ function startFocusScreen() {
         remainingTime = 0; // Reset remaining time
         sortedTasks = sortedTasks.slice(1); // Remove the current task from the list
         if (sortedTasks.length > 0) {
-            startDeadlineSetting();
+            displaySortedTasks();
         } else {
             alert('All tasks completed!');
             focusScreen.remove(); // Remove the focus screen
@@ -258,13 +244,4 @@ function mergeInteractive(left, right) {
 
         compareNext();
     });
-}
-
-// Function to download task list as a text file
-function downloadTaskList() {
-    const blob = new Blob([sortedTasks.join('\n')], { type: 'text/plain' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'sorted_tasks.txt';
-    link.click();
 }
