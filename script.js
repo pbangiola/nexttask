@@ -3,6 +3,7 @@ let sortedTasks = [];
 let remainingTime = 0;
 let timerInterval = null;
 let nextTask = null;
+let deadline = 0;
 
 // Step 1: Start Sorting (Input Task List and Sort)
 document.getElementById('startSort').addEventListener('click', () => {
@@ -47,7 +48,7 @@ function displaySortedTasks() {
     const getToWorkBtn = document.createElement('button');
     getToWorkBtn.textContent = 'Get to Work';
     getToWorkBtn.addEventListener('click', () => {
-        if (remainingTime > 0) {
+        if (remainingTime != 0) {
             // If a task is already in progress, skip deadline setting
             startFocusScreen();
         } else {
@@ -56,6 +57,12 @@ function displaySortedTasks() {
         }
     });
     taskResult.appendChild(getToWorkBtn);
+
+    // Add "Download Task List" button
+    const downloadBtn = document.createElement('button');
+    downloadBtn.textContent = 'Download Task List';
+    downloadBtn.addEventListener('click', downloadTaskList);
+    taskResult.appendChild(downloadBtn);
 }
 
 // Step 3: Deadline Setting Page
@@ -82,12 +89,14 @@ function startDeadlineSetting() {
     startButton.addEventListener('click', () => {
         const time = parseInt(input.value, 10);
         if (time >= 1 && time <= 60) {
-            remainingTime = time * 60; // Set initial remaining time in seconds
+            time = time * 60; // Set initial remaining time in seconds
+	    deadline = Math.floor(Date.now()/1000 + time)
             startFocusScreen(); // Start Focus Screen with the selected time
         } else {
             alert('Please enter a valid time between 1 and 60 minutes.');
         }
     });
+
     deadlinePage.appendChild(startButton);
 
     document.body.appendChild(deadlinePage);
@@ -96,7 +105,7 @@ function startDeadlineSetting() {
 // Step 4: Focus Screen (Countdown and Task Handling)
 function startFocusScreen() {
     const deadlinePage = document.getElementById('deadlinePage');
-    if (deadlinePage) deadlinePage.remove();
+    deadlinePage.remove();
 
     const focusScreen = document.createElement('div');
     focusScreen.id = 'focusScreen';
@@ -110,19 +119,26 @@ function startFocusScreen() {
     focusScreen.appendChild(timerDisplay);
 
     function updateTimer() {
-        const minutes = Math.floor(remainingTime / 60);
-        const seconds = remainingTime % 60;
-        timerDisplay.textContent = `Time Remaining: ${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-        if (remainingTime <= 0) {
-            clearInterval(timerInterval);
+        const now = Math.floor(Date.now() / 1000); // Current timestamp in seconds
+        const timeRemaining = deadline - now; // Calculate the time difference
+
+	    
+        // Set the text and color based on remaining time
+        if (timeRemaining >= 0) {
+            timerDisplay.style.color = 'green';
+        } else {
+            timerDisplay.style.color = 'red';
         }
+
+        const absTime = Math.abs(timeRemaining);
+        const minutes = Math.floor(absTime / 60);
+        const seconds = absTime % 60;
+        timerDisplay.textContent = `Time Remaining: ${timeRemaining >= 0 ? '' : '-'}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
     }
 
-    updateTimer();
+    updateTimer(); // Initial timer update
     timerInterval = setInterval(() => {
-        remainingTime--;
         updateTimer();
-        if (remainingTime <= 0) clearInterval(timerInterval);
     }, 1000);
 
     const doneNext = document.createElement('button');
@@ -132,7 +148,7 @@ function startFocusScreen() {
         remainingTime = 0; // Reset remaining time
         sortedTasks = sortedTasks.slice(1); // Remove the current task from the list
         if (sortedTasks.length > 0) {
-            displaySortedTasks();
+            startDeadlineSetting();
         } else {
             alert('All tasks completed!');
             focusScreen.remove(); // Remove the focus screen
@@ -244,4 +260,13 @@ function mergeInteractive(left, right) {
 
         compareNext();
     });
+}
+
+// Function to download task list as a text file
+function downloadTaskList() {
+    const blob = new Blob([sortedTasks.join('\n')], { type: 'text/plain' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'sorted_tasks.txt';
+    link.click();
 }
