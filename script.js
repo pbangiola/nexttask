@@ -48,7 +48,7 @@ function displaySortedTasks() {
     const getToWorkBtn = document.createElement('button');
     getToWorkBtn.textContent = 'Get to Work';
     getToWorkBtn.addEventListener('click', () => {
-        if (remainingTime > 0) {
+        if (remainingTime != 0) {
             // If a task is already in progress, skip deadline setting
             startFocusScreen();
         } else {
@@ -89,8 +89,8 @@ function startDeadlineSetting() {
     startButton.addEventListener('click', () => {
         const time = parseInt(input.value, 10);
         if (time >= 1 && time <= 60) {
-            remainingTime = time * 60; // Set initial remaining time in seconds
-	    deadline = Math.floor(Date.now()/1000 + remainingTime)
+            time = time * 60; // Set initial remaining time in seconds
+	    deadline = Math.floor(Date.now()/1000 + time)
             startFocusScreen(); // Start Focus Screen with the selected time
         } else {
             alert('Please enter a valid time between 1 and 60 minutes.');
@@ -122,6 +122,7 @@ function startFocusScreen() {
         const now = Math.floor(Date.now() / 1000); // Current timestamp in seconds
         const timeRemaining = deadline - now; // Calculate the time difference
 
+	    
         // Set the text and color based on remaining time
         if (timeRemaining >= 0) {
             timerDisplay.style.color = 'green';
