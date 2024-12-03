@@ -56,6 +56,12 @@ function displaySortedTasks() {
         }
     });
     taskResult.appendChild(getToWorkBtn);
+
+    // Add "Download Task List" button
+    const downloadBtn = document.createElement('button');
+    downloadBtn.textContent = 'Download Task List';
+    downloadBtn.addEventListener('click', downloadTaskList);
+    taskResult.appendChild(downloadBtn);
 }
 
 // Step 3: Deadline Setting Page
@@ -244,4 +250,13 @@ function mergeInteractive(left, right) {
 
         compareNext();
     });
+}
+
+// Function to download task list as a text file
+function downloadTaskList() {
+    const blob = new Blob([sortedTasks.join('\n')], { type: 'text/plain' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'sorted_tasks.txt';
+    link.click();
 }
