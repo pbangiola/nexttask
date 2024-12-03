@@ -4,6 +4,7 @@ let remainingTime = 0;
 let timerInterval = null;
 let nextTask = null;
 let deadline = 0;
+let sparetime = 0
 
 // Step 1: Start Sorting (Input Task List and Sort)
 document.getElementById('startSort').addEventListener('click', () => {
@@ -144,7 +145,9 @@ function startFocusScreen() {
     doneNext.textContent = 'Done, Next!';
     doneNext.addEventListener('click', () => {
         clearInterval(timerInterval);
+	sparetime = sparetime + deadline - Math.floor(Date.now() / 1000);
         remainingTime = 0; // Reset remaining time
+	deadline = 0;
         sortedTasks = sortedTasks.slice(1); // Remove the current task from the list
         if (sortedTasks.length > 0) {
             startDeadlineSetting();
