@@ -95,6 +95,7 @@ function startDeadlineSetting() {
             alert('Please enter a valid time between 1 and 60 minutes.');
         }
     });
+    deadline = deadline + remainingTime
     deadlinePage.appendChild(startButton);
 
     document.body.appendChild(deadlinePage);
