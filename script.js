@@ -3,6 +3,7 @@ let sortedTasks = [];
 let remainingTime = 0;
 let timerInterval = null;
 let nextTask = null;
+let deadline = Date.now();
 
 // Step 1: Start Sorting (Input Task List and Sort)
 document.getElementById('startSort').addEventListener('click', () => {
