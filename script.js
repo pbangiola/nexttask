@@ -89,8 +89,7 @@ function startDeadlineSetting() {
     startButton.addEventListener('click', () => {
         const time = parseInt(input.value, 10);
         if (time >= 1 && time <= 60) {
-            remainingTime = time * 60; // Set initial remaining time in seconds
-	    deadline = Math.floor(Date.now()/1000 + remainingTime)
+	    deadline = Math.floor(Date.now()/1000 + time * 60)
             startFocusScreen(); // Start Focus Screen with the selected time
         } else {
             alert('Please enter a valid time between 1 and 60 minutes.');
@@ -105,7 +104,7 @@ function startDeadlineSetting() {
 // Step 4: Focus Screen (Countdown and Task Handling)
 function startFocusScreen() {
     const deadlinePage = document.getElementById('deadlinePage');
-    deadlinePage.remove();
+    if(deadlinePage) {deadlinePage.remove()};
 
     const focusScreen = document.createElement('div');
     focusScreen.id = 'focusScreen';
