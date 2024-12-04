@@ -263,3 +263,34 @@ function mergeInteractive(left, right) {
         compareNext();
     });
 }
+function startAddTask() {
+    const addTaskPage = document.createElement('div');
+    addTaskPage.id = 'addTaskPage';
+
+    const title = document.createElement('h2');
+    title.textContent = 'Add New Task';
+    addTaskPage.appendChild(title);
+
+    const input = document.createElement('textarea');
+    input.id = 'newTaskInput';
+    input.placeholder = 'Enter your new task';
+    addTaskPage.appendChild(input);
+
+    const saveButton = document.createElement('button');
+    saveButton.textContent = 'Save Task';
+    saveButton.addEventListener('click', () => {
+        const newTask = input.value.trim();
+        if (newTask) {
+            tasks = sortedTasks; // Update the tasks array with the current sorted tasks
+            tasks.push(newTask);
+            sortedTasks = startMergeSort(tasks); // Re-sort the tasks
+            displaySortedTasks(); // Redisplay the sorted tasks
+            addTaskPage.remove(); // Remove the "Add Task" page
+        } else {
+            alert('Please enter a valid task.');
+        }
+    });
+    addTaskPage.appendChild(saveButton);
+
+    document.body.appendChild(addTaskPage);
+}
