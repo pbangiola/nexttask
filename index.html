@@ -19,7 +19,15 @@
 </head>
 <body>
     <h1>Task Sorter</h1>
-    <div id="taskInput">
+
+    <!-- Google Sign-In Section -->
+    <div id="authSection">
+        <button id="googleSignIn">Sign in with Google</button>
+        <button id="googleSignOut" class="hidden">Sign out</button>
+        <p id="userInfo" class="hidden"></p>
+    </div>
+
+    <div id="taskInput" class="hidden">
         <h2>Enter Your Tasks</h2>
         <textarea id="tasks" rows="10" cols="30" placeholder="Enter one task per line"></textarea>
         <br>
@@ -34,8 +42,7 @@
         <h2>Sorted Task List</h2>
         <ol id="sortedTasks"></ol>
     </div>
+
     <script src="script.js"></script>
 </body>
-<button id="googleSignIn">Sign in with Google</button>
-
 </html>
