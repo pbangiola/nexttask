@@ -7,17 +7,17 @@ require("dotenv").config();
 
 const app = express();
 
-// ✅ CORS Setup (Apply Before Routes & Middleware)
+// ✅ CORS Setup - Move this to the top!
 const allowedOrigins = [
     'https://pbangiola.github.io', // Allow frontend
 ];
 
 app.use(cors({
     origin: allowedOrigins,
-    credentials: true // Allow cookies/sessions if needed
+    credentials: true
 }));
 
-// ✅ Session Middleware (Apply After CORS)
+// ✅ Session Middleware
 app.use(
   session({
     secret: process.env.SESSION_SECRET,
@@ -26,7 +26,7 @@ app.use(
   })
 );
 
-// Initialize Passport
+// ✅ Initialize Passport
 app.use(passport.initialize());
 app.use(passport.session());
 
@@ -36,7 +36,7 @@ passport.use(
     {
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: "/auth/google/callback",
+      callbackURL: "https://nexttask-7rj8.onrender.com/auth/google/callback", // Ensure this matches Google Console
     },
     (accessToken, refreshToken, profile, done) => {
       return done(null, profile);
@@ -44,7 +44,7 @@ passport.use(
   )
 );
 
-// Serialize user into session
+// ✅ Serialize user into session
 passport.serializeUser((user, done) => {
   done(null, user);
 });
@@ -52,7 +52,7 @@ passport.deserializeUser((user, done) => {
   done(null, user);
 });
 
-// ✅ Add Missing Session Endpoint
+// ✅ Ensure `/auth/session` exists!
 app.get("/auth/session", (req, res) => {
   if (req.isAuthenticated()) {
     res.json({ user: req.user });
@@ -61,21 +61,19 @@ app.get("/auth/session", (req, res) => {
   }
 });
 
-// Google OAuth Routes
-app.get(
-  "/auth/google",
+// ✅ Google OAuth Routes
+app.get("/auth/google",
   passport.authenticate("google", { scope: ["profile", "email"] })
 );
 
-app.get(
-  "/auth/google/callback",
+app.get("/auth/google/callback",
   passport.authenticate("google", { failureRedirect: "/" }),
   (req, res) => {
     res.redirect("https://pbangiola.github.io"); // Redirect back to frontend
   }
 );
 
-// ✅ Fix Logout (New Express Versions Require a Callback)
+// ✅ Logout Fix
 app.get("/logout", (req, res, next) => {
   req.logout(err => {
     if (err) return next(err);
@@ -83,12 +81,9 @@ app.get("/logout", (req, res, next) => {
   });
 });
 
-// ✅ Protected Route Example
-app.get("/dashboard", (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.redirect("/");
-  }
-  res.send(`Welcome, ${req.user.displayName}`);
+// ✅ Test Route to Confirm Server Works
+app.get("/", (req, res) => {
+  res.send("Server is running!");
 });
 
 // Start Server
