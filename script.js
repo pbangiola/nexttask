@@ -7,14 +7,9 @@ let timerInterval = null;
 // Google SSO
 const googleSignIn = document.getElementById('googleSignIn');
 const googleSignOut = document.getElementById('googleSignOut');
-
-googleSignIn.addEventListener('click', () => {
-    window.location.href = '/auth/google';
-});
 document.getElementById('googleSignIn').addEventListener('click', () => {
     window.location.href = 'https://nexttask-7rj8.onrender.com/auth/google';
 });
-
 
 googleSignOut.addEventListener('click', () => {
     fetch('/auth/logout').then(() => location.reload());
