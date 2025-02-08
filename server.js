@@ -40,6 +40,16 @@ passport.serializeUser((user, done) => {
 passport.deserializeUser((user, done) => {
   done(null, user);
 });
+const cors = require('cors');
+
+const allowedOrigins = [
+    'https://pbangiola.github.io', // Allow frontend
+];
+
+app.use(cors({
+    origin: allowedOrigins,
+    credentials: true // Allow cookies/sessions if using them
+}));
 
 // Google OAuth Routes
 app.get(
