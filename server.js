@@ -2,11 +2,22 @@ const express = require("express");
 const passport = require("passport");
 const session = require("express-session");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const cors = require("cors");
 require("dotenv").config();
 
 const app = express();
 
-// Configure session
+// ✅ CORS Setup (Apply Before Routes & Middleware)
+const allowedOrigins = [
+    'https://pbangiola.github.io', // Allow frontend
+];
+
+app.use(cors({
+    origin: allowedOrigins,
+    credentials: true // Allow cookies/sessions if needed
+}));
+
+// ✅ Session Middleware (Apply After CORS)
 app.use(
   session({
     secret: process.env.SESSION_SECRET,
@@ -19,7 +30,7 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Google OAuth Strategy
+// ✅ Google OAuth Strategy
 passport.use(
   new GoogleStrategy(
     {
@@ -40,16 +51,15 @@ passport.serializeUser((user, done) => {
 passport.deserializeUser((user, done) => {
   done(null, user);
 });
-const cors = require('cors');
 
-const allowedOrigins = [
-    'https://pbangiola.github.io', // Allow frontend
-];
-
-app.use(cors({
-    origin: allowedOrigins,
-    credentials: true // Allow cookies/sessions if using them
-}));
+// ✅ Add Missing Session Endpoint
+app.get("/auth/session", (req, res) => {
+  if (req.isAuthenticated()) {
+    res.json({ user: req.user });
+  } else {
+    res.status(401).json({ error: "Not authenticated" });
+  }
+});
 
 // Google OAuth Routes
 app.get(
@@ -61,18 +71,19 @@ app.get(
   "/auth/google/callback",
   passport.authenticate("google", { failureRedirect: "/" }),
   (req, res) => {
-    res.redirect("/dashboard");
+    res.redirect("https://pbangiola.github.io"); // Redirect back to frontend
   }
 );
 
-// Logout Route
-app.get("/logout", (req, res) => {
-  req.logout(() => {
-    res.redirect("/");
+// ✅ Fix Logout (New Express Versions Require a Callback)
+app.get("/logout", (req, res, next) => {
+  req.logout(err => {
+    if (err) return next(err);
+    res.redirect("https://pbangiola.github.io");
   });
 });
 
-// Protected Route Example
+// ✅ Protected Route Example
 app.get("/dashboard", (req, res) => {
   if (!req.isAuthenticated()) {
     return res.redirect("/");
