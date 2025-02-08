@@ -11,6 +11,10 @@ const googleSignOut = document.getElementById('googleSignOut');
 googleSignIn.addEventListener('click', () => {
     window.location.href = '/auth/google';
 });
+document.getElementById('googleSignIn').addEventListener('click', () => {
+    window.location.href = 'https://your-render-backend.onrender.com/auth/google';
+});
+
 
 googleSignOut.addEventListener('click', () => {
     fetch('/auth/logout').then(() => location.reload());
