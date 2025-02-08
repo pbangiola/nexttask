@@ -12,7 +12,7 @@ googleSignIn.addEventListener('click', () => {
     window.location.href = '/auth/google';
 });
 document.getElementById('googleSignIn').addEventListener('click', () => {
-    window.location.href = 'https://your-render-backend.onrender.com/auth/google';
+    window.location.href = 'https://nexttask-7rj8.onrender.com/auth/google';
 });
 
 
