@@ -8,36 +8,49 @@ let spareTime = 0; // Variable to track cumulative spare time
 let user = null; // Track the signed-in user
 
 // Google Sign-In Initialization
-async function handleAuth(isSignIn) {
+// Google Sign-In Logic
+function handleAuth(isSignIn) {
     if (isSignIn) {
-        try {
-            const response = await fetch("https://nexttask-7rj8.onrender.com/auth/google", {
-                credentials: "include",
-            });
-            if (response.ok) {
-                user = await response.json();
-                document.getElementById("userInfo").textContent = `Signed in as ${user.name}`;
-                document.getElementById("userInfo").classList.remove("hidden");
-                document.getElementById("googleSignOut").classList.remove("hidden");
-                document.getElementById("googleSignIn").classList.add("hidden");
-                document.getElementById("taskInput").classList.remove("hidden"); // Show task section
-            }
-        } catch (error) {
-            console.error("Sign-in failed:", error);
-        }
+        // Redirect user to Google authentication
+        window.location.href = "https://nexttask-7rj8.onrender.com/auth/google";
     } else {
-        await fetch("https://nexttask-7rj8.onrender.com/logout", { credentials: "include" });
-        user = null;
-        document.getElementById("userInfo").classList.add("hidden");
-        document.getElementById("googleSignOut").classList.add("hidden");
-        document.getElementById("googleSignIn").classList.remove("hidden");
-        document.getElementById("taskInput").classList.add("hidden"); // Hide task section
+        // Logout request to backend
+        fetch("https://nexttask-7rj8.onrender.com/logout", { credentials: "include" })
+            .then(() => {
+                user = null;
+                document.getElementById("userInfo").classList.add("hidden");
+                document.getElementById("googleSignOut").classList.add("hidden");
+                document.getElementById("googleSignIn").classList.remove("hidden");
+                document.getElementById("taskInput").classList.add("hidden"); // Hide task section
+            })
+            .catch(error => console.error("Logout failed:", error));
     }
 }
+
+// Check session on page load
+async function checkSession() {
+    try {
+        const response = await fetch("https://nexttask-7rj8.onrender.com/auth/session", { credentials: "include" });
+        if (response.ok) {
+            const user = await response.json();
+            document.getElementById("userInfo").textContent = `Signed in as ${user.displayName}`;
+            document.getElementById("userInfo").classList.remove("hidden");
+            document.getElementById("googleSignOut").classList.remove("hidden");
+            document.getElementById("googleSignIn").classList.add("hidden");
+            document.getElementById("taskInput").classList.remove("hidden"); // Show task section
+        }
+    } catch (error) {
+        console.error("Session check failed:", error);
+    }
+}
+
+// Run session check on page load
+window.onload = checkSession;
 
 // Attach event listeners to sign-in and sign-out buttons
 document.getElementById("googleSignIn").addEventListener("click", () => handleAuth(true));
 document.getElementById("googleSignOut").addEventListener("click", () => handleAuth(false));
+
 
 // Step 1: Start Sorting (Input Task List and Sort)
 document.getElementById("startSort").addEventListener("click", () => {
