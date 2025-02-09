@@ -3,6 +3,10 @@ const passport = require("passport");
 const session = require("express-session");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const cors = require("cors");
+const PORT = process.env.PORT || 10000;
+
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
 require("dotenv").config();
 
 const app = express();
