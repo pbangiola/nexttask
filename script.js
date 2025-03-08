@@ -41,21 +41,23 @@ function startAddTask() {
     input.placeholder = 'Enter your new task';
     addTaskPage.appendChild(input);
 
-    const addToEndCheckbox = document.createElement('label');
-    addToEndCheckbox.innerHTML = '<input type="checkbox" id="addToEnd"> Add task to end of the list';
-    addTaskPage.appendChild(addToEndCheckbox);
+    const checkboxLabel = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = 'addToEnd';
+    checkboxLabel.appendChild(checkbox);
+    checkboxLabel.appendChild(document.createTextNode(' Add task to end of list'));
+    addTaskPage.appendChild(checkboxLabel);
 
     const saveButton = document.createElement('button');
     saveButton.textContent = 'Save Task';
     saveButton.addEventListener('click', () => {
         const newTask = input.value.trim();
-        const addToEnd = document.getElementById('addToEnd').checked;
         if (newTask) {
-            tasks = sortedTasks; // Update the tasks array with the current sorted tasks
-            if (addToEnd) {
-                tasks.push(newTask);
-                sortedTasks = tasks;
+            if (checkbox.checked) {
+                sortedTasks.push(newTask); // Add to the end without sorting
             } else {
+                tasks = sortedTasks; // Update the tasks array with the current sorted tasks
                 tasks.push(newTask);
                 sortedTasks = startMergeSort(tasks); // Re-sort the tasks
             }
@@ -69,6 +71,7 @@ function startAddTask() {
 
     document.body.appendChild(addTaskPage);
 }
+
 
 // Step 2: Display Sorted Tasks
 function displaySortedTasks() {
