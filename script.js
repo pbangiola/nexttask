@@ -1,7 +1,5 @@
 // ============================================================
 //  NextTask — script.js
-//  Features: interactive merge sort, task timers, Google Sheets
-//  import/export/persistence, actual vs estimated time tracking
 // ============================================================
 
 const CLIENT_ID = '181397444268-4ekbmv2vmatdj5cmao6pgsc0348f9h1l.apps.googleusercontent.com';
@@ -9,47 +7,34 @@ const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
 const SHEET_NAME = 'NextTask';
 
 // ── State ────────────────────────────────────────────────────
-let tasks = [];           // [{name, estimated, startedAt, completedAt, actual}]
-let sortedTasks = [];     // same shape, in priority order
+let sortedTasks = [];
 let currentTaskIndex = 0;
-let deadline = 0;         // unix timestamp (seconds)
+let deadline = 0;
 let timerInterval = null;
-let spareTime = 0;        // cumulative seconds ahead/behind
-let taskStartTime = 0;    // unix timestamp when task started
-let screenBeforeAdd = ''; // which screen to return to after adding task
+let spareTime = 0;
+let taskStartTime = 0;
+let screenBeforeAdd = '';
 let totalComparisons = 0;
 let completedComparisons = 0;
-
-// Google auth
 let accessToken = null;
+let sheetModalCallback = null;
 
-// ── Screen management ────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────
+function pad(n) { return n < 10 ? '0' + n : '' + n; }
+function formatDateTime(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+function setStatus(msg, color) {
+  const el = document.getElementById('statusMsg');
+  el.textContent = msg;
+  el.style.color = color || 'var(--muted)';
+}
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
 }
 
-// ── Status message ───────────────────────────────────────────
-function setStatus(msg, color = '') {
-  const el = document.getElementById('statusMsg');
-  el.textContent = msg;
-  el.style.color = color || 'var(--muted)';
-}
-
 // ── Google Auth ──────────────────────────────────────────────
-function initGoogleAuth() {
-  // Wait for GSI library to load
-  const checkGsi = setInterval(() => {
-    if (typeof google !== 'undefined' && google.accounts) {
-      clearInterval(checkGsi);
-      google.accounts.id.initialize({
-        client_id: CLIENT_ID,
-        callback: handleCredentialResponse,
-      });
-    }
-  }, 200);
-}
-
 function signIn() {
   const client = google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID,
@@ -60,7 +45,9 @@ function signIn() {
         return;
       }
       accessToken = tokenResponse.access_token;
-      updateAuthUI(true);
+      document.getElementById('signInBtn').style.display = 'none';
+      document.getElementById('signOutBtn').style.display = '';
+      document.getElementById('userInfo').textContent = '● connected';
       setStatus('Signed in to Google.', 'var(--green)');
     },
   });
@@ -68,26 +55,15 @@ function signIn() {
 }
 
 function signOut() {
-  if (accessToken) {
-    google.accounts.oauth2.revoke(accessToken, () => {});
-  }
+  if (accessToken) google.accounts.oauth2.revoke(accessToken, () => {});
   accessToken = null;
-  updateAuthUI(false);
+  document.getElementById('signInBtn').style.display = '';
+  document.getElementById('signOutBtn').style.display = 'none';
+  document.getElementById('userInfo').textContent = '';
   setStatus('Signed out.');
 }
 
-function updateAuthUI(isSignedIn) {
-  document.getElementById('signInBtn').style.display = isSignedIn ? 'none' : '';
-  document.getElementById('signOutBtn').style.display = isSignedIn ? '' : 'none';
-  document.getElementById('userInfo').textContent = isSignedIn ? '● connected' : '';
-}
-
-document.getElementById('signInBtn').addEventListener('click', signIn);
-document.getElementById('signOutBtn').addEventListener('click', signOut);
-
 // ── Sheet Modal ───────────────────────────────────────────────
-let sheetModalCallback = null;
-
 function openSheetModal(title, desc, callback) {
   document.getElementById('sheetModalTitle').textContent = title;
   document.getElementById('sheetModalDesc').innerHTML = desc;
@@ -96,24 +72,11 @@ function openSheetModal(title, desc, callback) {
   document.getElementById('sheetModal').classList.add('open');
 }
 
-document.getElementById('sheetModalCancel').addEventListener('click', () => {
-  document.getElementById('sheetModal').classList.remove('open');
-});
-
-document.getElementById('sheetModalConfirm').addEventListener('click', () => {
-  const sheetId = document.getElementById('sheetIdInput').value.trim();
-  if (!sheetId) { alert('Please enter a Sheet ID.'); return; }
-  document.getElementById('sheetModal').classList.remove('open');
-  if (sheetModalCallback) sheetModalCallback(sheetId);
-});
-
-// ── Google Sheets API helpers ─────────────────────────────────
+// ── Sheets API ────────────────────────────────────────────────
 async function sheetsGet(sheetId, range) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
-  if (!res.ok) throw new Error(`Sheets API error: ${res.status} ${await res.text()}`);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error(`Sheets API error ${res.status}: ${await res.text()}`);
   return res.json();
 }
 
@@ -121,171 +84,68 @@ async function sheetsUpdate(sheetId, range, values) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
   const res = await fetch(url, {
     method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    },
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ range, majorDimension: 'ROWS', values })
   });
-  if (!res.ok) throw new Error(`Sheets API error: ${res.status} ${await res.text()}`);
+  if (!res.ok) throw new Error(`Sheets update error ${res.status}: ${await res.text()}`);
   return res.json();
 }
 
 async function sheetsClear(sheetId, range) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}:clear`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
-  if (!res.ok) throw new Error(`Sheets clear error: ${res.status}`);
-  return res.json();
+  const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error(`Sheets clear error ${res.status}`);
 }
-
-// ── Import from Sheet ─────────────────────────────────────────
-document.getElementById('importSheetBtn').addEventListener('click', () => {
-  if (!accessToken) {
-    alert('Please sign in with Google first.');
-    return;
-  }
-  openSheetModal(
-    'Import from Sheet',
-    'Paste your Sheet ID. We\'ll read from a tab named <strong>NextTask</strong>.<br>Expected columns: Task | Estimated (min) | Started At | Completed At | Actual (min)',
-    async (sheetId) => {
-      setStatus('Importing…');
-      try {
-        const data = await sheetsGet(sheetId, `${SHEET_NAME}!A:E`);
-        const rows = data.values || [];
-        if (rows.length <= 1) {
-          setStatus('Sheet is empty or has only headers.', 'var(--red)');
-          return;
-        }
-        // Skip header row
-        const imported = rows.slice(1).map(row => ({
-          name: row[0] || '',
-          estimated: parseInt(row[1]) || 0,
-          startedAt: row[2] || '',
-          completedAt: row[3] || '',
-          actual: parseFloat(row[4]) || 0,
-        })).filter(t => t.name);
-
-        // Populate textarea with task names
-        document.getElementById('tasksInput').value = imported.map(t => {
-          return t.estimated ? `${t.name} [${t.estimated}min]` : t.name;
-        }).join('\n');
-
-        // Store estimated times keyed by name for later use
-        window._importedTimings = {};
-        imported.forEach(t => {
-          window._importedTimings[t.name] = t.estimated;
-        });
-
-        setStatus(`Imported ${imported.length} tasks.`, 'var(--green)');
-      } catch (e) {
-        setStatus('Import failed: ' + e.message, 'var(--red)');
-      }
-    }
-  );
-});
-
-// ── Export to Sheet ───────────────────────────────────────────
-document.getElementById('exportSheetBtn').addEventListener('click', () => {
-  if (!accessToken) {
-    alert('Please sign in with Google first.');
-    return;
-  }
-  openSheetModal(
-    'Export to Sheet',
-    'Paste your Sheet ID. We\'ll write to a tab named <strong>NextTask</strong> (existing data will be replaced).',
-    async (sheetId) => {
-      setStatus('Exporting…');
-      try {
-        await sheetsClear(sheetId, `${SHEET_NAME}!A:Z`);
-        const header = ['Task', 'Estimated (min)', 'Started At', 'Completed At', 'Actual (min)'];
-        const rows = sortedTasks.map(t => [
-          t.name,
-          t.estimated || '',
-          t.startedAt || '',
-          t.completedAt || '',
-          t.actual || ''
-        ]);
-        await sheetsUpdate(sheetId, `${SHEET_NAME}!A1`, [header, ...rows]);
-        setStatus('Exported successfully!', 'var(--green)');
-      } catch (e) {
-        // Tab might not exist — try creating it first
-        try {
-          await createSheetTab(sheetId);
-          await sheetsUpdate(sheetId, `${SHEET_NAME}!A1`, [
-            ['Task', 'Estimated (min)', 'Started At', 'Completed At', 'Actual (min)'],
-            ...sortedTasks.map(t => [t.name, t.estimated || '', t.startedAt || '', t.completedAt || '', t.actual || ''])
-          ]);
-          setStatus('Exported successfully!', 'var(--green)');
-        } catch (e2) {
-          setStatus('Export failed: ' + e2.message, 'var(--red)');
-        }
-      }
-    }
-  );
-});
 
 async function createSheetTab(sheetId) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      requests: [{ addSheet: { properties: { title: SHEET_NAME } } }]
-    })
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests: [{ addSheet: { properties: { title: SHEET_NAME } } }] })
   });
   if (!res.ok) throw new Error(`Could not create sheet tab: ${res.status}`);
 }
 
 // ── Task parsing ──────────────────────────────────────────────
 function parseTaskInput(raw) {
-  // Support optional [Xmin] suffix from import
   return raw.split('\n')
-    .map(line => line.trim())
-    .filter(line => line)
+    .map(line => line.trim()).filter(Boolean)
     .map(line => {
       const match = line.match(/^(.+?)\s*\[(\d+)min\]$/);
-      const name = match ? match[1].trim() : line;
-      const estimated = match ? parseInt(match[2]) : (window._importedTimings?.[name] || 0);
-      return { name, estimated, startedAt: '', completedAt: '', actual: 0 };
+      return {
+        name: match ? match[1].trim() : line,
+        estimated: match ? parseInt(match[2]) : 0,
+        startedAt: '', completedAt: '', actual: 0
+      };
     });
 }
 
-// ── Sort ──────────────────────────────────────────────────────
-document.getElementById('startSortBtn').addEventListener('click', () => {
-  const raw = document.getElementById('tasksInput').value.trim();
-  if (!raw) { alert('Please enter at least one task.'); return; }
-  tasks = parseTaskInput(raw);
-  if (tasks.length === 1) {
-    sortedTasks = [...tasks];
-    showSortedScreen();
-  } else {
-    // Estimate comparisons for progress bar
-    totalComparisons = Math.ceil(tasks.length * Math.log2(tasks.length));
-    completedComparisons = 0;
-    updateProgress();
-    showScreen('compareScreen');
-    mergeSortInteractive([...tasks]).then(sorted => {
-      sortedTasks = sorted;
-      showSortedScreen();
-    });
+// ── Merge Sort ────────────────────────────────────────────────
+// We resolve comparisons by storing a single pending resolver,
+// then calling it when a button is clicked. No cloning needed.
+let pendingResolve = null;
+
+function setCompareButtons(nameA, nameB) {
+  document.getElementById('task1Text').textContent = nameA;
+  document.getElementById('task2Text').textContent = nameB;
+}
+
+// The two compare buttons call this
+function handleCompareChoice(choice) {
+  if (pendingResolve) {
+    const fn = pendingResolve;
+    pendingResolve = null;
+    fn(choice); // 'left' or 'right'
   }
-});
-
-function updateProgress() {
-  const pct = totalComparisons > 0
-    ? Math.min(100, Math.round((completedComparisons / totalComparisons) * 100))
-    : 0;
-  document.getElementById('progressFill').style.width = pct + '%';
-  document.getElementById('progressText').textContent = `${completedComparisons} / ${totalComparisons}`;
 }
 
-// ── Merge Sort (async, interactive) ──────────────────────────
+function waitForChoice() {
+  return new Promise(resolve => {
+    pendingResolve = resolve;
+  });
+}
+
 async function mergeSortInteractive(array) {
   if (array.length <= 1) return array;
   const mid = Math.floor(array.length / 2);
@@ -294,47 +154,29 @@ async function mergeSortInteractive(array) {
   return mergeInteractive(left, right);
 }
 
-function mergeInteractive(left, right) {
-  return new Promise(resolve => {
-    const result = [];
-
-    function compareNext() {
-      if (!left.length && !right.length) { resolve(result); return; }
-      if (!left.length) { result.push(...right); resolve(result); return; }
-      if (!right.length) { result.push(...left); resolve(result); return; }
-
-      document.getElementById('task1Text').textContent = left[0].name;
-      document.getElementById('task2Text').textContent = right[0].name;
-
-      // Replace onclick to avoid stacking listeners
-      const btn1 = document.getElementById('task1Btn');
-      const btn2 = document.getElementById('task2Btn');
-
-      const newBtn1 = btn1.cloneNode(true);
-      const newBtn2 = btn2.cloneNode(true);
-      btn1.parentNode.replaceChild(newBtn1, btn1);
-      btn2.parentNode.replaceChild(newBtn2, btn2);
-
-      newBtn1.querySelector('#task1Text') || (newBtn1.id = 'task1Btn');
-      newBtn2.querySelector('#task2Text') || (newBtn2.id = 'task2Btn');
-
-      document.getElementById('task1Btn').addEventListener('click', () => {
-        result.push(left.shift());
-        completedComparisons++;
-        updateProgress();
-        compareNext();
-      });
-
-      document.getElementById('task2Btn').addEventListener('click', () => {
-        result.push(right.shift());
-        completedComparisons++;
-        updateProgress();
-        compareNext();
-      });
+async function mergeInteractive(left, right) {
+  const result = [];
+  let li = 0, ri = 0;
+  while (li < left.length && ri < right.length) {
+    setCompareButtons(left[li].name, right[ri].name);
+    const choice = await waitForChoice();
+    if (choice === 'left') {
+      result.push(left[li++]);
+    } else {
+      result.push(right[ri++]);
     }
+    completedComparisons++;
+    updateProgress();
+  }
+  while (li < left.length) result.push(left[li++]);
+  while (ri < right.length) result.push(right[ri++]);
+  return result;
+}
 
-    compareNext();
-  });
+function updateProgress() {
+  const pct = totalComparisons > 0 ? Math.min(100, Math.round((completedComparisons / totalComparisons) * 100)) : 0;
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressText').textContent = `${completedComparisons} / ${totalComparisons}`;
 }
 
 // ── Sorted Screen ─────────────────────────────────────────────
@@ -354,14 +196,141 @@ function showSortedScreen() {
   showScreen('sortedScreen');
 }
 
+// ── Deadline Screen ───────────────────────────────────────────
+function showDeadlineScreen() {
+  if (currentTaskIndex >= sortedTasks.length) return;
+  const task = sortedTasks[currentTaskIndex];
+  document.getElementById('deadlineTaskName').textContent = task.name;
+  document.getElementById('taskTimeInput').value = task.estimated || '';
+  showScreen('deadlineScreen');
+}
+
+// ── Focus Screen ──────────────────────────────────────────────
+function showFocusScreen() {
+  if (timerInterval) clearInterval(timerInterval);
+  const task = sortedTasks[currentTaskIndex];
+  document.getElementById('focusTaskName').textContent = task.name;
+  function updateTimer() {
+    const now = Math.floor(Date.now() / 1000);
+    const remaining = deadline - now;
+    const abs = Math.abs(remaining);
+    const m = Math.floor(abs / 60), s = abs % 60;
+    const sign = remaining < 0 ? '-' : '';
+    document.getElementById('timerDisplay').textContent = `${sign}${m}:${pad(s)}`;
+    document.getElementById('timerDisplay').style.color = remaining >= 0 ? 'var(--green)' : 'var(--red)';
+    document.getElementById('timerLabel').textContent = remaining >= 0 ? 'remaining' : 'over time';
+  }
+  updateTimer();
+  timerInterval = setInterval(updateTimer, 1000);
+  showScreen('focusScreen');
+}
+
+// ── Completion Screen ─────────────────────────────────────────
+function showCompletionScreen() {
+  const abs = Math.abs(spareTime);
+  const h = Math.floor(abs / 3600), m = Math.floor((abs % 3600) / 60), s = abs % 60;
+  const sign = spareTime >= 0 ? '+' : '-';
+  const fmt = h > 0 ? `${sign}${h}:${pad(m)}:${pad(s)}` : `${sign}${m}:${pad(s)}`;
+  document.getElementById('spareTimeDisplay').textContent = fmt;
+  document.getElementById('spareTimeDisplay').style.color = spareTime >= 0 ? 'var(--green)' : 'var(--red)';
+  document.getElementById('spareTimeLabel').textContent = spareTime >= 0 ? 'spare time' : 'over schedule';
+  showScreen('completionScreen');
+}
+
+// ── EVENT LISTENERS ───────────────────────────────────────────
+
+// Auth
+document.getElementById('signInBtn').addEventListener('click', signIn);
+document.getElementById('signOutBtn').addEventListener('click', signOut);
+
+// Sheet modal
+document.getElementById('sheetModalCancel').addEventListener('click', () => {
+  document.getElementById('sheetModal').classList.remove('open');
+});
+document.getElementById('sheetModalConfirm').addEventListener('click', () => {
+  const id = document.getElementById('sheetIdInput').value.trim();
+  if (!id) { alert('Please enter a Sheet ID.'); return; }
+  document.getElementById('sheetModal').classList.remove('open');
+  if (sheetModalCallback) sheetModalCallback(id);
+});
+
+// Input screen — Sort
+document.getElementById('startSortBtn').addEventListener('click', () => {
+  const raw = document.getElementById('tasksInput').value.trim();
+  if (!raw) { alert('Please enter at least one task.'); return; }
+  const parsed = parseTaskInput(raw);
+  if (parsed.length === 0) { alert('No valid tasks found.'); return; }
+  sortedTasks = parsed;
+  if (parsed.length === 1) {
+    showSortedScreen();
+    return;
+  }
+  totalComparisons = Math.ceil(parsed.length * Math.log2(parsed.length));
+  completedComparisons = 0;
+  updateProgress();
+  showScreen('compareScreen');
+  mergeSortInteractive([...parsed]).then(sorted => {
+    sortedTasks = sorted;
+    showSortedScreen();
+  });
+});
+
+// Input screen — Import
+document.getElementById('importSheetBtn').addEventListener('click', () => {
+  if (!accessToken) { alert('Please sign in with Google first.'); return; }
+  openSheetModal(
+    'Import from Sheet',
+    'Paste your Sheet ID. Reads from a tab named <strong>NextTask</strong>.',
+    async (sheetId) => {
+      setStatus('Importing…');
+      try {
+        const data = await sheetsGet(sheetId, `${SHEET_NAME}!A:E`);
+        const rows = (data.values || []).slice(1);
+        if (!rows.length) { setStatus('Sheet appears empty.', 'var(--red)'); return; }
+        document.getElementById('tasksInput').value = rows
+          .filter(r => r[0])
+          .map(r => r[1] ? `${r[0]} [${r[1]}min]` : r[0])
+          .join('\n');
+        setStatus(`Imported ${rows.length} tasks.`, 'var(--green)');
+      } catch (e) { setStatus('Import failed: ' + e.message, 'var(--red)'); }
+    }
+  );
+});
+
+// Compare screen buttons
+document.getElementById('task1Btn').addEventListener('click', () => handleCompareChoice('left'));
+document.getElementById('task2Btn').addEventListener('click', () => handleCompareChoice('right'));
+
+// Sorted screen
 document.getElementById('getToWorkBtn').addEventListener('click', () => {
   if (deadline > 0 && currentTaskIndex < sortedTasks.length) {
-    showFocusScreen(); // Resume in-progress task
+    showFocusScreen();
   } else {
     showDeadlineScreen();
   }
 });
-
+document.getElementById('addTaskBtn').addEventListener('click', () => {
+  screenBeforeAdd = 'sortedScreen';
+  document.getElementById('newTaskInput').value = '';
+  showScreen('addTaskScreen');
+});
+document.getElementById('exportSheetBtn').addEventListener('click', () => {
+  if (!accessToken) { alert('Please sign in with Google first.'); return; }
+  openSheetModal(
+    'Export to Sheet',
+    'Paste your Sheet ID. Writes to a tab named <strong>NextTask</strong> (replaces existing data).',
+    async (sheetId) => {
+      setStatus('Exporting…');
+      try {
+        try { await sheetsClear(sheetId, `${SHEET_NAME}!A:Z`); } catch (_) { await createSheetTab(sheetId); }
+        const header = ['Task', 'Estimated (min)', 'Started At', 'Completed At', 'Actual (min)'];
+        const rows = sortedTasks.map(t => [t.name, t.estimated || '', t.startedAt || '', t.completedAt || '', t.actual || '']);
+        await sheetsUpdate(sheetId, `${SHEET_NAME}!A1`, [header, ...rows]);
+        setStatus('Exported!', 'var(--green)');
+      } catch (e) { setStatus('Export failed: ' + e.message, 'var(--red)'); }
+    }
+  );
+});
 document.getElementById('downloadBtn').addEventListener('click', () => {
   const lines = sortedTasks.map((t, i) => {
     let line = `${i + 1}. ${t.name}`;
@@ -376,62 +345,10 @@ document.getElementById('downloadBtn').addEventListener('click', () => {
   a.click();
 });
 
-// ── Add Task ──────────────────────────────────────────────────
-function showAddTask(fromScreen) {
-  screenBeforeAdd = fromScreen;
-  document.getElementById('newTaskInput').value = '';
-  showScreen('addTaskScreen');
-}
-
-document.getElementById('addTaskBtn').addEventListener('click', () => showAddTask('sortedScreen'));
-document.getElementById('addTaskFocusBtn').addEventListener('click', () => {
-  clearInterval(timerInterval);
-  showAddTask('focusScreen');
-});
-
-document.getElementById('cancelAddTaskBtn').addEventListener('click', () => {
-  if (screenBeforeAdd === 'focusScreen') {
-    // Restart timer
-    showFocusScreen();
-  } else {
-    showScreen('sortedScreen');
-  }
-});
-
-document.getElementById('saveNewTaskBtn').addEventListener('click', async () => {
-  const name = document.getElementById('newTaskInput').value.trim();
-  if (!name) { alert('Please enter a task name.'); return; }
-
-  const newTask = { name, estimated: 0, startedAt: '', completedAt: '', actual: 0 };
-
-  // Insert into sorted list and re-sort
-  const allTasks = [...sortedTasks, newTask];
-  totalComparisons = Math.ceil(allTasks.length * Math.log2(allTasks.length));
-  completedComparisons = 0;
-  updateProgress();
-  showScreen('compareScreen');
-
-  const sorted = await mergeSortInteractive(allTasks);
-  sortedTasks = sorted;
-  showSortedScreen();
-});
-
-// ── Deadline Screen ───────────────────────────────────────────
-function showDeadlineScreen() {
-  if (currentTaskIndex >= sortedTasks.length) return;
-  const task = sortedTasks[currentTaskIndex];
-  document.getElementById('deadlineTaskName').textContent = task.name;
-  const input = document.getElementById('taskTimeInput');
-  input.value = task.estimated || '';
-  showScreen('deadlineScreen');
-}
-
+// Deadline screen
 document.getElementById('startTaskBtn').addEventListener('click', () => {
   const mins = parseInt(document.getElementById('taskTimeInput').value, 10);
-  if (!mins || mins < 1 || mins > 180) {
-    alert('Please enter a time between 1 and 180 minutes.');
-    return;
-  }
+  if (!mins || mins < 1 || mins > 180) { alert('Please enter a time between 1 and 180 minutes.'); return; }
   const task = sortedTasks[currentTaskIndex];
   task.estimated = mins;
   deadline = Math.floor(Date.now() / 1000) + mins * 60;
@@ -440,77 +357,60 @@ document.getElementById('startTaskBtn').addEventListener('click', () => {
   showFocusScreen();
 });
 
-// ── Focus Screen ──────────────────────────────────────────────
-function showFocusScreen() {
-  if (timerInterval) clearInterval(timerInterval);
-
-  const task = sortedTasks[currentTaskIndex];
-  document.getElementById('focusTaskName').textContent = task.name;
-
-  function updateTimer() {
-    const now = Math.floor(Date.now() / 1000);
-    const remaining = deadline - now;
-    const absTime = Math.abs(remaining);
-    const mins = Math.floor(absTime / 60);
-    const secs = absTime % 60;
-    const sign = remaining < 0 ? '-' : '';
-    document.getElementById('timerDisplay').textContent =
-      `${sign}${mins}:${secs < 10 ? '0' : ''}${secs}`;
-    document.getElementById('timerDisplay').style.color =
-      remaining >= 0 ? 'var(--green)' : 'var(--red)';
-    document.getElementById('timerLabel').textContent =
-      remaining >= 0 ? 'remaining' : 'over time';
-  }
-
-  updateTimer();
-  timerInterval = setInterval(updateTimer, 1000);
-  showScreen('focusScreen');
-}
-
+// Focus screen
 document.getElementById('doneNextBtn').addEventListener('click', () => {
   clearInterval(timerInterval);
-
   const now = Math.floor(Date.now() / 1000);
-  const timeDiff = deadline - now;
-  spareTime += timeDiff;
-
-  // Record completion data
+  spareTime += deadline - now;
   const task = sortedTasks[currentTaskIndex];
   task.completedAt = formatDateTime(new Date());
   task.actual = parseFloat(((now - taskStartTime) / 60).toFixed(1));
-
   deadline = 0;
   currentTaskIndex++;
-
   if (currentTaskIndex < sortedTasks.length) {
     showDeadlineScreen();
   } else {
     showCompletionScreen();
   }
 });
+document.getElementById('addTaskFocusBtn').addEventListener('click', () => {
+  clearInterval(timerInterval);
+  screenBeforeAdd = 'focusScreen';
+  document.getElementById('newTaskInput').value = '';
+  showScreen('addTaskScreen');
+});
 
-// ── Completion Screen ─────────────────────────────────────────
-function showCompletionScreen() {
-  const absTime = Math.abs(spareTime);
-  const h = Math.floor(absTime / 3600);
-  const m = Math.floor((absTime % 3600) / 60);
-  const s = absTime % 60;
-  const sign = spareTime < 0 ? '-' : '+';
-  const formatted = h > 0
-    ? `${sign}${h}:${pad(m)}:${pad(s)}`
-    : `${sign}${m}:${pad(s)}`;
+// Add task screen
+document.getElementById('saveNewTaskBtn').addEventListener('click', async () => {
+  const name = document.getElementById('newTaskInput').value.trim();
+  if (!name) { alert('Please enter a task name.'); return; }
+  const newTask = { name, estimated: 0, startedAt: '', completedAt: '', actual: 0 };
+  const allTasks = [...sortedTasks, newTask];
+  totalComparisons = Math.ceil(allTasks.length * Math.log2(allTasks.length));
+  completedComparisons = 0;
+  updateProgress();
+  showScreen('compareScreen');
+  const sorted = await mergeSortInteractive(allTasks);
+  sortedTasks = sorted;
+  // After re-sort, go back to where we came from
+  if (screenBeforeAdd === 'focusScreen') {
+    // Find the current task again (index may have shifted)
+    const currentName = sortedTasks[currentTaskIndex] ? sortedTasks[currentTaskIndex].name : null;
+    showSortedScreen();
+  } else {
+    showSortedScreen();
+  }
+});
+document.getElementById('cancelAddTaskBtn').addEventListener('click', () => {
+  if (screenBeforeAdd === 'focusScreen') {
+    showFocusScreen();
+  } else {
+    showScreen('sortedScreen');
+  }
+});
 
-  document.getElementById('spareTimeDisplay').textContent = formatted;
-  document.getElementById('spareTimeDisplay').style.color =
-    spareTime >= 0 ? 'var(--green)' : 'var(--red)';
-  document.getElementById('spareTimeLabel').textContent =
-    spareTime >= 0 ? 'spare time' : 'over schedule';
-
-  showScreen('completionScreen');
-}
-
+// Completion screen
 document.getElementById('startOverBtn').addEventListener('click', () => {
-  tasks = [];
   sortedTasks = [];
   currentTaskIndex = 0;
   deadline = 0;
@@ -520,14 +420,3 @@ document.getElementById('startOverBtn').addEventListener('click', () => {
   setStatus('');
   showScreen('inputScreen');
 });
-
-// ── Helpers ───────────────────────────────────────────────────
-function pad(n) { return n < 10 ? '0' + n : '' + n; }
-
-function formatDateTime(date) {
-  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())} ` +
-         `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-// ── Init ──────────────────────────────────────────────────────
-initGoogleAuth();
