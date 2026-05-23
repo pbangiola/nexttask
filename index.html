@@ -1,48 +1,574 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Task Sorter</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-        }
-        .task-box {
-            margin: 10px 0;
-        }
-        .hidden {
-            display: none;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NextTask</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,wght@0,300;0,600;1,300&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --paper: #f5f2eb;
+    --accent: #c84b2f;
+    --muted: #8a8070;
+    --border: #d4cfc4;
+    --green: #2d6a4f;
+    --red: #c84b2f;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'DM Mono', monospace;
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  /* Header */
+  #appHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 28px;
+    border-bottom: 1.5px solid var(--border);
+    background: var(--paper);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  #appHeader h1 {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 1.5rem;
+    letter-spacing: -0.02em;
+  }
+
+  #appHeader h1 span {
+    color: var(--accent);
+    font-style: italic;
+  }
+
+  /* Auth area */
+  #authArea {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.75rem;
+  }
+
+  #userInfo {
+    color: var(--muted);
+    font-size: 0.72rem;
+  }
+
+  /* Buttons */
+  .btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    padding: 8px 16px;
+    border: 1.5px solid var(--ink);
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: all 0.15s ease;
+    text-transform: uppercase;
+  }
+
+  .btn:hover {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .btn-accent {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  .btn-accent:hover {
+    background: #a33a22;
+    border-color: #a33a22;
+    color: white;
+  }
+
+  .btn-sm {
+    padding: 5px 10px;
+    font-size: 0.70rem;
+  }
+
+  /* Main content */
+  #mainContent {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 40px 24px;
+  }
+
+  /* Screen transitions */
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  /* Input screen */
+  .screen-title {
+    font-family: 'Fraunces', serif;
+    font-weight: 300;
+    font-size: 1.8rem;
+    margin-bottom: 6px;
+    line-height: 1.2;
+  }
+
+  .screen-subtitle {
+    color: var(--muted);
+    font-size: 0.75rem;
+    margin-bottom: 28px;
+    letter-spacing: 0.03em;
+  }
+
+  textarea {
+    width: 100%;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.82rem;
+    padding: 14px;
+    border: 1.5px solid var(--border);
+    background: white;
+    color: var(--ink);
+    resize: vertical;
+    min-height: 180px;
+    line-height: 1.7;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  textarea:focus { border-color: var(--ink); }
+
+  .input-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+
+  /* Sheet picker modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  .modal-overlay.open { display: flex; }
+
+  .modal {
+    background: var(--paper);
+    border: 1.5px solid var(--ink);
+    padding: 28px;
+    width: 100%;
+    max-width: 420px;
+  }
+
+  .modal h3 {
+    font-family: 'Fraunces', serif;
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  .modal p {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 16px;
+    line-height: 1.6;
+  }
+
+  .modal input {
+    width: 100%;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.80rem;
+    padding: 10px 12px;
+    border: 1.5px solid var(--border);
+    background: white;
+    color: var(--ink);
+    outline: none;
+    margin-bottom: 12px;
+  }
+
+  .modal input:focus { border-color: var(--ink); }
+
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* Compare screen */
+  #compareScreen .screen-title { margin-bottom: 28px; }
+
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 20px;
+  }
+
+  .compare-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.82rem;
+    padding: 20px 16px;
+    border: 1.5px solid var(--border);
+    background: white;
+    color: var(--ink);
+    cursor: pointer;
+    text-align: left;
+    line-height: 1.5;
+    transition: all 0.15s ease;
+    min-height: 80px;
+  }
+
+  .compare-btn:hover {
+    border-color: var(--accent);
+    background: #fff8f6;
+  }
+
+  .compare-btn:active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+
+  .compare-label {
+    font-size: 0.65rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+
+  /* Sorted list screen */
+  .task-list {
+    list-style: none;
+    margin: 20px 0;
+    border: 1.5px solid var(--border);
+  }
+
+  .task-list li {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.82rem;
+    gap: 12px;
+  }
+
+  .task-list li:last-child { border-bottom: none; }
+
+  .task-rank {
+    font-size: 0.68rem;
+    color: var(--muted);
+    width: 20px;
+    flex-shrink: 0;
+  }
+
+  .task-name { flex: 1; }
+
+  .task-time {
+    font-size: 0.70rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .sorted-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+
+  /* Deadline screen */
+  #deadlineScreen .task-label {
+    font-size: 0.72rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+
+  #deadlineScreen .task-display {
+    font-family: 'Fraunces', serif;
+    font-size: 1.4rem;
+    font-weight: 300;
+    margin-bottom: 28px;
+    line-height: 1.3;
+  }
+
+  .time-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .time-input-wrapper input {
+    font-family: 'DM Mono', monospace;
+    font-size: 1.4rem;
+    width: 80px;
+    padding: 10px;
+    border: 1.5px solid var(--border);
+    background: white;
+    text-align: center;
+    outline: none;
+  }
+
+  .time-input-wrapper input:focus { border-color: var(--ink); }
+
+  .time-unit {
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  /* Focus screen */
+  #focusScreen {
+    text-align: center;
+  }
+
+  #focusScreen .task-label {
+    font-size: 0.72rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+  }
+
+  #focusScreen .task-display {
+    font-family: 'Fraunces', serif;
+    font-size: 1.6rem;
+    font-weight: 300;
+    margin-bottom: 40px;
+    line-height: 1.3;
+  }
+
+  #timerDisplay {
+    font-family: 'Fraunces', serif;
+    font-size: 4rem;
+    font-weight: 300;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+    transition: color 0.3s;
+  }
+
+  #timerLabel {
+    font-size: 0.70rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 40px;
+  }
+
+  .focus-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  /* Completion screen */
+  #completionScreen {
+    text-align: center;
+    padding: 40px 0;
+  }
+
+  #completionScreen .screen-title {
+    margin-bottom: 6px;
+  }
+
+  .spare-time-display {
+    font-family: 'Fraunces', serif;
+    font-size: 3rem;
+    font-weight: 300;
+    margin: 24px 0 8px;
+  }
+
+  .spare-time-label {
+    font-size: 0.72rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 32px;
+  }
+
+  /* Add task screen */
+  #addTaskScreen .screen-title { margin-bottom: 20px; }
+
+  /* Progress bar */
+  .progress-bar-wrapper {
+    margin-bottom: 28px;
+  }
+
+  .progress-bar-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.68rem;
+    color: var(--muted);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .progress-bar {
+    height: 3px;
+    background: var(--border);
+    width: 100%;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.4s ease;
+  }
+
+  /* Status message */
+  #statusMsg {
+    font-size: 0.72rem;
+    color: var(--muted);
+    padding: 8px 0;
+    min-height: 24px;
+  }
+
+  /* Divider */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 24px 0;
+  }
+</style>
 </head>
 <body>
-    <h1>Task Sorter</h1>
 
-    <!-- Google Sign-In Section -->
-    <div id="authSection">
-        <button id="googleSignIn">Sign in with Google</button>
-        <button id="googleSignOut" class="hidden">Sign out</button>
-        <p id="userInfo" class="hidden"></p>
-    </div>
+<header id="appHeader">
+  <h1>Next<span>Task</span></h1>
+  <div id="authArea">
+    <span id="userInfo"></span>
+    <button class="btn btn-sm" id="signInBtn">Sign in with Google</button>
+    <button class="btn btn-sm" id="signOutBtn" style="display:none">Sign out</button>
+  </div>
+</header>
 
-    <div id="taskInput" class="hidden">
-        <h2>Enter Your Tasks</h2>
-        <textarea id="tasks" rows="10" cols="30" placeholder="Enter one task per line"></textarea>
-        <br>
-        <button id="startSort">Start Sorting</button>
-    </div>
-    <div id="taskCompare" class="hidden">
-        <h2>Which task comes first?</h2>
-        <button id="task1"></button>
-        <button id="task2"></button>
-    </div>
-    <div id="taskResult" class="hidden">
-        <h2>Sorted Task List</h2>
-        <ol id="sortedTasks"></ol>
-    </div>
+<div id="mainContent">
 
-    <script src="script.js"></script>
+  <!-- Input Screen -->
+  <div id="inputScreen" class="screen active">
+    <h2 class="screen-title">What needs<br><em style="font-style:italic;color:var(--accent)">doing?</em></h2>
+    <p class="screen-subtitle">One task per line. We'll sort them together.</p>
+    <textarea id="tasksInput" placeholder="Write the quarterly report&#10;Reply to Sarah's email&#10;Fix the login bug&#10;Book dentist appointment"></textarea>
+    <div id="statusMsg"></div>
+    <div class="input-actions">
+      <button class="btn btn-accent" id="startSortBtn">Sort Tasks</button>
+      <button class="btn" id="importSheetBtn">Import from Sheet</button>
+    </div>
+  </div>
+
+  <!-- Compare Screen -->
+  <div id="compareScreen" class="screen">
+    <p class="screen-subtitle" style="margin-bottom:4px">SORTING YOUR TASKS</p>
+    <h2 class="screen-title">Which comes<br><em style="font-style:italic;color:var(--accent)">first?</em></h2>
+    <div id="progressBarWrapper" class="progress-bar-wrapper" style="margin-top:20px">
+      <div class="progress-bar-label">
+        <span>Progress</span>
+        <span id="progressText">0 / 0</span>
+      </div>
+      <div class="progress-bar"><div class="progress-bar-fill" id="progressFill" style="width:0%"></div></div>
+    </div>
+    <div class="compare-grid">
+      <button class="compare-btn" id="task1Btn">
+        <div class="compare-label">Option A</div>
+        <div id="task1Text"></div>
+      </button>
+      <button class="compare-btn" id="task2Btn">
+        <div class="compare-label">Option B</div>
+        <div id="task2Text"></div>
+      </button>
+    </div>
+  </div>
+
+  <!-- Sorted List Screen -->
+  <div id="sortedScreen" class="screen">
+    <h2 class="screen-title">Your priority<br><em style="font-style:italic;color:var(--accent)">list</em></h2>
+    <p class="screen-subtitle">Tasks sorted by importance. Ready when you are.</p>
+    <ol class="task-list" id="sortedTaskList"></ol>
+    <div class="sorted-actions">
+      <button class="btn btn-accent" id="getToWorkBtn">Get to Work</button>
+      <button class="btn" id="addTaskBtn">Add Task</button>
+      <button class="btn" id="exportSheetBtn">Export to Sheet</button>
+      <button class="btn" id="downloadBtn">Download</button>
+    </div>
+  </div>
+
+  <!-- Deadline Screen -->
+  <div id="deadlineScreen" class="screen">
+    <p class="screen-subtitle">NEXT UP</p>
+    <div class="task-label">Set a time limit for</div>
+    <div class="task-display" id="deadlineTaskName"></div>
+    <div class="time-input-wrapper">
+      <input type="number" id="taskTimeInput" min="1" max="180" placeholder="25">
+      <span class="time-unit">minutes</span>
+    </div>
+    <button class="btn btn-accent" id="startTaskBtn">Start Task</button>
+  </div>
+
+  <!-- Focus Screen -->
+  <div id="focusScreen" class="screen">
+    <p class="task-label">WORKING ON</p>
+    <div class="task-display" id="focusTaskName"></div>
+    <div id="timerDisplay">0:00</div>
+    <div id="timerLabel">remaining</div>
+    <div class="focus-actions">
+      <button class="btn btn-accent" id="doneNextBtn">Done, Next!</button>
+      <button class="btn" id="addTaskFocusBtn">Add Task</button>
+    </div>
+  </div>
+
+  <!-- Add Task Screen -->
+  <div id="addTaskScreen" class="screen">
+    <h2 class="screen-title">Add a<br><em style="font-style:italic;color:var(--accent)">new task</em></h2>
+    <p class="screen-subtitle">It'll be sorted into the right position.</p>
+    <textarea id="newTaskInput" rows="3" placeholder="Enter your new task"></textarea>
+    <div class="input-actions" style="margin-top:12px">
+      <button class="btn btn-accent" id="saveNewTaskBtn">Save & Sort</button>
+      <button class="btn" id="cancelAddTaskBtn">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Completion Screen -->
+  <div id="completionScreen" class="screen">
+    <p class="screen-subtitle">SESSION COMPLETE</p>
+    <h2 class="screen-title">All done!</h2>
+    <div class="spare-time-display" id="spareTimeDisplay">0:00</div>
+    <div class="spare-time-label" id="spareTimeLabel">spare time</div>
+    <button class="btn btn-accent" id="startOverBtn">Start Over</button>
+  </div>
+
+</div>
+
+<!-- Sheet Picker Modal -->
+<div class="modal-overlay" id="sheetModal">
+  <div class="modal">
+    <h3 id="sheetModalTitle">Google Sheet</h3>
+    <p id="sheetModalDesc">Paste the Sheet ID from the URL of your Google Sheet.<br>e.g. <code>1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms</code></p>
+    <input type="text" id="sheetIdInput" placeholder="Sheet ID">
+    <div class="modal-actions">
+      <button class="btn btn-sm" id="sheetModalCancel">Cancel</button>
+      <button class="btn btn-sm btn-accent" id="sheetModalConfirm">Continue</button>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+<!-- Google Identity Services -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 </body>
 </html>
