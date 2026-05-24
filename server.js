@@ -1,95 +1,44 @@
-const express = require("express");
-const passport = require("passport");
-const session = require("express-session");
-const GoogleStrategy = require("passport-google-oauth20").Strategy;
-const cors = require("cors");
-const PORT = process.env.PORT || 10000;
-
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
-require("dotenv").config();
-
+const express = require('express');
+const { google } = require('googleapis');
+const cors = require('cors'); // Required to allow your GitHub Pages site to talk to Render
 const app = express();
 
-// ✅ CORS Setup - Move this to the top!
-const allowedOrigins = [
-    'https://pbangiola.github.io', // Allow frontend
-];
+app.use(cors({ origin: 'https://yourusername.github.io' })); // Whitelist your GitHub Pages domain
+app.use(express.json());
 
-app.use(cors({
-    origin: allowedOrigins,
-    credentials: true
-}));
-
-// ✅ Session Middleware
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: true,
-  })
-);
-
-// ✅ Initialize Passport
-app.use(passport.initialize());
-app.use(passport.session());
-
-// ✅ Google OAuth Strategy
-passport.use(
-  new GoogleStrategy(
-    {
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: "https://nexttask-7rj8.onrender.com/auth/google/callback", // Ensure this matches Google Console
-    },
-    (accessToken, refreshToken, profile, done) => {
-      return done(null, profile);
-    }
-  )
-);
-
-// ✅ Serialize user into session
-passport.serializeUser((user, done) => {
-  done(null, user);
-});
-passport.deserializeUser((user, done) => {
-  done(null, user);
+// A simple ping endpoint your frontend calls immediately on page load to wake up the server
+app.get('/api/ping', (req, res) => {
+  res.json({ status: "awake" });
 });
 
-// ✅ Ensure `/auth/session` exists!
-app.get("/auth/session", (req, res) => {
-  if (req.isAuthenticated()) {
-    res.json({ user: req.user });
-  } else {
-    res.status(401).json({ error: "Not authenticated" });
+app.post('/api/sheets/export', async (req, res) => {
+  const { taskList, accessToken } = req.body; // Frontend passes the token down manually now
+  
+  if (!accessToken) return res.status(401).json({ error: "Missing token" });
+
+  try {
+    const authClient = new google.auth.OAuth2();
+    authClient.setCredentials({ access_token: accessToken });
+    const sheets = google.sheets({ version: 'v4', auth: authClient });
+
+    const spreadsheet = await sheets.spreadsheets.create({
+      requestBody: {
+        properties: { title: `NextTask List - ${new Date().toLocaleDateString()}` },
+      },
+    });
+
+    const rows = taskList.map((task) => [task]);
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: spreadsheet.data.spreadsheetId,
+      range: 'Sheet1!A1',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: rows },
+    });
+
+    res.json({ url: spreadsheet.data.spreadsheetUrl });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
-// ✅ Google OAuth Routes
-app.get("/auth/google",
-  passport.authenticate("google", { scope: ["profile", "email"] })
-);
-
-app.get("/auth/google/callback",
-  passport.authenticate("google", { failureRedirect: "/" }),
-  (req, res) => {
-    res.redirect("https://pbangiola.github.io/nexttask"); // Redirect back to frontend
-  }
-);
-
-// ✅ Logout Fix
-app.get("/logout", (req, res, next) => {
-  req.logout(err => {
-    if (err) return next(err);
-    res.redirect("https://pbangiola.github.io");
-  });
-});
-
-// ✅ Test Route to Confirm Server Works
-app.get("/", (req, res) => {
-  res.send("Server is running!");
-});
-
-// Start Server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(process.env.PORT || 3001);
