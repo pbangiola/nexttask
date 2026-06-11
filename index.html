@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,6 +9,7 @@
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
+            max-width: 600px;
         }
         .task-box {
             margin: 10px 0;
@@ -15,25 +17,42 @@
         .hidden {
             display: none;
         }
+        button {
+            margin: 5px;
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+        input, textarea {
+            margin: 5px 0;
+            padding: 6px;
+        }
+        .checkbox-container {
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
     <h1>Task Sorter</h1>
+    
     <div id="taskInput">
         <h2>Enter Your Tasks</h2>
         <textarea id="tasks" rows="10" cols="30" placeholder="Enter one task per line"></textarea>
-        <br>
+        <div class="checkbox-container">
+            <label>
+                <input type="checkbox" id="skipSortCheckbox"> Skip sorting (use current order)
+            </label>
+        </div>
         <button id="startSort">Start Sorting</button>
     </div>
+
     <div id="taskCompare" class="hidden">
         <h2>Which task comes first?</h2>
         <button id="task1"></button>
         <button id="task2"></button>
     </div>
-    <div id="taskResult" class="hidden">
-        <h2>Sorted Task List</h2>
-        <ol id="sortedTasks"></ol>
-    </div>
+
+    <div id="dynamicContainer"></div>
+
     <script src="script.js"></script>
 </body>
 </html>
