@@ -1,25 +1,28 @@
-let tasks = [];
-let sortedTasks = [];
-let remainingTime = 0;
+let sortedTasks = []; // Holds objects: { name: "Task", estimatedTime: 0, actualTime: 0 }
+let currentTaskIndex = 0;
 let timerInterval = null;
-let nextTask = null;
 let deadline = 0;
-let spareTime = 0; // Variable to track cumulative spare time
+let spareTime = 0; 
+let taskStartTimestamp = 0; 
+let pausedSecondsRemaining = 0; // Tracks exactly how many seconds were left on the countdown clock when paused
 
-// Step 1: Start Sorting (Input Task List and Sort)
+// Step 1: Start Sorting or Skip Sorting
 document.getElementById('startSort').addEventListener('click', () => {
     const taskInput = document.getElementById('tasks').value.trim();
-    if (taskInput) {
-        tasks = taskInput.split('\n').map(task => task.trim()).filter(task => task);
-        if (tasks.length > 1) {
-            sortedTasks = startMergeSort(tasks); // Sort the tasks initially
-            displaySortedTasks(); // Display sorted task list
-        } else {
-            sortedTasks = tasks;
-            displaySortedTasks();
-        }
-    } else {
+    if (!taskInput) {
         alert('Task list cannot be empty!');
+        return;
+    }
+
+    const rawTasks = taskInput.split('\n').map(t => t.trim()).filter(t => t);
+    const skipSort = document.getElementById('skipSortCheckbox').checked;
+
+    if (skipSort || rawTasks.length <= 1) {
+        sortedTasks = rawTasks.map(name => ({ name, estimatedTime: 0, actualTime: 0 }));
+        currentTaskIndex = 0;
+        displaySortedTasks();
+    } else {
+        startMergeSort(rawTasks);
     }
 });
 
@@ -27,54 +30,76 @@ document.getElementById('startSort').addEventListener('click', () => {
 function displaySortedTasks() {
     document.getElementById('taskInput').classList.add('hidden');
     document.getElementById('taskCompare').classList.add('hidden');
-    const taskResult = document.getElementById('taskResult');
-    taskResult.classList.remove('hidden');
+    
+    const container = document.getElementById('dynamicContainer');
+    container.innerHTML = ''; 
 
-    const sortedList = document.getElementById('sortedTasks');
-    sortedList.innerHTML = ''; // Clear the previous task list
+    const taskResult = document.createElement('div');
+    taskResult.id = 'taskResult';
 
-    sortedTasks.forEach(task => {
+    const title = document.createElement('h2');
+    title.textContent = 'Sorted Task List';
+    taskResult.appendChild(title);
+
+    const sortedList = document.createElement('ol');
+    sortedTasks.forEach((task, idx) => {
         const li = document.createElement('li');
-        li.textContent = task;
+        if (idx < currentTaskIndex) {
+            const diff = task.estimatedTime - task.actualTime;
+            li.textContent = `${task.name} (Done | Est: ${task.estimatedTime}m, Act: ${task.actualTime}m, Diff: ${diff}m)`;
+            li.style.color = 'gray';
+            li.style.textDecoration = 'line-through';
+        } else {
+            li.textContent = task.name;
+            if (idx === currentTaskIndex && pausedSecondsRemaining > 0) {
+                li.textContent += " (In Progress - Paused)";
+            }
+        }
         sortedList.appendChild(li);
     });
+    taskResult.appendChild(sortedList);
 
-    // Remove any existing "Get to Work" button
-    const existingButton = document.querySelector('#taskResult button');
-    if (existingButton) {
-        existingButton.remove();
+    if (currentTaskIndex < sortedTasks.length) {
+        const getToWorkBtn = document.createElement('button');
+        getToWorkBtn.textContent = pausedSecondsRemaining > 0 ? 'Resume Working' : 'Get to Work';
+        getToWorkBtn.addEventListener('click', () => {
+            if (pausedSecondsRemaining > 0) {
+                // If returning to a paused session, reconstruct the deadline wall and skip the time setter
+                const now = Math.floor(Date.now() / 1000);
+                deadline = now + pausedSecondsRemaining;
+                startFocusScreen();
+            } else {
+                startDeadlineSetting();
+            }
+        });
+        taskResult.appendChild(getToWorkBtn);
+    } else {
+        const completeBtn = document.createElement('button');
+        completeBtn.textContent = 'View Final Efficiency Report';
+        completeBtn.addEventListener('click', () => displaySpareTime());
+        taskResult.appendChild(completeBtn);
     }
 
-    // Add "Get to Work" button at the bottom of the list
-    const getToWorkBtn = document.createElement('button');
-    getToWorkBtn.textContent = 'Get to Work';
-    getToWorkBtn.addEventListener('click', () => {
-        if (remainingTime != 0) {
-            startFocusScreen(); // Skip deadline setting if a task is already in progress
-        } else {
-            startDeadlineSetting(); // Otherwise, go to deadline setting
-        }
-    });
-    taskResult.appendChild(getToWorkBtn);
-
-    // Add "Download Task List" button
     const downloadBtn = document.createElement('button');
-    downloadBtn.textContent = 'Download Task List';
-    downloadBtn.addEventListener('click', downloadTaskList);
+    downloadBtn.textContent = 'Download Task List (CSV)';
+    downloadBtn.addEventListener('click', downloadTaskListCSV);
     taskResult.appendChild(downloadBtn);
+
+    container.appendChild(taskResult);
 }
 
 // Step 3: Deadline Setting Page
 function startDeadlineSetting() {
-    document.getElementById('taskResult').classList.add('hidden');
+    const container = document.getElementById('dynamicContainer');
+    container.innerHTML = '';
 
     const deadlinePage = document.createElement('div');
     deadlinePage.id = 'deadlinePage';
 
-    nextTask = sortedTasks[0]; // Default to the highest priority task (first task in sorted list)
+    const nextTask = sortedTasks[currentTaskIndex];
 
     const taskName = document.createElement('h2');
-    taskName.textContent = `Set a deadline for: ${nextTask}`;
+    taskName.textContent = `Set a deadline for: ${nextTask.name}`;
     deadlinePage.appendChild(taskName);
 
     const input = document.createElement('input');
@@ -88,46 +113,45 @@ function startDeadlineSetting() {
     startButton.addEventListener('click', () => {
         const time = parseInt(input.value, 10);
         if (time >= 1 && time <= 60) {
-            deadline = Math.floor(Date.now() / 1000 + time * 60);
-            startFocusScreen(); // Start Focus Screen with the selected time
+            nextTask.estimatedTime = time; 
+            taskStartTimestamp = Math.floor(Date.now() / 1000); 
+            deadline = taskStartTimestamp + (time * 60);
+            pausedSecondsRemaining = 0; // Pure initialization string
+            startFocusScreen();
         } else {
             alert('Please enter a valid time between 1 and 60 minutes.');
         }
     });
-
     deadlinePage.appendChild(startButton);
 
-    document.body.appendChild(deadlinePage);
+    container.appendChild(deadlinePage);
 }
 
 // Step 4: Focus Screen (Countdown and Task Handling)
 function startFocusScreen() {
-    const deadlinePage = document.getElementById('deadlinePage');
-    if (deadlinePage) {
-        deadlinePage.remove();
-    }
+    const container = document.getElementById('dynamicContainer');
+    container.innerHTML = '';
 
     const focusScreen = document.createElement('div');
     focusScreen.id = 'focusScreen';
 
+    const currentTask = sortedTasks[currentTaskIndex];
+
     const taskName = document.createElement('h2');
-    taskName.textContent = `Current Task: ${nextTask}`;
+    taskName.textContent = `Current Task: ${currentTask.name}`;
     focusScreen.appendChild(taskName);
 
     const timerDisplay = document.createElement('p');
     timerDisplay.id = 'timer';
+    timerDisplay.style.fontSize = '24px';
+    timerDisplay.style.fontWeight = 'bold';
     focusScreen.appendChild(timerDisplay);
 
     function updateTimer() {
-        const now = Math.floor(Date.now() / 1000); // Current timestamp in seconds
-        const timeRemaining = deadline - now; // Calculate the time difference
+        const now = Math.floor(Date.now() / 1000);
+        const timeRemaining = deadline - now;
 
-        // Set the text and color based on remaining time
-        if (timeRemaining >= 0) {
-            timerDisplay.style.color = 'green';
-        } else {
-            timerDisplay.style.color = 'red';
-        }
+        timerDisplay.style.color = timeRemaining >= 0 ? 'green' : 'red';
 
         const absTime = Math.abs(timeRemaining);
         const minutes = Math.floor(absTime / 60);
@@ -135,7 +159,7 @@ function startFocusScreen() {
         timerDisplay.textContent = `Time Remaining: ${timeRemaining >= 0 ? '' : '-'}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
     }
 
-    updateTimer(); // Initial timer update
+    updateTimer();
     timerInterval = setInterval(updateTimer, 1000);
 
     const doneNext = document.createElement('button');
@@ -143,19 +167,22 @@ function startFocusScreen() {
     doneNext.addEventListener('click', () => {
         clearInterval(timerInterval);
 
-        const now = Math.floor(Date.now() / 1000); // Current timestamp
-        const timeDifference = deadline - now; // Calculate time difference
-        spareTime += timeDifference; // Update spare time with the difference
+        const now = Math.floor(Date.now() / 1000);
+        
+        // Finalize total actual minutes accumulated
+        const totalSecondsSpent = now - taskStartTimestamp;
+        currentTask.actualTime += Math.ceil(totalSecondsSpent / 60);
 
-        remainingTime = 0; // Reset remaining time
-        sortedTasks = sortedTasks.slice(1); // Remove the current task from the list
+        const timeDifference = deadline - now;
+        spareTime += timeDifference;
 
-        if (sortedTasks.length > 0) {
-            startDeadlineSetting(); // Start the next task
+        pausedSecondsRemaining = 0; // Clear the pause state completely for the next task
+        currentTaskIndex++; 
+
+        if (currentTaskIndex < sortedTasks.length) {
+            startDeadlineSetting();
         } else {
-            // Display Spare Time
-            displaySpareTime(spareTime);
-            focusScreen.remove(); // Remove the focus screen
+            displaySpareTime();
         }
     });
     focusScreen.appendChild(doneNext);
@@ -164,16 +191,28 @@ function startFocusScreen() {
     addTask.textContent = 'Add New Task';
     addTask.addEventListener('click', () => {
         clearInterval(timerInterval);
-        focusScreen.remove();
+        
+        const now = Math.floor(Date.now() / 1000);
+        
+        // 1. Calculate and permanently lock down the time spent up to this exact split-second
+        const elapsedSeconds = now - taskStartTimestamp;
+        currentTask.actualTime += Math.ceil(elapsedSeconds / 60);
+        
+        // 2. Lock down the exact remaining time footprint left on the clock wrapper
+        pausedSecondsRemaining = deadline - now;
+        
         startAddTask();
     });
     focusScreen.appendChild(addTask);
 
-    document.body.appendChild(focusScreen);
+    container.appendChild(focusScreen);
 }
 
-// Step 5: Display Spare Time
-function displaySpareTime(spareTime) {
+// Step 5: Display Efficiency Report
+function displaySpareTime() {
+    const container = document.getElementById('dynamicContainer');
+    container.innerHTML = '';
+
     const completionScreen = document.createElement('div');
     completionScreen.id = 'completionScreen';
 
@@ -186,28 +225,120 @@ function displaySpareTime(spareTime) {
     const hours = Math.floor(absSpareTime / 3600);
     const minutes = Math.floor((absSpareTime % 3600) / 60);
     const seconds = absSpareTime % 60;
-
-    spareTimeDisplay.textContent = `Spare Time: ${spareTime >= 0 ? '' : '-'}${hours}:${minutes < 10 ? '0' : ''}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+    spareTimeDisplay.textContent = `Cumulative Clock Delta: ${spareTime >= 0 ? '' : '-'}${hours}:${minutes < 10 ? '0' : ''}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
     spareTimeDisplay.style.color = spareTime >= 0 ? 'green' : 'red';
     completionScreen.appendChild(spareTimeDisplay);
 
-    document.body.appendChild(completionScreen);
+    const breakdownTitle = document.createElement('h3');
+    breakdownTitle.textContent = 'Detailed Timing Logs:';
+    completionScreen.appendChild(breakdownTitle);
+
+    const reportList = document.createElement('ul');
+    sortedTasks.forEach(task => {
+        const item = document.createElement('li');
+        const variance = task.estimatedTime - task.actualTime;
+        item.textContent = `${task.name} ➔ Est: ${task.estimatedTime}m | Act: ${task.actualTime}m | Diff: ${variance >= 0 ? '+' : ''}${variance}m`;
+        reportList.appendChild(item);
+    });
+    completionScreen.appendChild(reportList);
+
+    const downloadBtn = document.createElement('button');
+    downloadBtn.textContent = 'Download Metrics (CSV)';
+    downloadBtn.addEventListener('click', downloadTaskListCSV);
+    completionScreen.appendChild(downloadBtn);
+
+    container.appendChild(completionScreen);
 }
 
-// Function to download task list as a text file
-function downloadTaskList() {
-    const blob = new Blob([sortedTasks.join('\n')], { type: 'text/plain' });
+// Step 6: Add New Task Workflow
+function startAddTask() {
+    const container = document.getElementById('dynamicContainer');
+    container.innerHTML = '';
+
+    const addTaskPage = document.createElement('div');
+    addTaskPage.id = 'addTaskPage';
+
+    const title = document.createElement('h2');
+    title.textContent = 'Add New Task';
+    addTaskPage.appendChild(title);
+
+    const input = document.createElement('textarea');
+    input.id = 'newTaskInput';
+    input.placeholder = 'Enter your new task description...';
+    addTaskPage.appendChild(input);
+
+    const appendCheckboxContainer = document.createElement('div');
+    appendCheckboxContainer.className = 'checkbox-container';
+    const appendLabel = document.createElement('label');
+    const appendCheckbox = document.createElement('input');
+    appendCheckbox.type = 'checkbox';
+    appendCheckbox.id = 'appendToEndCheckbox';
+    appendLabel.appendChild(appendCheckbox);
+    appendLabel.appendChild(document.createTextNode(' Push this task to the absolute end of the list'));
+    appendCheckboxContainer.appendChild(appendLabel);
+    addTaskPage.appendChild(appendCheckboxContainer);
+
+    const saveButton = document.createElement('button');
+    saveButton.textContent = 'Save and Process Task';
+    saveButton.addEventListener('click', async () => {
+        const newTaskName = input.value.trim();
+        if (!newTaskName) {
+            alert('Please enter a valid task name.');
+            return;
+        }
+
+        const newTaskObj = { name: newTaskName, estimatedTime: 0, actualTime: 0 };
+
+        if (appendCheckbox.checked) {
+            sortedTasks.push(newTaskObj);
+            displaySortedTasks();
+        } else {
+            const completeTasks = sortedTasks.slice(0, currentTaskIndex);
+            const remainingTasks = sortedTasks.slice(currentTaskIndex);
+
+            const namesToSort = [...remainingTasks.map(t => t.name), newTaskObj.name];
+            
+            document.getElementById('taskCompare').classList.remove('hidden');
+            const freshlySortedNames = await mergeSortInteractive(namesToSort);
+            document.getElementById('taskCompare').classList.add('hidden');
+
+            const freshlySortedObjects = freshlySortedNames.map(name => {
+                const match = remainingTasks.find(t => t.name === name);
+                return match ? match : (name === newTaskObj.name ? newTaskObj : { name, estimatedTime: 0, actualTime: 0 });
+            });
+
+            sortedTasks = [...completeTasks, ...freshlySortedObjects];
+            displaySortedTasks();
+        }
+    });
+    addTaskPage.appendChild(saveButton);
+
+    container.appendChild(addTaskPage);
+}
+
+// Function to download task list as a spreadsheet CSV file
+function downloadTaskListCSV() {
+    let csvContent = "Task Name,Estimated Time (Min),Actual Time (Min),Difference (Min)\n";
+    
+    sortedTasks.forEach(task => {
+        const diff = task.estimatedTime - task.actualTime;
+        const sanitizedName = `"${task.name.replace(/"/g, '""')}"`;
+        csvContent += `${sanitizedName},${task.estimatedTime},${task.actualTime},${diff}\n`;
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = 'sorted_tasks.txt';
+    link.download = 'sorted_tasks_metrics.csv';
     link.click();
 }
 
-// Optimized Merge Sort
+// Interactive Merge Sort Foundations
 function startMergeSort(array) {
-    mergeSortInteractive(array).then(sorted => {
-        sortedTasks = sorted;
-        displaySortedTasks(sortedTasks);
+    mergeSortInteractive(array).then(sortedNames => {
+        sortedTasks = sortedNames.map(name => ({ name, estimatedTime: 0, actualTime: 0 }));
+        currentTaskIndex = 0;
+        displaySortedTasks();
     });
 }
 
@@ -230,13 +361,11 @@ function mergeInteractive(left, right) {
                 resolve(result);
                 return;
             }
-
             if (!left.length) {
                 result.push(...right);
                 resolve(result);
                 return;
             }
-
             if (!right.length) {
                 result.push(...left);
                 resolve(result);
@@ -249,48 +378,15 @@ function mergeInteractive(left, right) {
 
             document.getElementById('task1').onclick = () => {
                 result.push(left.shift());
-                document.getElementById('taskCompare').classList.add('hidden');
                 compareNext();
             };
 
             document.getElementById('task2').onclick = () => {
                 result.push(right.shift());
-                document.getElementById('taskCompare').classList.add('hidden');
                 compareNext();
             };
         }
 
         compareNext();
     });
-}
-function startAddTask() {
-    const addTaskPage = document.createElement('div');
-    addTaskPage.id = 'addTaskPage';
-
-    const title = document.createElement('h2');
-    title.textContent = 'Add New Task';
-    addTaskPage.appendChild(title);
-
-    const input = document.createElement('textarea');
-    input.id = 'newTaskInput';
-    input.placeholder = 'Enter your new task';
-    addTaskPage.appendChild(input);
-
-    const saveButton = document.createElement('button');
-    saveButton.textContent = 'Save Task';
-    saveButton.addEventListener('click', () => {
-        const newTask = input.value.trim();
-        if (newTask) {
-            tasks = sortedTasks; // Update the tasks array with the current sorted tasks
-            tasks.push(newTask);
-            sortedTasks = startMergeSort(tasks); // Re-sort the tasks
-            addTaskPage.remove(); // Remove the "Add Task" page
-            displaySortedTasks(); // Redisplay the sorted tasks
-        } else {
-            alert('Please enter a valid task.');
-        }
-    });
-    addTaskPage.appendChild(saveButton);
-
-    document.body.appendChild(addTaskPage);
 }
