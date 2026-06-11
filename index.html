@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,10 +8,8 @@
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
-            max-width: 600px;
-        }
-        .task-box {
-            margin: 10px 0;
+            max-width: 800px;
+            position: relative;
         }
         .hidden {
             display: none;
@@ -26,23 +23,61 @@
             margin: 5px 0;
             padding: 6px;
         }
-        .checkbox-container {
-            margin: 10px 0;
+        .checkbox-container, .upload-container {
+            margin: 15px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .upload-container {
+            border: 1px dashed #ccc;
+            background: #fafafa;
+        }
+        /* Side-by-side layout for explicit index inserting */
+        .insertion-layout {
+            display: flex;
+            gap: 40px;
+            margin-top: 15px;
+        }
+        .insertion-column {
+            flex: 1;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #fff;
+        }
+        /* Top right positioning for Stop Working */
+        #stopWorkingBtn {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background-color: #ffcdd2;
+            border: 1px solid #e53935;
+            color: #b71c1c;
+            font-weight: bold;
+            border-radius: 4px;
         }
     </style>
 </head>
 <body>
+    <button id="stopWorkingBtn" class="hidden">Stop Working</button>
+
     <h1>Task Sorter</h1>
     
     <div id="taskInput">
         <h2>Enter Your Tasks</h2>
-        <textarea id="tasks" rows="10" cols="30" placeholder="Enter one task per line"></textarea>
+        <textarea id="tasks" rows="10" cols="40" placeholder="Enter one task per line"></textarea>
+        
         <div class="checkbox-container">
             <label>
                 <input type="checkbox" id="skipSortCheckbox"> Skip sorting (use current order)
             </label>
         </div>
         <button id="startSort">Start Sorting</button>
+
+        <div class="upload-container">
+            <h3>Or Resume Previous Session</h3>
+            <input type="file" id="csvUpload" accept=".csv">
+        </div>
     </div>
 
     <div id="taskCompare" class="hidden">
