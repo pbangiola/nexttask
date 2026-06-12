@@ -58,6 +58,14 @@
         .checkbox-container {
             margin: 15px 0;
         }
+        .upload-container {
+            border: 2px dashed #ccc;
+            background: #fafafa;
+            padding: 20px;
+            text-align: center;
+            border-radius: 6px;
+            margin-top: 20px;
+        }
         .insertion-layout {
             display: flex;
             gap: 40px;
@@ -99,20 +107,37 @@
     </style>
 </head>
 <body>
-    <button id=\"stopWorkingBtn\" class=\"hidden\">Stop Working</button>
+    <button id="stopWorkingBtn" class="hidden">Stop Working</button>
 
     <h1>Task Sorter</h1>
     
-    <div id=\"dynamicContainer\"></div>
+    <div id="taskInputContainer">
+        <h2>Enter Your Tasks</h2>
+        <textarea id="tasksTextarea" rows="10" placeholder="Enter one task instruction entry per line..."></textarea>
+        
+        <div class="checkbox-container">
+            <label>
+                <input type="checkbox" id="skipSortCheckbox"> Skip sorting (use current order)
+            </label>
+        </div>
+        <button id="btnSubmitText">Start Sorting</button>
 
-    <div id=\"taskCompare\" class=\"hidden\">
-        <h2>Which task comes first?</h2>
-        <div class=\"choice-box-container\">
-            <div id=\"task1\" class=\"forced-choice-box\"></div>
-            <div id=\"task2\" class=\"forced-choice-box\"></div>
+        <div class="upload-container">
+            <h3>Or Resume Previous Session</h3>
+            <input type="file" id="csvFileInput" accept=".csv">
         </div>
     </div>
 
-    <script src=\"script.js\"></script>
+    <div id="dynamicContainer"></div>
+
+    <div id="taskCompare" class="hidden">
+        <h2>Which task comes first?</h2>
+        <div class="choice-box-container">
+            <div id="task1" class="forced-choice-box"></div>
+            <div id="task2" class="forced-choice-box"></div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
 </body>
 </html>
