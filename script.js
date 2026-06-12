@@ -6,9 +6,87 @@ let spareTime = 0;
 let taskStartTimestamp = 0; 
 let pausedSecondsRemaining = 0; 
 
+// --- NEW: Persistence Layer ---
+function saveSession() {
+    const sessionState = {
+        sortedTasks,
+        currentTaskIndex,
+        deadline,
+        spareTime,
+        taskStartTimestamp,
+        pausedSecondsRemaining,
+        // Track exactly what view screen was active
+        activeView: getActiveViewContext() 
+    };
+    localStorage.setItem('taskSorterSession', JSON.stringify(sessionState));
+}
+
+function loadSession() {
+    const saved = localStorage.getItem('taskSorterSession');
+    if (!saved) return;
+
+    try {
+        const state = JSON.parse(saved);
+        sortedTasks = state.sortedTasks || [];
+        currentTaskIndex = state.currentTaskIndex || 0;
+        deadline = state.deadline || 0;
+        spareTime = state.spareTime || 0;
+        taskStartTimestamp = state.taskStartTimestamp || 0;
+        pausedSecondsRemaining = state.pausedSecondsRemaining || 0;
+
+        if (sortedTasks.length > 0) {
+            // Hide initial input screen
+            document.getElementById('taskInput').classList.add('hidden');
+            
+            // Route user back to where they were
+            routeToStoredView(state.activeView);
+        }
+    } catch (e) {
+        console.error("Error restoring session:", e);
+    }
+}
+
+function clearSession() {
+    localStorage.removeItem('taskSorterSession');
+}
+
+function getActiveViewContext() {
+    if (document.getElementById('focusScreen')) return 'focus';
+    if (document.getElementById('deadlinePage')) return 'deadline';
+    if (document.getElementById('addTaskPage')) return 'add-task';
+    if (document.getElementById('completionScreen')) return 'completion';
+    if (sortedTasks.length > 0 && document.getElementById('taskInput').classList.contains('hidden')) return 'dashboard';
+    return 'input';
+}
+
+function routeToStoredView(view) {
+    if (view === 'focus') {
+        // Verify if deadline has already passed while backgrounded
+        const now = Math.floor(Date.now() / 1000);
+        if (deadline > now) {
+            startFocusScreen();
+        } else {
+            // If it passed while away, go to dashboard or auto-handle
+            displaySortedTasks();
+        }
+    } else if (view === 'deadline') {
+        startDeadlineSetting();
+    } else if (view === 'add-task') {
+        startAddTask();
+    } else if (view === 'completion') {
+        displaySpareTime();
+    } else {
+        displaySortedTasks();
+    }
+}
+// ------------------------------
+
 // Initializing Event Listeners
 document.getElementById('csvUpload').addEventListener('change', handleCSVUpload);
 document.getElementById('stopWorkingBtn').addEventListener('click', handleStopWorking);
+
+// Check for existing session right at boot
+window.addEventListener('DOMContentLoaded', loadSession);
 
 // Step 1: Handle Initial Task Sorter Submission
 document.getElementById('startSort').addEventListener('click', () => {
@@ -21,12 +99,12 @@ document.getElementById('startSort').addEventListener('click', () => {
     const rawTasks = taskInput.split('\n').map(t => t.trim()).filter(t => t);
     const skipSort = document.getElementById('skipSortCheckbox').checked;
 
-    // Hide the landing page inputs immediately upon clicking
     document.getElementById('taskInput').classList.add('hidden');
 
     if (skipSort || rawTasks.length <= 1) {
         sortedTasks = rawTasks.map(name => ({ name, estimatedTime: 0, actualTime: 0 }));
         currentTaskIndex = 0;
+        saveSession();
         promptForUpfrontTimings();
     } else {
         startMergeSort(rawTasks);
@@ -71,12 +149,12 @@ function handleCSVUpload(event) {
             return;
         }
 
-        // Hide the landing page inputs on successful CSV loading
         document.getElementById('taskInput').classList.add('hidden');
 
         sortedTasks = parsedTasks;
         currentTaskIndex = runningCompletedCount; 
         
+        saveSession();
         displaySortedTasks();
     };
     reader.readAsText(file);
@@ -85,12 +163,10 @@ function handleCSVUpload(event) {
 // Step 2a: Upfront Timings Gateway Motif
 function promptForUpfrontTimings() {
     document.getElementById('taskCompare').classList.add('hidden');
-
     const container = document.getElementById('dynamicContainer');
     container.innerHTML = '';
 
     const gatewayScreen = document.createElement('div');
-    
     const question = document.createElement('h2');
     question.textContent = 'Do you want to set timings now?';
     gatewayScreen.appendChild(question);
@@ -110,6 +186,7 @@ function promptForUpfrontTimings() {
     gatewayScreen.appendChild(noBtn);
 
     container.appendChild(gatewayScreen);
+    saveSession();
 }
 
 // Step 2b: Sequential Timing Entry Routine
@@ -146,6 +223,7 @@ function runSequentialTimingInput(index) {
         const timeVal = parseInt(input.value, 10);
         if (timeVal >= 1 && timeVal <= 120) {
             targetTask.estimatedTime = timeVal;
+            saveSession();
             runSequentialTimingInput(index + 1); 
         } else {
             alert('Please specify an estimate between 1 and 120 minutes.');
@@ -154,12 +232,13 @@ function runSequentialTimingInput(index) {
     timingScreen.appendChild(nextBtn);
 
     container.appendChild(timingScreen);
+    saveSession();
 }
 
 // Step 3: Main Dashboard Listing
 function displaySortedTasks() {
     document.getElementById('taskCompare').classList.add('hidden');
-    document.getElementById('stopWorkingBtn').classList.add('hidden'); // Hidden on dashboard list
+    document.getElementById('stopWorkingBtn').classList.add('hidden'); 
     
     const container = document.getElementById('dynamicContainer');
     container.innerHTML = ''; 
@@ -217,12 +296,26 @@ function displaySortedTasks() {
     downloadBtn.addEventListener('click', downloadTaskListCSV);
     taskResult.appendChild(downloadBtn);
 
+    // Dynamic reset button so users can intentionally start completely over
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'Reset All and Start Over';
+    resetBtn.style.backgroundColor = '#eceff1';
+    resetBtn.style.marginLeft = '15px';
+    resetBtn.addEventListener('click', () => {
+        if (confirm("Are you sure you want to delete this session?")) {
+            clearSession();
+            window.location.reload();
+        }
+    });
+    taskResult.appendChild(resetBtn);
+
     container.appendChild(taskResult);
+    saveSession();
 }
 
 // Step 4: Deadline Setup
 function startDeadlineSetting() {
-    document.getElementById('stopWorkingBtn').classList.remove('hidden'); // Show on setup flow
+    document.getElementById('stopWorkingBtn').classList.remove('hidden'); 
 
     const nextTask = sortedTasks[currentTaskIndex];
     
@@ -267,11 +360,12 @@ function startDeadlineSetting() {
     deadlinePage.appendChild(startButton);
 
     container.appendChild(deadlinePage);
+    saveSession();
 }
 
 // Step 5: Live Execution Focus Panel
 function startFocusScreen() {
-    document.getElementById('stopWorkingBtn').classList.remove('hidden'); // Show on active execution
+    document.getElementById('stopWorkingBtn').classList.remove('hidden'); 
 
     const container = document.getElementById('dynamicContainer');
     container.innerHTML = '';
@@ -304,6 +398,7 @@ function startFocusScreen() {
     }
 
     updateTimer();
+    if (timerInterval) clearInterval(timerInterval);
     timerInterval = setInterval(updateTimer, 1000);
 
     const doneNext = document.createElement('button');
@@ -345,13 +440,13 @@ function startFocusScreen() {
     focusScreen.appendChild(addTask);
 
     container.appendChild(focusScreen);
+    saveSession();
 }
 
 // Action Trigger for Stop Working Routine
 function handleStopWorking() {
     clearInterval(timerInterval);
     
-    // Process current run metrics if stopped while mid-timer
     if (document.getElementById('focusScreen') && currentTaskIndex < sortedTasks.length) {
         const now = Math.floor(Date.now() / 1000);
         sortedTasks[currentTaskIndex].actualTime += Math.ceil((now - taskStartTimestamp) / 60);
@@ -384,7 +479,7 @@ function downloadRemainingTasksCSV() {
 
 // Step 6: Targeted Numerical Index Insertion Panel
 function startAddTask() {
-    document.getElementById('stopWorkingBtn').classList.add('hidden'); // Hidden while altering queues
+    document.getElementById('stopWorkingBtn').classList.add('hidden'); 
 
     const container = document.getElementById('dynamicContainer');
     container.innerHTML = '';
@@ -442,7 +537,7 @@ function startAddTask() {
     rightCol.appendChild(input);
 
     const label = document.createElement('p');
-    label.innerHTML = `Where should this task go in the list?' (Min: ${currentTaskIndex + 1}, Max: ${sortedTasks.length + 1}):`;
+    label.innerHTML = `Where should this task go in the list? (Min: ${currentTaskIndex + 1}, Max: ${sortedTasks.length + 1}):`;
     rightCol.appendChild(label);
 
     const slotInput = document.createElement('input');
@@ -482,6 +577,7 @@ function startAddTask() {
     addTaskPage.appendChild(layout);
 
     container.appendChild(addTaskPage);
+    saveSession();
 }
 
 // Cumulative Metric Engine Execution Views
@@ -525,10 +621,20 @@ function displaySpareTime() {
     downloadBtn.addEventListener('click', downloadTaskListCSV);
     completionScreen.appendChild(downloadBtn);
 
+    // Reset button on completion screen
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'Start Fresh Session';
+    resetBtn.style.marginLeft = '15px';
+    resetBtn.addEventListener('click', () => {
+        clearSession();
+        window.location.reload();
+    });
+    completionScreen.appendChild(resetBtn);
+
     container.appendChild(completionScreen);
+    saveSession();
 }
 
-// Function to download task list as a spreadsheet CSV file
 function downloadTaskListCSV() {
     let csvContent = "Task Name,Estimated Time (Min),Actual Time (Min),Difference (Min)\n";
     
@@ -570,16 +676,19 @@ function mergeInteractive(left, right) {
 
         function compareNext() {
             if (!left.length && !right.length) {
+                document.getElementById('taskCompare').classList.add('hidden');
                 resolve(result);
                 return;
             }
             if (!left.length) {
                 result.push(...right);
+                document.getElementById('taskCompare').classList.add('hidden');
                 resolve(result);
                 return;
             }
             if (!right.length) {
                 result.push(...left);
+                document.getElementById('taskCompare').classList.add('hidden');
                 resolve(result);
                 return;
             }
