@@ -1,10 +1,11 @@
 // --- Core Application Memory State Variables ---
-let sortedTasks = [];         // Flattened tasks array: { name, estimatedTime, actualTime, deadlines: [] }
+let sortedTasks = [];         // Flattened tasks array: { name, estimatedTime, actualTime }
 let currentTaskIndex = 0;
 let masterSchedule = [];      // Array of absolute target timestamp deadlines matching task indices
 let overallStartTimestamp = 0; // True epoch timestamp when focus workflow begins
 let currentProjectContext = null; // Wizard state payload for building nested tasks
 let globalTimeoutId = null;   // Tracker identifier for 30s screen drop timeouts
+let timerInterval = null;     // Focus countdown tick reference
 
 // --- Session Persistence Handlers ---
 function saveSession() {
@@ -22,7 +23,7 @@ function saveSession() {
 function loadSession() {
     const saved = localStorage.getItem('taskSorterStateEngine');
     if (!saved) {
-        renderStep0Landing();
+        initInitialListeners();
         return;
     }
     try {
@@ -32,10 +33,12 @@ function loadSession() {
         masterSchedule = state.masterSchedule || [];
         overallStartTimestamp = state.overallStartTimestamp || 0;
         currentProjectContext = state.currentProjectContext || null;
+        
+        initInitialListeners();
         routeToStoredView(state.activeView);
     } catch (e) {
         console.error("Session parse violation:", e);
-        renderStep0Landing();
+        initInitialListeners();
     }
 }
 
@@ -47,6 +50,7 @@ function clearSession() {
     overallStartTimestamp = 0;
     currentProjectContext = null;
     clearGlobalTimeout();
+    if (timerInterval) clearInterval(timerInterval);
 }
 
 function getActiveViewContext() {
@@ -57,21 +61,23 @@ function getActiveViewContext() {
     if (document.getElementById('projectBuilderPanel')) return 'project-wizard';
     if (document.getElementById('projectSummaryPanel')) return 'project-summary';
     if (document.getElementById('dashboardScreen')) return 'dashboard';
-    if (document.getElementById('textInputScreen')) return 'text-input';
-    if (document.getElementById('fileUploadScreen')) return 'file-input';
-    return 'step0';
+    return 'landing';
 }
 
 function routeToStoredView(view) {
+    if (view === 'landing') {
+        // Stay on default HTML layout input state
+        return;
+    }
+    // For any advanced app state, clear out the static landing fields
+    document.getElementById('taskInputContainer').classList.add('hidden');
+
     if (view === 'focus') startFocusScreen();
     else if (view === 'deadline') startDeadlineSetting();
     else if (view === 'add-task') startAddTask();
     else if (view === 'completion') displayStatsScreen();
-    else if (view === 'text-input') renderStep1TextInput();
-    else if (view === 'file-input') renderStep1FileInput();
     else if (view === 'dashboard') displaySortedTasks();
     else if (view === 'project-wizard') resumeProjectWizard();
-    else renderStep0Landing();
 }
 
 function clearGlobalTimeout() {
@@ -86,96 +92,62 @@ function startViewTimeout(callback, durationMs = 30000) {
     globalTimeoutId = setTimeout(callback, durationMs);
 }
 
-// --- View Rendering Routines ---
+// --- Wire Up Landing Form View Elements ---
+function initInitialListeners() {
+    const submitBtn = document.getElementById('btnSubmitText');
+    const fileInput = document.getElementById('csvFileInput');
 
-// Step 0: Forced Choice Entry Hub
-function renderStep0Landing() {
-    clearGlobalTimeout();
-    document.getElementById('stopWorkingBtn').classList.add('hidden');
-    const container = document.getElementById('dynamicContainer');
-    container.innerHTML = `
-        <h2>Select Input Methodology</h2>
-        <div class="choice-box-container">
-            <div id="choiceType" class="forced-choice-box">Type Tasks</div>
-            <div id="choiceUpload" class="forced-choice-box">Upload Tasks</div>
-        </div>
-    `;
-    document.getElementById('choiceType').onclick = () => renderStep1TextInput();
-    document.getElementById('choiceUpload').onclick = () => renderStep1FileInput();
-    saveSession();
-}
+    if (submitBtn) {
+        submitBtn.onclick = () => {
+            const input = document.getElementById('tasksTextarea').value.trim();
+            if (!input) { alert('Task inputs cannot evaluate blank.'); return; }
+            const items = input.split('\n').map(t => t.trim()).filter(t => t);
+            const skip = document.getElementById('skipSortCheckbox').checked;
 
-// Step 1a: Text Block Submission Form View
-function renderStep1TextInput() {
-    const container = document.getElementById('dynamicContainer');
-    container.innerHTML = `
-        <h2>Type Task Inventories</h2>
-        <textarea id="tasksTextarea" rows="10" placeholder="Enter one task instruction entry per line..."></textarea>
-        <div class="checkbox-container">
-            <label><input type="checkbox" id="skipSortCheckbox"> Skip sorting (use current order)</label>
-        </div>
-        <div class="choice-box-container">
-            <div id="btnSubmitText" class="forced-choice-box">Process and Proceed</div>
-            <div id="btnCancelText" class="forced-choice-box" style="background:#eee;">Back</div>
-        </div>
-    `;
-    document.getElementById('btnCancelText').onclick = () => renderStep0Landing();
-    document.getElementById('btnSubmitText').onclick = () => {
-        const input = document.getElementById('tasksTextarea').value.trim();
-        if (!input) { alert('Task inputs cannot evaluate blank.'); return; }
-        const items = input.split('\n').map(t => t.trim()).filter(t => t);
-        const skip = document.getElementById('skipSortCheckbox').checked;
-        if (skip || items.length <= 1) {
-            sortedTasks = items.map(name => ({ name, estimatedTime: 0, actualTime: 0 }));
-            currentTaskIndex = 0;
-            runUpfrontTimingGateway();
-        } else {
-            startMergeSort(items);
-        }
-    };
-    saveSession();
-}
+            document.getElementById('taskInputContainer').classList.add('hidden');
 
-// Step 1b: CSV Import Interface Screen View
-function renderStep1FileInput() {
-    const container = document.getElementById('dynamicContainer');
-    container.innerHTML = `
-        <h2>Upload Session Manifest</h2>
-        <input type="file" id="csvFileInput" accept=".csv" style="margin:20px 0;">
-        <div class="choice-box-container">
-            <div id="btnCancelFile" class="forced-choice-box" style="background:#eee;">Back</div>
-        </div>
-    `;
-    document.getElementById('btnCancelFile').onclick = () => renderStep0Landing();
-    document.getElementById('csvFileInput').onchange = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = function(evt) {
-            const lines = evt.target.result.split('\n').map(l => l.trim()).filter(l => l);
-            if (lines.length <= 1) { alert("Corrupt CSV header map."); return; }
-            const items = [];
-            let processedCounter = 0;
-            for(let i = 1; i < lines.length; i++) {
-                const parts = lines[i].match(/(".*?"|[^,]+)(?=\s*,|\s*$|\s*\n)/g);
-                if (!parts || parts.length < 3) continue;
-                const name = parts[0].replace(/^"|"$/g, '').trim();
-                const est = parseInt(parts[1], 10) || 0;
-                const act = parseInt(parts[2], 10) || 0;
-                items.push({ name, estimatedTime: est, actualTime: act });
-                if (act > 0) processedCounter++;
+            if (skip || items.length <= 1) {
+                sortedTasks = items.map(name => ({ name, estimatedTime: 0, actualTime: 0 }));
+                currentTaskIndex = 0;
+                runUpfrontTimingGateway();
+            } else {
+                startMergeSort(items);
             }
-            if (items.length === 0) { alert("Zero validation matches extracted."); return; }
-            sortedTasks = items;
-            currentTaskIndex = processedCounter;
-            displaySortedTasks();
         };
-        reader.readAsText(file);
-    };
-    saveSession();
+    }
+
+    if (fileInput) {
+        fileInput.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                const lines = evt.target.result.split('\n').map(l => l.trim()).filter(l => l);
+                if (lines.length <= 1) { alert("Corrupt CSV header map."); return; }
+                const items = [];
+                let processedCounter = 0;
+                for(let i = 1; i < lines.length; i++) {
+                    const parts = lines[i].match(/(".*?"|[^,]+)(?=\s*,|\s*$|\s*\n)/g);
+                    if (!parts || parts.length < 3) continue;
+                    const name = parts[0].replace(/^"|"$/g, '').trim();
+                    const est = parseInt(parts[1], 10) || 0;
+                    const act = parseInt(parts[2], 10) || 0;
+                    items.push({ name, estimatedTime: est, actualTime: act });
+                    if (act > 0) processedCounter++;
+                }
+                if (items.length === 0) { alert("Zero validation matches extracted."); return; }
+                
+                document.getElementById('taskInputContainer').classList.add('hidden');
+                sortedTasks = items;
+                currentTaskIndex = processedCounter;
+                displaySortedTasks();
+            };
+            reader.readAsText(file);
+        };
+    }
 }
 
-// Step 3a: Timing Profile Configuration Selection Gateway
+// Timing Profile Gateway Option Check
 function runUpfrontTimingGateway() {
     clearGlobalTimeout();
     const container = document.getElementById('dynamicContainer');
@@ -191,7 +163,7 @@ function runUpfrontTimingGateway() {
     saveSession();
 }
 
-// Step 3b & Project Expansion Logic: Main Sequential Configuration Engine
+// Main Upfront Step 3b Configuration Loop Engine
 function runSequentialTimingLoop(index) {
     clearGlobalTimeout();
     if (index >= sortedTasks.length) {
@@ -210,7 +182,6 @@ function runSequentialTimingLoop(index) {
         </div>
     `;
 
-    // 30s Timeout Default Fallback Sequence Hook
     startViewTimeout(() => {
         target.estimatedTime = 10;
         runSequentialTimingLoop(index + 1);
@@ -225,7 +196,6 @@ function runSequentialTimingLoop(index) {
         clearGlobalTimeout();
         target.estimatedTime = val;
 
-        // "Project" Parsing Intervention Layer
         if (val > 15) {
             initiateProjectWizard(index);
         } else {
@@ -235,7 +205,7 @@ function runSequentialTimingLoop(index) {
     saveSession();
 }
 
-// Recursive Project Breakdown Subsystem Context
+// --- Recursive Project Compilation Wizard ---
 function initiateProjectWizard(parentIndex) {
     currentProjectContext = {
         parentIndex: parentIndex,
@@ -279,8 +249,8 @@ function renderProjectWizardScreen() {
         container.innerHTML = `
             <div id="projectBuilderPanel">
                 <h2>Define Sub-tasks for Project</h2>
-                <p>Parent Focus Context: <strong>${currentProjectContext.parentName}</strong></p>
-                <textarea id="subtaskTextarea" rows="6" placeholder="Enter sub-tasks (one per line)... No file uploads."></textarea>
+                <p>Parent Context: <strong>${currentProjectContext.parentName}</strong></p>
+                <textarea id="subtaskTextarea" rows="6" placeholder="Enter sub-tasks (one per line)... No file uploads allowed."></textarea>
                 <div class="checkbox-container">
                     <label><input type="checkbox" id="subtaskSkipSort"> Skip sub-sorting trees</label>
                 </div>
@@ -348,11 +318,8 @@ function renderProjectWizardScreen() {
             clearGlobalTimeout();
             targetSub.estimatedTime = val;
             
-            // Nested Project Deep-Recursion Hook Check
             if (val > 15) {
-                // To maintain structural execution stack within a linear browser memory profile, 
-                // we safely namespace the nested sub-branch items dynamically
-                alert(`Sub-task exceeds 15m. Creating nested sub-tier tree tracking inside: ${targetSub.name}`);
+                alert(`Sub-task exceeds 15m. Nesting child sub-tier inside: ${targetSub.name}`);
                 targetSub.name = `${currentProjectContext.parentName}:${targetSub.name}`;
             }
             currentProjectContext.subIndex++;
@@ -369,7 +336,7 @@ function renderProjectWizardScreen() {
             <div id="projectBuilderPanel">
                 <h2>Verify Compiled Project Properties</h2>
                 <p>Base Anchor Target Identifier: <strong>${currentProjectContext.parentName}</strong></p>
-                <p>Aggregated Calculation Payload: <strong>${cumulativeSum} Total Estimated Minutes</strong></p>
+                <p>Aggregated Total Payload: <strong>${cumulativeSum} Estimated Minutes</strong></p>
                 <ul>${listBuffer}</ul>
                 <input type="text" id="projectRenameInput" value="${currentProjectContext.parentName}" style="margin-bottom:25px;">
                 <div class="choice-box-container">
@@ -406,19 +373,13 @@ function executeIsolatedProjectCSVDownload(projectName, subtasks) {
 function finalizeProjectFlattening(finalProjectTitle) {
     const parentIndex = currentProjectContext.parentIndex;
     const flattenedChildren = currentProjectContext.subTaskObjects.map(s => {
-        // Build flat namespacing pattern rules safely
         let coreName = s.name;
         if (!coreName.startsWith(finalProjectTitle)) {
             coreName = `${finalProjectTitle}:${coreName}`;
         }
-        return {
-            name: coreName,
-            estimatedTime: s.estimatedTime,
-            actualTime: 0
-        };
+        return { name: coreName, estimatedTime: s.estimatedTime, actualTime: 0 };
     });
     
-    // Splice the structural child items directly into the primary master thread array
     sortedTasks.splice(parentIndex, 1, ...flattenedChildren);
     const resumeIndex = parentIndex + flattenedChildren.length;
     currentProjectContext = null;
@@ -426,7 +387,7 @@ function finalizeProjectFlattening(finalProjectTitle) {
     runSequentialTimingLoop(resumeIndex);
 }
 
-// Step 4: The Master Summary Task Dashboard View Panel
+// --- Step 4: Master Dashboard Operations Pane ---
 function displaySortedTasks() {
     clearGlobalTimeout();
     document.getElementById('stopWorkingBtn').classList.add('hidden');
@@ -441,7 +402,7 @@ function displaySortedTasks() {
     durationLabel.textContent = `Estimated Total Time: ${totalQueueDuration} Minutes`;
     viewNode.appendChild(durationLabel);
 
-    // Focus Session Trimming Interceptor Rule Hook (Capped strictly at 120m)
+    // 120-Minute Split Interceptor Trigger Box
     if (totalQueueDuration > 120) {
         const splitModule = document.createElement('div');
         splitModule.style.padding = '15px';
@@ -449,7 +410,7 @@ function displaySortedTasks() {
         splitModule.style.border = '1px solid #03a9f4';
         splitModule.style.marginBottom = '20px';
         splitModule.innerHTML = `
-            <p style="color:#01579b; margin:0 0 10px 0;"><strong>Optimization Warning:</strong> Combined workflow breaks 120m cap threshold parameter guidelines.</p>
+            <p style="color:#01579b; margin:0 0 10px 0;"><strong>Optimization Boundary:</strong> Total combined load breaks 120m cap threshold parameters.</p>
             <button id="btnTrigger120Split" style="background:#0288d1; color:#fff; font-weight:bold;">Isolate and Export Overlap Contingency Lists</button>
         `;
         viewNode.appendChild(splitModule);
@@ -457,23 +418,22 @@ function displaySortedTasks() {
     }
 
     const masterListElement = document.createElement('ol');
-    
-    // Map tracking strings to fold rendering subtasks under parent structural namespaces
     const processedProjectRoots = new Set();
 
     sortedTasks.forEach((task, idx) => {
         const li = document.createElement('li');
+        li.style.styleFloat = 'none';
         li.style.marginBottom = '10px';
 
         if (task.name.includes(':')) {
             const rootParent = task.name.split(':')[0];
-            if (processedProjectRoots.has(rootParent)) return; // Already folded parent view item rendering
+            if (processedProjectRoots.has(rootParent)) return;
             processedProjectRoots.add(rootParent);
 
             if (idx < currentTaskIndex) {
-                li.innerHTML = `<span style="color:gray; text-decoration:line-through;">Project Bundle: ${rootParent} (Completed)</span>`;
+                li.innerHTML = `<span style="color:gray; text-decoration:line-through;">Project Group: ${rootParent} (Completed)</span>`;
             } else {
-                li.innerHTML = `Project Profile Group: <strong class="hyperlink-style" onclick="renderProjectSummaryPane('${rootParent}')">${rootParent}</strong> <em>[Click to Manage Tree]</em>`;
+                li.innerHTML = `Project Profile Group: <strong class="hyperlink-style" onclick="renderProjectSummaryPane('${rootParent}')">${rootParent}</strong> <em>[Open Subtask View]</em>`;
             }
         } else {
             if (idx < currentTaskIndex) {
@@ -510,7 +470,7 @@ function displaySortedTasks() {
     actWipe.onclick = () => {
         if (confirm("Permanently wipe operational local storage memory?")) {
             clearSession();
-            renderStep0Landing();
+            window.location.reload();
         }
     };
     controlLayout.appendChild(actWipe);
@@ -519,7 +479,6 @@ function displaySortedTasks() {
     saveSession();
 }
 
-// 120-Minute Destructive Trimming Execution Slice Engine
 function executeFocusSession120Split() {
     let trackingAccumulator = 0;
     let splitIndex = -1;
@@ -537,7 +496,6 @@ function executeFocusSession120Split() {
     const keptTasks = sortedTasks.slice(0, splitIndex);
     const droppedTasks = sortedTasks.slice(splitIndex);
 
-    // Download downstream sliced items as an independent contingency CSV
     let csv = "Task Name,Estimated Time (Min),Actual Time (Min)\n";
     droppedTasks.forEach(t => {
         csv += `"${t.name.replace(/"/g, '""')}",${t.estimatedTime},${t.actualTime}\n`;
@@ -548,22 +506,21 @@ function executeFocusSession120Split() {
     link.download = "session_continuation_120m_overflow.csv";
     link.click();
 
-    // Drop items from localized execution memory map arrays
     sortedTasks = keptTasks;
     if (currentTaskIndex >= sortedTasks.length) {
         currentTaskIndex = Math.max(0, sortedTasks.length - 1);
     }
     
-    alert(`Successfully trimmed queue context parameters. Exported ${droppedTasks.length} tasks to continuation file mapping.`);
-    masterSchedule = []; // Reset schedule constraints to force recalculation layout parameters safely
+    alert(`Trimmed active configuration. Exported ${droppedTasks.length} tasks down to overflow manifestation CSV.`);
+    masterSchedule = []; 
     displaySortedTasks();
 }
 
-// Dashboard Interactive Project Explorer Sub-view
+// Exploded Project Hierarchy Dashboard Extension Router
 function renderProjectSummaryPane(parentName) {
     clearGlobalTimeout();
     const container = document.getElementById('dynamicContainer');
-    container.innerHTML = `<div id="projectSummaryPanel"><h2>Project Exploded Tree: ${parentName}</h2></div>`;
+    container.innerHTML = `<div id="projectSummaryPanel"><h2>Project Subtasks View: ${parentName}</h2></div>`;
     const viewNode = document.getElementById('projectSummaryPanel');
 
     const projectSubtasks = sortedTasks.filter(t => t.name.startsWith(parentName + ':'));
@@ -576,7 +533,7 @@ function renderProjectSummaryPane(parentName) {
     });
 
     const metricsCard = document.createElement('p');
-    metricsCard.innerHTML = `Combined Sub-tree Weight: <strong>${subEstSum} Minutes Total Est</strong>`;
+    metricsCard.innerHTML = `Combined Sub-tree Target Total: <strong>${subEstSum} Minutes</strong>`;
     viewNode.appendChild(metricsCard);
 
     const ul = document.createElement('ul');
@@ -602,7 +559,7 @@ function renderProjectSummaryPane(parentName) {
     viewNode.appendChild(choicePanel);
 }
 
-// Anchors true execution timeline based on sequential offsets
+// Anchors fixed absolute deadline values across execution track arrays
 function initializeAbsoluteScheduleTimeline() {
     overallStartTimestamp = Math.floor(Date.now() / 1000);
     let cumulativeSecondsOffset = 0;
@@ -614,7 +571,7 @@ function initializeAbsoluteScheduleTimeline() {
     });
 }
 
-// Step 5: Dynamic Checkpoint Setup Control
+// --- Step 5a & 5b: Mid-Session Checkpoint Interceptor Controls ---
 function startDeadlineSetting() {
     clearGlobalTimeout();
     document.getElementById('stopWorkingBtn').classList.remove('hidden');
@@ -626,8 +583,7 @@ function startDeadlineSetting() {
 
     const target = sortedTasks[currentTaskIndex];
 
-    // Step 5b Modification Check: If a task has pre-saved time data, check for fallback updates
-    // For 2nd and subsequent tasks, allow configuration modifications
+    // If task has pre-saved data and it's the very first task, auto-skip prompt
     if (target.estimatedTime > 0 && currentTaskIndex === 0) {
         startFocusScreen();
         return;
@@ -637,8 +593,8 @@ function startDeadlineSetting() {
     container.innerHTML = `
         <div id="deadlinePage">
             <div class="timeout-banner">Auto-submitting 10m default fallback in 30 seconds...</div>
-            <h2>${target.estimatedTime > 0 ? "Modify Estimation Setting" : "Establish Target Allocation Time"}</h2>
-            <p>Task Identifier Target: <strong>${target.name}</strong></p>
+            <h2>${target.estimatedTime > 0 ? "Modify Target Duration Option" : "Establish Target Allocation Time"}</h2>
+            <p>Active Task: <strong>${target.name}</strong></p>
             <input type="number" id="checkpointDurationInput" placeholder="Minutes (1-120)" value="${target.estimatedTime > 0 ? target.estimatedTime : ''}">
             <div class="choice-box-container">
                 <div id="btnStartFocus" class="forced-choice-box">Initiate Focused Action Timer</div>
@@ -649,7 +605,6 @@ function startDeadlineSetting() {
     startViewTimeout(() => {
         if (!(target.estimatedTime > 0)) {
             target.estimatedTime = 10;
-            // Recalculate schedule parameters down line dynamically safely
             recalculateDownstreamScheduleFailsafes();
         }
         startFocusScreen();
@@ -680,7 +635,7 @@ function recalculateDownstreamScheduleFailsafes() {
     }
 }
 
-// Step 6: Core Active Execution Watcher View Panel
+// --- Step 6: Live Countdown Operations Control Window ---
 function startFocusScreen() {
     clearGlobalTimeout();
     document.getElementById('stopWorkingBtn').classList.remove('hidden');
@@ -706,7 +661,7 @@ function startFocusScreen() {
     document.getElementById('focusTaskLabel').innerHTML = `Task: <strong>${target.name}</strong>`;
     
     const deadlineDateObj = new Date(targetAbsoluteDeadlineTimestamp * 1000);
-    document.getElementById('focusAbsoluteDeadlineDisplay').textContent = `Absolute Target Schedule Milestone: ${deadlineDateObj.toLocaleTimeString()}`;
+    document.getElementById('focusAbsoluteDeadlineDisplay').textContent = `Absolute Schedule Target Milestone: ${deadlineDateObj.toLocaleTimeString()}`;
 
     function runEngineMetricsCalculationsUpdateTick() {
         const now = Math.floor(Date.now() / 1000);
@@ -738,7 +693,6 @@ function startFocusScreen() {
         const sMin = Math.floor(absSession / 60);
         const sSec = absSession % 60;
 
-        // UI Text Element Compilations
         document.getElementById('timerClockDisplay').textContent = `Time Remaining: ${currentSign}${cMin}:${cSec < 10 ? '0' : ''}${cSec}`;
         document.getElementById('timerClockDisplay').style.color = currentTaskRemainingSeconds >= 0 ? "green" : "red";
 
@@ -752,17 +706,15 @@ function startFocusScreen() {
     if (timerInterval) clearInterval(timerInterval);
     timerInterval = setInterval(runEngineMetricsCalculationsUpdateTick, 1000);
 
-    // Step 7a: Task Completion Progression Click Hook
+    // Done Next Execution Progression Click Hook
     document.getElementById('btnDoneNext').onclick = () => {
         clearInterval(timerInterval);
         const now = Math.floor(Date.now() / 1000);
         
-        // Capture absolute time difference metric calculation profiles directly off scheduled targets
         let elapsedCalculationSeconds = 0;
         if (currentTaskIndex === 0) {
             elapsedCalculationSeconds = now - overallStartTimestamp;
         } else {
-            // Calculated relative to previous baseline target milestones
             elapsedCalculationSeconds = now - masterSchedule[currentTaskIndex - 1];
         }
         
@@ -777,7 +729,6 @@ function startFocusScreen() {
         }
     };
 
-    // Step 7b: Inline Queue Modification Context Click Hook
     document.getElementById('btnFocusAddTask').onclick = () => {
         clearInterval(timerInterval);
         startAddTask();
@@ -785,7 +736,7 @@ function startFocusScreen() {
     saveSession();
 }
 
-// Step 7b Views: Task Index Insertion Panel
+// --- Step 7b: Task List Queue Injection Module Screen ---
 function startAddTask() {
     clearGlobalTimeout();
     document.getElementById('stopWorkingBtn').classList.add('hidden');
@@ -838,24 +789,23 @@ function startAddTask() {
 
         if (!text) { alert("Descriptions must contain character entries."); return; }
         if (isNaN(slot) || slot < (currentTaskIndex + 1) || slot > (sortedTasks.length + 1)) {
-            alert("Specified insertion bounds out of valid context scope parameters.");
+            alert("Specified insertion bounds out of valid scope parameters.");
             return;
         }
 
         const freshObj = { name: text, estimatedTime: 0, actualTime: 0 };
         sortedTasks.splice(slot - 1, 0, freshObj);
         
-        masterSchedule = []; // Wipe schedule profiles to trigger automated baseline adjustments safely
+        masterSchedule = []; 
         displaySortedTasks();
     };
     saveSession();
 }
 
-// Step 7c Action Route: Stop Working Execution Flow Trigger
+// --- Step 7c Action Route: Stop Working Execution Flow Trigger ---
 document.getElementById('stopWorkingBtn').onclick = () => {
     if (timerInterval) clearInterval(timerInterval);
     
-    // Process trailing variance tracking properties if context drops mid-timer execution loop
     if (document.getElementById('focusScreen') && currentTaskIndex < sortedTasks.length) {
         const now = Math.floor(Date.now() / 1000);
         let elapsedCalculationSeconds = 0;
@@ -885,7 +835,7 @@ function executeRemainingTasksCSVExport() {
     link.click();
 }
 
-// Step 8: Cumulative Performance Summary Evaluation View Panel
+// --- Step 8: Cumulative Evaluation Stats Screen view ---
 function displayStatsScreen() {
     clearGlobalTimeout();
     document.getElementById('stopWorkingBtn').classList.add('hidden');
@@ -895,7 +845,6 @@ function displayStatsScreen() {
 
     const finalClockNow = Math.floor(Date.now() / 1000);
     
-    // Schedule Score Metric Calculation Check (Evaluated strictly against precalculated deadlines)
     let sessionDeltaScoreSeconds = 0;
     if (masterSchedule.length > 0) {
         const targetSessionFinalDeadline = masterSchedule[masterSchedule.length - 1];
@@ -913,7 +862,6 @@ function displayStatsScreen() {
     }
     viewNode.appendChild(scoreTextElement);
 
-    // Structural Namespace Total Aggregation Trackers Map Engine
     const projectAggregatesMap = {};
     const standaloneRowLogArray = [];
 
@@ -924,9 +872,8 @@ function displayStatsScreen() {
             const tiers = task.name.split(':');
             let currentPathString = "";
             
-            // Incrementally build structural tier parent lookup fields safely
             tiers.forEach((tierToken, levelIndex) => {
-                if (levelIndex === tiers.length - 1) return; // Leaf node element processing
+                if (levelIndex === tiers.length - 1) return; 
                 currentPathString = currentPathString ? `${currentPathString}:${tierToken}` : tierToken;
                 
                 if (!projectAggregatesMap[currentPathString]) {
@@ -987,7 +934,7 @@ function displayStatsScreen() {
     btnRestartFresh.textContent = "Clear and Start Fresh Session";
     btnRestartFresh.onclick = () => {
         clearSession();
-        renderStep0Landing();
+        window.location.reload();
     };
 
     actionBox.appendChild(btnDownloadFullCSV);
@@ -996,7 +943,7 @@ function displayStatsScreen() {
     saveSession();
 }
 
-// --- Interactive Merge Sorter Foundation Engines ---
+// --- Interactive Merge Sorter Engines ---
 function startMergeSort(array) {
     mergeSortInteractive(array).then(res => {
         sortedTasks = res.map(name => ({ name, estimatedTime: 0, actualTime: 0 }));
