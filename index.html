@@ -7,12 +7,12 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            margin: 20px;
+            margin: 20px auto;
             max-width: 800px;
             position: relative;
         }
         .hidden {
-            display: none;
+            display: none !important;
         }
         button {
             margin: 5px;
@@ -21,7 +21,8 @@
         }
         input, textarea {
             margin: 5px 0;
-            padding: 6px;
+            padding: 8px;
+            font-size: 1rem;
         }
         .checkbox-container, .upload-container {
             margin: 15px 0;
@@ -56,14 +57,124 @@
             font-weight: bold;
             border-radius: 4px;
         }
+
+        /* --- Step 1 Styling Additions --- */
+        .landing-container {
+            text-align: center;
+            padding: 20px 0;
+        }
+        .card-grid {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-top: 30px;
+        }
+        .mode-card {
+            flex: 1;
+            padding: 30px 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            text-align: center;
+            transition: transform 0.1s ease;
+        }
+        .mode-card:hover {
+            transform: translateY(-2px);
+        }
+        .work-card {
+            border: 2px solid #0070f3;
+            background: #f0f7ff;
+            color: #0070f3;
+        }
+        .plan-card {
+            border: 2px solid #7928ca;
+            background: #fbf5ff;
+            color: #7928ca;
+        }
+        .card-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        .card-desc {
+            font-size: 0.9rem;
+            margin-top: 10px;
+            color: #444;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        .form-group input {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .primary-btn {
+            background-color: #0070f3;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            font-size: 1rem;
+            font-weight: bold;
+            border-radius: 6px;
+        }
+        .back-btn {
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            padding: 0;
+            margin-bottom: 15px;
+        }
     </style>
 </head>
 <body>
     <button id="stopWorkingBtn" class="hidden">Stop Working</button>
 
-    <h1>Task Sorter</h1>
+    <h1 style="text-align: center;">Task Sorter</h1>
     
-    <div id="taskInput">
+    <!-- STEP 1: LANDING PAGE -->
+    <div id="landingScreen" class="landing-container">
+        <p style="color: #666; font-size: 1.1rem;">What would you like to focus on right now?</p>
+        <div class="card-grid">
+            <div id="workModeBtn" class="mode-card work-card">
+                <div class="card-title">⚡ Work</div>
+                <div class="card-desc">Sort tasks and execute a focused work session</div>
+            </div>
+            <div id="planModeBtn" class="mode-card plan-card">
+                <div class="card-title">📋 Plan</div>
+                <div class="card-desc">Create and prioritize high-level projects</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- STEP 1: WORK SESSION SETUP -->
+    <div id="workSetupScreen" class="hidden">
+        <button id="workSetupBackBtn" class="back-btn">← Back</button>
+        <h2>Session Setup</h2>
+        <p style="color: #666;">Let's set your time boundary for this work block.</p>
+
+        <form id="workSetupForm">
+            <div class="form-group">
+                <label for="availableTimeInput">How many minutes do you have to work right now?</label>
+                <input type="number" id="availableTimeInput" value="45" min="1" max="480" required>
+            </div>
+
+            <div class="form-group">
+                <label for="anchorEventInput">What happens when this time is up? <span style="font-weight: normal; color: #888;">(Optional)</span></label>
+                <input type="text" id="anchorEventInput" placeholder="e.g., class ends, leaving for appointment">
+            </div>
+
+            <button type="submit" class="primary-btn">Continue to Task List →</button>
+        </form>
+    </div>
+
+    <!-- EXISTING WORK FLOW: TASK ENTRY CONTAINER -->
+    <div id="taskInput" class="hidden">
         <h2>Enter Your Tasks</h2>
         <textarea id="tasks" rows="10" cols="40" placeholder="Enter one task per line"></textarea>
         
@@ -72,7 +183,7 @@
                 <input type="checkbox" id="skipSortCheckbox"> Skip sorting (use current order)
             </label>
         </div>
-        <button id="startSort">Start Sorting</button>
+        <button id="startSort" class="primary-btn">Start Sorting</button>
 
         <div class="upload-container">
             <h3>Or Resume Previous Session</h3>
@@ -80,12 +191,21 @@
         </div>
     </div>
 
+    <!-- PLACEHOLDER FOR PLAN MODE -->
+    <div id="planScreen" class="hidden">
+        <button id="planBackBtn" class="back-btn">← Back to Home</button>
+        <h2>Project Plan Mode</h2>
+        <p><em>(Project prioritizer will be implemented in future step)</em></p>
+    </div>
+
+    <!-- EXISTING WORK FLOW: PAIRWISE COMPARISON SCREEN -->
     <div id="taskCompare" class="hidden">
         <h2>Which task comes first?</h2>
         <button id="task1"></button>
         <button id="task2"></button>
     </div>
 
+    <!-- DYNAMIC SCREEN CONTAINER -->
     <div id="dynamicContainer"></div>
 
     <script src="script.js"></script>
