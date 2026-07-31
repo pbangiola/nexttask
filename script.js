@@ -363,7 +363,7 @@ function runSequentialTimingInput(index) {
 
     const input = document.createElement('input');
     input.type = 'number';
-    input.placeholder = 'Enter minutes (1-120)';
+    input.placeholder = 'Enter minutes (1-60)';
     if (targetTask.estimatedTime > 0) input.value = targetTask.estimatedTime;
     timingScreen.appendChild(input);
 
@@ -372,12 +372,12 @@ function runSequentialTimingInput(index) {
     
     nextBtn.addEventListener('click', () => {
         const timeVal = parseInt(input.value, 10);
-        if (timeVal >= 1 && timeVal <= 120) {
+        if (timeVal >= 1 && timeVal <= 60) {
             targetTask.estimatedTime = timeVal;
             saveSession();
             runSequentialTimingInput(index + 1); 
         } else {
-            alert('Please specify an estimate between 1 and 120 minutes.');
+            alert('Please specify an estimate between 1 and 60 minutes.');
         }
     });
     timingScreen.appendChild(nextBtn);
@@ -421,7 +421,7 @@ function displaySortedTasks() {
         if (idx < currentTaskIndex) {
             const diff = task.estimatedTime - task.actualTime;
             const completedAt = task.timestamps?.completed ? ` | Done at ${formatRealTime(task.timestamps.completed)}` : '';
-            li.textContent = `${task.name} (Done | Est: ${task.estimatedTime}m, Act: ${task.actualTime}m, Diff: ${diff}m${completedAt})`;
+            li.textContent = `${task.name} (Done | Took ${task.actualTime}m, Ahead/behind by: ${diff}m${completedAt})`;
             li.style.color = 'gray';
             li.style.textDecoration = 'line-through';
         } else {
@@ -430,7 +430,7 @@ function displaySortedTasks() {
                 li.textContent += ` (Estimated: ${task.estimatedTime}m)`;
             }
             if (idx === currentTaskIndex && pausedSecondsRemaining > 0) {
-                li.textContent += " [Paused Session In Progress]";
+                li.textContent += " [Paused]";
             }
 
             if (totalAvailableTime > 0 && cumulativeEstTime > totalAvailableTime) {
@@ -514,14 +514,14 @@ function startDeadlineSetting() {
     const input = document.createElement('input');
     input.type = 'number';
     input.id = 'taskTime';
-    input.placeholder = 'Enter minutes (1-120)';
+    input.placeholder = 'Enter minutes (1-60)';
     deadlinePage.appendChild(input);
 
     const startButton = document.createElement('button');
     startButton.textContent = 'Start Task';
     startButton.addEventListener('click', () => {
         const time = parseInt(input.value, 10);
-        if (time >= 1 && time <= 120) {
+        if (time >= 1 && time <= 60) {
             nextTask.estimatedTime = time; 
             const nowMs = Date.now();
             if (!nextTask.timestamps) nextTask.timestamps = {};
@@ -532,7 +532,7 @@ function startDeadlineSetting() {
             pausedSecondsRemaining = 0;
             startFocusScreen();
         } else {
-            alert('Please enter a valid time between 1 and 120 minutes.');
+            alert('Please enter a valid time between 1 and 60 minutes.');
         }
     });
     deadlinePage.appendChild(startButton);
@@ -558,12 +558,6 @@ function startFocusScreen() {
     taskName.textContent = `Current Task: ${currentTask.name}`;
     focusScreen.appendChild(taskName);
 
-    const timeAccessInfo = document.createElement('p');
-    timeAccessInfo.style.fontSize = '0.9em';
-    timeAccessInfo.style.color = '#666';
-    timeAccessInfo.textContent = `Task accessed at: ${formatRealTime(currentTask.timestamps?.started)}`;
-    focusScreen.appendChild(timeAccessInfo);
-
     const timerDisplay = document.createElement('p');
     timerDisplay.id = 'timer';
     timerDisplay.style.fontSize = '24px';
@@ -583,7 +577,7 @@ function startFocusScreen() {
 
         if (timeRemaining <= 0) {
             clearInterval(timerInterval);
-            alert(`Time is up! Your available session window (${endConstraint || 'time limit'}) has ended.`);
+            alert(`Time is up!`);
             handleStopWorking();
         }
     }
@@ -947,7 +941,7 @@ function displaySpareTime() {
         const startTimeStr = task.timestamps?.started ? formatRealTime(task.timestamps.started) : 'N/A';
         const completionTimeStr = task.timestamps?.completed ? formatRealTime(task.timestamps.completed) : 'N/A';
         
-        item.textContent = `${task.name} | Est: ${task.estimatedTime}m | Act: ${task.actualTime}m | Var: ${variance >= 0 ? '+' : ''}${variance}m [Start: ${startTimeStr}, End: ${completionTimeStr}]`;
+        item.textContent = `${task.name} | Took ${task.actualTime}m | Ahead/Behind by: ${variance >= 0 ? '+' : ''}${variance}m`;
         reportList.appendChild(item);
     });
     completionScreen.appendChild(reportList);
