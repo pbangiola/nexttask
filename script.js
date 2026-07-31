@@ -6,12 +6,6 @@ let spareTime = 0;
 let taskStartTimestamp = 0; 
 let pausedSecondsRemaining = 0; 
 
-// --- STEP 1: Session Configuration Variables ---
-let sessionConfig = {
-    availableTimeMinutes: 45,
-    anchorEvent: ''
-};
-
 // --- NEW: Persistence Layer ---
 function saveSession() {
     const sessionState = {
@@ -21,7 +15,6 @@ function saveSession() {
         spareTime,
         taskStartTimestamp,
         pausedSecondsRemaining,
-        sessionConfig,
         // Track exactly what view screen was active
         activeView: getActiveViewContext() 
     };
@@ -40,11 +33,11 @@ function loadSession() {
         spareTime = state.spareTime || 0;
         taskStartTimestamp = state.taskStartTimestamp || 0;
         pausedSecondsRemaining = state.pausedSecondsRemaining || 0;
-        if (state.sessionConfig) sessionConfig = state.sessionConfig;
 
         if (sortedTasks.length > 0) {
-            // Hide initial setup/landing screens
-            hideAllMainViews();
+            // Hide initial mode selection and input screens
+            document.getElementById('modeSelect').classList.add('hidden');
+            document.getElementById('taskInput').classList.add('hidden');
             
             // Route user back to where they were
             routeToStoredView(state.activeView);
@@ -58,28 +51,27 @@ function clearSession() {
     localStorage.removeItem('taskSorterSession');
 }
 
-function hideAllMainViews() {
-    document.getElementById('landingScreen').classList.add('hidden');
-    document.getElementById('workSetupScreen').classList.add('hidden');
-    document.getElementById('taskInput').classList.add('hidden');
-    document.getElementById('planScreen').classList.add('hidden');
-}
-
 function getActiveViewContext() {
     if (document.getElementById('focusScreen')) return 'focus';
     if (document.getElementById('deadlinePage')) return 'deadline';
     if (document.getElementById('addTaskPage')) return 'add-task';
     if (document.getElementById('completionScreen')) return 'completion';
     if (sortedTasks.length > 0 && document.getElementById('taskInput').classList.contains('hidden')) return 'dashboard';
-    return 'landing';
+    
+    // Check for modeSelect context
+    if (!document.getElementById('modeSelect').classList.contains('hidden')) return 'mode-select';
+
+    return 'input';
 }
 
 function routeToStoredView(view) {
     if (view === 'focus') {
+        // Verify if deadline has already passed while backgrounded
         const now = Math.floor(Date.now() / 1000);
         if (deadline > now) {
             startFocusScreen();
         } else {
+            // If it passed while away, go to dashboard or auto-handle
             displaySortedTasks();
         }
     } else if (view === 'deadline') {
@@ -98,40 +90,10 @@ function routeToStoredView(view) {
 document.getElementById('csvUpload').addEventListener('change', handleCSVUpload);
 document.getElementById('stopWorkingBtn').addEventListener('click', handleStopWorking);
 
-// --- STEP 1 Event Listeners ---
-document.getElementById('workModeBtn').addEventListener('click', () => {
-    document.getElementById('landingScreen').classList.add('hidden');
-    document.getElementById('workSetupScreen').classList.remove('hidden');
-});
-
-document.getElementById('planModeBtn').addEventListener('click', () => {
-    document.getElementById('landingScreen').classList.add('hidden');
-    document.getElementById('planScreen').classList.remove('hidden');
-});
-
-document.getElementById('workSetupBackBtn').addEventListener('click', () => {
-    document.getElementById('workSetupScreen').classList.add('hidden');
-    document.getElementById('landingScreen').classList.remove('hidden');
-});
-
-document.getElementById('planBackBtn').addEventListener('click', () => {
-    document.getElementById('planScreen').classList.add('hidden');
-    document.getElementById('landingScreen').classList.remove('hidden');
-});
-
-document.getElementById('workSetupForm').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const timeVal = parseInt(document.getElementById('availableTimeInput').value, 10);
-    const anchorVal = document.getElementById('anchorEventInput').value.trim();
-
-    if (timeVal && timeVal > 0) {
-        sessionConfig.availableTimeMinutes = timeVal;
-        sessionConfig.anchorEvent = anchorVal;
-
-        document.getElementById('workSetupScreen').classList.add('hidden');
-        document.getElementById('taskInput').classList.remove('hidden');
-        saveSession();
-    }
+// Click listener to transition from Mode Selection to Task Input screen
+document.getElementById('workBtn').addEventListener('click', () => {
+    document.getElementById('modeSelect').classList.add('hidden');
+    document.getElementById('taskInput').classList.remove('hidden');
 });
 
 // Check for existing session right at boot
@@ -299,16 +261,6 @@ function displaySortedTasks() {
     title.textContent = 'Sorted Task List';
     taskResult.appendChild(title);
 
-    // Banner displaying active session boundaries from Step 1
-    if (sessionConfig.availableTimeMinutes) {
-        const sessionBanner = document.createElement('p');
-        sessionBanner.style.backgroundColor = '#e3f2fd';
-        sessionBanner.style.padding = '10px';
-        sessionBanner.style.borderRadius = '4px';
-        sessionBanner.innerHTML = `<strong>Session Target:</strong> ${sessionConfig.availableTimeMinutes} mins ${sessionConfig.anchorEvent ? `(before ${sessionConfig.anchorEvent})` : ''}`;
-        taskResult.appendChild(sessionBanner);
-    }
-
     const sortedList = document.createElement('ol');
     sortedTasks.forEach((task, idx) => {
         const li = document.createElement('li');
@@ -333,7 +285,6 @@ function displaySortedTasks() {
     if (currentTaskIndex < sortedTasks.length) {
         const getToWorkBtn = document.createElement('button');
         getToWorkBtn.textContent = pausedSecondsRemaining > 0 ? 'Resume Working' : 'Get to Work';
-        getToWorkBtn.className = 'primary-btn';
         getToWorkBtn.addEventListener('click', () => {
             if (pausedSecondsRemaining > 0) {
                 const now = Math.floor(Date.now() / 1000);
@@ -347,7 +298,6 @@ function displaySortedTasks() {
     } else {
         const completeBtn = document.createElement('button');
         completeBtn.textContent = 'View Final Efficiency Report';
-        completeBtn.className = 'primary-btn';
         completeBtn.addEventListener('click', () => displaySpareTime());
         taskResult.appendChild(completeBtn);
     }
@@ -357,6 +307,7 @@ function displaySortedTasks() {
     downloadBtn.addEventListener('click', downloadTaskListCSV);
     taskResult.appendChild(downloadBtn);
 
+    // Dynamic reset button so users can intentionally start completely over
     const resetBtn = document.createElement('button');
     resetBtn.textContent = 'Reset All and Start Over';
     resetBtn.style.backgroundColor = '#eceff1';
@@ -405,7 +356,6 @@ function startDeadlineSetting() {
 
     const startButton = document.createElement('button');
     startButton.textContent = 'Start Task';
-    startButton.className = 'primary-btn';
     startButton.addEventListener('click', () => {
         const time = parseInt(input.value, 10);
         if (time >= 1 && time <= 120) {
@@ -440,13 +390,6 @@ function startFocusScreen() {
     taskName.textContent = `Current Task: ${currentTask.name}`;
     focusScreen.appendChild(taskName);
 
-    if (sessionConfig.anchorEvent) {
-        const anchorNote = document.createElement('p');
-        anchorNote.style.color = '#555';
-        anchorNote.innerHTML = `Target Anchor: Finish before <strong>${sessionConfig.anchorEvent}</strong>`;
-        focusScreen.appendChild(anchorNote);
-    }
-
     const timerDisplay = document.createElement('p');
     timerDisplay.id = 'timer';
     timerDisplay.style.fontSize = '24px';
@@ -471,7 +414,6 @@ function startFocusScreen() {
 
     const doneNext = document.createElement('button');
     doneNext.textContent = 'Done, Next!';
-    doneNext.className = 'primary-btn';
     doneNext.addEventListener('click', () => {
         clearInterval(timerInterval);
 
@@ -618,7 +560,6 @@ function startAddTask() {
 
     const saveButton = document.createElement('button');
     saveButton.textContent = 'Save and Resume Work';
-    saveButton.className = 'primary-btn';
     saveButton.addEventListener('click', () => {
         const taskName = input.value.trim();
         const targetSlot = parseInt(slotInput.value, 10);
@@ -691,6 +632,7 @@ function displaySpareTime() {
     downloadBtn.addEventListener('click', downloadTaskListCSV);
     completionScreen.appendChild(downloadBtn);
 
+    // Reset button on completion screen
     const resetBtn = document.createElement('button');
     resetBtn.textContent = 'Start Fresh Session';
     resetBtn.style.marginLeft = '15px';
