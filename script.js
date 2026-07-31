@@ -5,6 +5,14 @@ let deadline = 0;
 let spareTime = 0; 
 let taskStartTimestamp = 0; 
 let pausedSecondsRemaining = 0; 
+let sortStartTime = 0; //Global tracking for the sorting phase
+
+
+// Helper: Estimate maximum comparison steps for Merge Sort
+function getEstimatedComparisons(n) {
+    if (n <= 1) return 0;
+    return Math.ceil(n * Math.log2(n));
+}
 
 // Track overall session time limits and end event
 let totalAvailableTime = 0;
