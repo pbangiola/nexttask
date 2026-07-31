@@ -163,7 +163,7 @@ function checkTaskInputCapacity() {
 
     if (rawTasks.length > allowedTaskCount) {
         textarea.classList.add('over-capacity');
-        infoMsg.textContent = `Warning: Based on ~10 min/task, you can likely complete ${allowedTaskCount} task(s) in your ${totalAvailableTime} min window. Tasks past line ${allowedTaskCount} exceed available time.`;
+        infoMsg.textContent = `FYI: You probably only have time for ${allowedTaskCount} tasks right now.`;
         infoMsg.style.color = '#d32f2f';
     } else {
         textarea.classList.remove('over-capacity');
