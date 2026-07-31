@@ -1,3 +1,10 @@
+// --- Session ID & Initialization ---
+let sessionId = localStorage.getItem('taskSorterSessionId');
+if (!sessionId) {
+    sessionId = 'session_' + Math.random().toString(36).substring(2, 9);
+    localStorage.setItem('taskSorterSessionId', sessionId);
+}
+
 let sortedTasks = []; // Holds objects: { name: "Task", estimatedTime: 0, actualTime: 0, timestamps: {} }
 let currentTaskIndex = 0;
 let timerInterval = null;
@@ -50,8 +57,8 @@ function getTotalAllocatedTime() {
     return sortedTasks.reduce((sum, task) => sum + (task.estimatedTime || 0), 0);
 }
 
-// --- Persistence Layer ---
-function saveSession() {
+// --- Persistence Layer (Backend API with Local Cache Fallback) ---
+async function saveSession() {
     const sessionState = {
         sortedTasks,
         currentTaskIndex,
@@ -65,15 +72,43 @@ function saveSession() {
         currentStepStartTimestamp,
         activeView: getActiveViewContext() 
     };
-    localStorage.setItem('taskSorterSession', JSON.stringify(sessionState));
-}
 
-function loadSession() {
-    const saved = localStorage.getItem('taskSorterSession');
-    if (!saved) return;
+    // Save locally first so UI is always responsive
+    localStorage.setItem('taskSorterSession_fallback', JSON.stringify(sessionState));
 
     try {
-        const state = JSON.parse(saved);
+        await fetch(`/api/session/${sessionId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(sessionState)
+        });
+    } catch (e) {
+        console.warn("Backend sync failed, state preserved in browser cache:", e);
+    }
+}
+
+async function loadSession() {
+    let state = null;
+
+    try {
+        const res = await fetch(`/api/session/${sessionId}`);
+        if (res.ok) {
+            state = await res.json();
+        }
+    } catch (e) {
+        console.warn("Could not reach backend, checking browser cache...", e);
+    }
+
+    if (!state) {
+        const saved = localStorage.getItem('taskSorterSession_fallback');
+        if (saved) {
+            try { state = JSON.parse(saved); } catch (e) {}
+        }
+    }
+
+    if (!state) return;
+
+    try {
         sortedTasks = state.sortedTasks || [];
         currentTaskIndex = state.currentTaskIndex || 0;
         deadline = state.deadline || 0;
@@ -85,17 +120,26 @@ function loadSession() {
         sessionStartTimestamp = state.sessionStartTimestamp || null;
         currentStepStartTimestamp = state.currentStepStartTimestamp || null;
 
-        if (sortedTasks.length > 0 || state.activeView === 'time-constraint' || state.activeView === 'input') {
-            document.getElementById('modeSelect').classList.add('hidden');
+        if (state.activeView && state.activeView !== 'mode-select') {
+            document.getElementById('modeSelect')?.classList.add('hidden');
+            document.getElementById('timeConstraintInput')?.classList.add('hidden');
+            document.getElementById('taskInput')?.classList.add('hidden');
+
             routeToStoredView(state.activeView);
         }
     } catch (e) {
-        console.error("Error restoring session:", e);
+        console.error("Error restoring session state:", e);
     }
 }
 
-function clearSession() {
-    localStorage.removeItem('taskSorterSession');
+async function clearSession() {
+    try {
+        await fetch(`/api/session/${sessionId}`, { method: 'DELETE' });
+    } catch (e) {
+        console.error("Failed to delete session on server:", e);
+    }
+    localStorage.removeItem('taskSorterSessionId');
+    localStorage.removeItem('taskSorterSession_fallback');
 }
 
 function getActiveViewContext() {
@@ -113,73 +157,122 @@ function getActiveViewContext() {
 }
 
 function routeToStoredView(view) {
-    if (view === 'time-constraint') {
-        document.getElementById('timeConstraintInput').classList.remove('hidden');
-    } else if (view === 'input') {
-        document.getElementById('taskInput').classList.remove('hidden');
-    } else if (view === 'focus') {
-        const nowSec = Math.floor(Date.now() / 1000);
-        if (deadline > nowSec) {
-            startFocusScreen();
-        } else {
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    switch (view) {
+        case 'time-constraint':
+            document.getElementById('timeConstraintInput')?.classList.remove('hidden');
+            break;
+        case 'input':
+            document.getElementById('taskInput')?.classList.remove('hidden');
+            break;
+        case 'focus':
+            if (deadline > nowSec) {
+                startFocusScreen();
+            } else {
+                displaySortedTasks();
+            }
+            break;
+        case 'deadline':
+            startDeadlineSetting();
+            break;
+        case 'add-task':
+            startAddTask();
+            break;
+        case 'completion':
+            displaySpareTime();
+            break;
+        case 'dashboard':
+        default:
             displaySortedTasks();
-        }
-    } else if (view === 'deadline') {
-        startDeadlineSetting();
-    } else if (view === 'add-task') {
-        startAddTask();
-    } else if (view === 'completion') {
-        displaySpareTime();
-    } else {
-        displaySortedTasks();
+            break;
     }
 }
-// ------------------------------
 
-// Initializing Event Listeners
-document.getElementById('csvUpload').addEventListener('change', handleCSVUpload);
-document.getElementById('stopWorkingBtn').addEventListener('click', handleStopWorking);
+// --- App Initialization & Listener Setup ---
+function initApp() {
+    // Attach static UI event listeners safely
+    document.getElementById('csvUpload')?.addEventListener('change', handleCSVUpload);
+    document.getElementById('stopWorkingBtn')?.addEventListener('click', handleStopWorking);
 
-// Step 1 -> Step 2: Mode Selection -> Time & Constraint Screen
-document.getElementById('workBtn').addEventListener('click', () => {
-    sessionStartTimestamp = Date.now();
-    logStepTransition('Time & Constraint Setup');
+    document.getElementById('workBtn')?.addEventListener('click', () => {
+        sessionStartTimestamp = Date.now();
+        logStepTransition('Time & Constraint Setup');
 
-    document.getElementById('modeSelect').classList.add('hidden');
-    document.getElementById('timeConstraintInput').classList.remove('hidden');
-    saveSession();
-});
+        document.getElementById('modeSelect').classList.add('hidden');
+        document.getElementById('timeConstraintInput').classList.remove('hidden');
+        saveSession();
+    });
 
-// Step 2 -> Step 3: Time & Constraint Screen -> Task Input Screen
-document.getElementById('timeConstraintNextBtn').addEventListener('click', () => {
-    const timeVal = parseInt(document.getElementById('availableTime').value, 10);
-    const constraintVal = document.getElementById('endConstraint').value.trim();
+    document.getElementById('timeConstraintNextBtn')?.addEventListener('click', () => {
+        const timeVal = parseInt(document.getElementById('availableTime').value, 10);
+        const constraintVal = document.getElementById('endConstraint').value.trim();
 
-    if (!timeVal || timeVal <= 0) {
-        alert("Please enter a valid amount of available minutes.");
-        return;
-    }
+        if (!timeVal || timeVal <= 0) {
+            alert("Please enter a valid amount of available minutes.");
+            return;
+        }
 
-    totalAvailableTime = timeVal;
-    endConstraint = constraintVal;
+        totalAvailableTime = timeVal;
+        endConstraint = constraintVal;
 
-    logStepTransition('Task Input');
+        logStepTransition('Task Input');
 
-    document.getElementById('timeConstraintInput').classList.add('hidden');
-    
-    const taskInputContainer = document.getElementById('taskInput');
-    taskInputContainer.classList.remove('hidden');
-    
-    const taskTextArea = document.getElementById('tasks');
-    if (!taskTextArea.dataset.capacityListener) {
-        taskTextArea.addEventListener('input', checkTaskInputCapacity);
-        taskTextArea.dataset.capacityListener = "true";
-    }
+        document.getElementById('timeConstraintInput').classList.add('hidden');
+        
+        const taskInputContainer = document.getElementById('taskInput');
+        taskInputContainer.classList.remove('hidden');
+        
+        const taskTextArea = document.getElementById('tasks');
+        if (taskTextArea && !taskTextArea.dataset.capacityListener) {
+            taskTextArea.addEventListener('input', checkTaskInputCapacity);
+            taskTextArea.dataset.capacityListener = "true";
+        }
 
-    saveSession();
-});
+        saveSession();
+    });
 
-// Calculate capacity at task entry (10 mins per task assumption)
+    document.getElementById('startSort')?.addEventListener('click', () => {
+        const taskInput = document.getElementById('tasks').value.trim();
+        if (!taskInput) {
+            alert('Task list cannot be empty!');
+            return;
+        }
+
+        let rawTasks = taskInput.split('\n').map(t => t.trim()).filter(t => t);
+        rawTasks = [...new Set(rawTasks)];
+
+        const skipSort = document.getElementById('skipSortCheckbox').checked;
+
+        document.getElementById('taskInput').classList.add('hidden');
+
+        if (skipSort || rawTasks.length <= 1) {
+            sortedTasks = rawTasks.map(name => ({ 
+                name, 
+                estimatedTime: 0, 
+                actualTime: 0,
+                timestamps: { created: Date.now(), started: null, completed: null } 
+            }));
+            currentTaskIndex = 0;
+            saveSession();
+            promptForUpfrontTimings();
+        } else {
+            logStepTransition('Interactive Merge Sort');
+            sortStartTime = Math.floor(Date.now() / 1000);
+            startMergeSort(rawTasks);
+        }
+    });
+
+    loadSession();
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+} else {
+    initApp();
+}
+
+// Capacity Indicator Helper
 function checkTaskInputCapacity() {
     const textarea = document.getElementById('tasks');
     const rawTasks = textarea.value.split('\n').map(t => t.trim()).filter(t => t);
@@ -204,41 +297,6 @@ function checkTaskInputCapacity() {
         infoMsg.style.color = '#2e7d32';
     }
 }
-
-// Check for existing session right at boot
-window.addEventListener('DOMContentLoaded', loadSession);
-
-// Handle Initial Task Sorter Submission
-document.getElementById('startSort').addEventListener('click', () => {
-    const taskInput = document.getElementById('tasks').value.trim();
-    if (!taskInput) {
-        alert('Task list cannot be empty!');
-        return;
-    }
-
-    let rawTasks = taskInput.split('\n').map(t => t.trim()).filter(t => t);
-    rawTasks = [...new Set(rawTasks)];
-
-    const skipSort = document.getElementById('skipSortCheckbox').checked;
-
-    document.getElementById('taskInput').classList.add('hidden');
-
-    if (skipSort || rawTasks.length <= 1) {
-        sortedTasks = rawTasks.map(name => ({ 
-            name, 
-            estimatedTime: 0, 
-            actualTime: 0,
-            timestamps: { created: Date.now(), started: null, completed: null } 
-        }));
-        currentTaskIndex = 0;
-        saveSession();
-        promptForUpfrontTimings();
-    } else {
-        logStepTransition('Interactive Merge Sort');
-        sortStartTime = Math.floor(Date.now() / 1000);
-        startMergeSort(rawTasks);
-    }
-});
 
 // CSV Session Resumption
 function handleCSVUpload(event) {
@@ -363,7 +421,7 @@ function runSequentialTimingInput(index) {
 
     const input = document.createElement('input');
     input.type = 'number';
-    input.placeholder = 'Enter minutes (1-60)';
+    input.placeholder = 'Enter minutes (1-120)';
     if (targetTask.estimatedTime > 0) input.value = targetTask.estimatedTime;
     timingScreen.appendChild(input);
 
@@ -372,12 +430,12 @@ function runSequentialTimingInput(index) {
     
     nextBtn.addEventListener('click', () => {
         const timeVal = parseInt(input.value, 10);
-        if (timeVal >= 1 && timeVal <= 60) {
+        if (timeVal >= 1 && timeVal <= 120) {
             targetTask.estimatedTime = timeVal;
             saveSession();
             runSequentialTimingInput(index + 1); 
         } else {
-            alert('Please specify an estimate between 1 and 60 minutes.');
+            alert('Please specify an estimate between 1 and 120 minutes.');
         }
     });
     timingScreen.appendChild(nextBtn);
@@ -421,7 +479,7 @@ function displaySortedTasks() {
         if (idx < currentTaskIndex) {
             const diff = task.estimatedTime - task.actualTime;
             const completedAt = task.timestamps?.completed ? ` | Done at ${formatRealTime(task.timestamps.completed)}` : '';
-            li.textContent = `${task.name} (Done | Took ${task.actualTime}m, Ahead/behind by: ${diff}m${completedAt})`;
+            li.textContent = `${task.name} (Done | Est: ${task.estimatedTime}m, Act: ${task.actualTime}m, Diff: ${diff}m${completedAt})`;
             li.style.color = 'gray';
             li.style.textDecoration = 'line-through';
         } else {
@@ -430,7 +488,7 @@ function displaySortedTasks() {
                 li.textContent += ` (Estimated: ${task.estimatedTime}m)`;
             }
             if (idx === currentTaskIndex && pausedSecondsRemaining > 0) {
-                li.textContent += " [Paused]";
+                li.textContent += " [Paused Session In Progress]";
             }
 
             if (totalAvailableTime > 0 && cumulativeEstTime > totalAvailableTime) {
@@ -470,9 +528,9 @@ function displaySortedTasks() {
     resetBtn.textContent = 'Reset All and Start Over';
     resetBtn.style.backgroundColor = '#eceff1';
     resetBtn.style.marginLeft = '15px';
-    resetBtn.addEventListener('click', () => {
+    resetBtn.addEventListener('click', async () => {
         if (confirm("Are you sure you want to delete this session?")) {
-            clearSession();
+            await clearSession();
             window.location.reload();
         }
     });
@@ -514,14 +572,14 @@ function startDeadlineSetting() {
     const input = document.createElement('input');
     input.type = 'number';
     input.id = 'taskTime';
-    input.placeholder = 'Enter minutes (1-60)';
+    input.placeholder = 'Enter minutes (1-120)';
     deadlinePage.appendChild(input);
 
     const startButton = document.createElement('button');
     startButton.textContent = 'Start Task';
     startButton.addEventListener('click', () => {
         const time = parseInt(input.value, 10);
-        if (time >= 1 && time <= 60) {
+        if (time >= 1 && time <= 120) {
             nextTask.estimatedTime = time; 
             const nowMs = Date.now();
             if (!nextTask.timestamps) nextTask.timestamps = {};
@@ -532,7 +590,7 @@ function startDeadlineSetting() {
             pausedSecondsRemaining = 0;
             startFocusScreen();
         } else {
-            alert('Please enter a valid time between 1 and 60 minutes.');
+            alert('Please enter a valid time between 1 and 120 minutes.');
         }
     });
     deadlinePage.appendChild(startButton);
@@ -558,6 +616,12 @@ function startFocusScreen() {
     taskName.textContent = `Current Task: ${currentTask.name}`;
     focusScreen.appendChild(taskName);
 
+    const timeAccessInfo = document.createElement('p');
+    timeAccessInfo.style.fontSize = '0.9em';
+    timeAccessInfo.style.color = '#666';
+    timeAccessInfo.textContent = `Task accessed at: ${formatRealTime(currentTask.timestamps?.started)}`;
+    focusScreen.appendChild(timeAccessInfo);
+
     const timerDisplay = document.createElement('p');
     timerDisplay.id = 'timer';
     timerDisplay.style.fontSize = '24px';
@@ -577,7 +641,7 @@ function startFocusScreen() {
 
         if (timeRemaining <= 0) {
             clearInterval(timerInterval);
-            alert(`Time is up!`);
+            alert(`Time is up! Your available session window (${endConstraint || 'time limit'}) has ended.`);
             handleStopWorking();
         }
     }
@@ -637,7 +701,6 @@ function startFocusScreen() {
 function handleStopWorking() {
     clearInterval(timerInterval);
     
-    // Log elapsed time for current active task if stopping mid-focus
     if (document.getElementById('focusScreen') && currentTaskIndex < sortedTasks.length) {
         const nowMs = Date.now();
         const nowSec = Math.floor(nowMs / 1000);
@@ -691,7 +754,7 @@ function renderUncompletedChecklistScreen(uncompletedTasks) {
         checkbox.id = `uncompleted_task_${relativeIdx}`;
         checkbox.value = relativeIdx;
 
-        const label = document.createElement('label');
+        const label = document.label = document.createElement('label');
         label.htmlFor = `uncompleted_task_${relativeIdx}`;
         label.style.marginLeft = '8px';
         label.textContent = task.name;
@@ -747,7 +810,7 @@ function downloadAllTaskFiles() {
     exportUncompletedTasksTXT();
 }
 
-// Export completed tasks with statistics to CSV (Timestamped filename)
+// Export completed tasks with statistics to CSV
 function exportCompletedTasksCSV() {
     const completed = sortedTasks.slice(0, currentTaskIndex);
     if (completed.length === 0) return;
@@ -766,7 +829,7 @@ function exportCompletedTasksCSV() {
     triggerFileDownload(csvContent, filename, 'text/csv;charset=utf-8;');
 }
 
-// Export uncompleted tasks to TXT plain text file (Timestamped filename)
+// Export uncompleted tasks to TXT plain text file
 function exportUncompletedTasksTXT() {
     const uncompleted = sortedTasks.slice(currentTaskIndex);
     if (uncompleted.length === 0) return;
@@ -941,7 +1004,7 @@ function displaySpareTime() {
         const startTimeStr = task.timestamps?.started ? formatRealTime(task.timestamps.started) : 'N/A';
         const completionTimeStr = task.timestamps?.completed ? formatRealTime(task.timestamps.completed) : 'N/A';
         
-        item.textContent = `${task.name} | Took ${task.actualTime}m | Ahead/Behind by: ${variance >= 0 ? '+' : ''}${variance}m`;
+        item.textContent = `${task.name} | Est: ${task.estimatedTime}m | Act: ${task.actualTime}m | Var: ${variance >= 0 ? '+' : ''}${variance}m [Start: ${startTimeStr}, End: ${completionTimeStr}]`;
         reportList.appendChild(item);
     });
     completionScreen.appendChild(reportList);
@@ -954,8 +1017,8 @@ function displaySpareTime() {
     const resetBtn = document.createElement('button');
     resetBtn.textContent = 'Start Fresh Session';
     resetBtn.style.marginLeft = '15px';
-    resetBtn.addEventListener('click', () => {
-        clearSession();
+    resetBtn.addEventListener('click', async () => {
+        await clearSession();
         window.location.reload();
     });
     completionScreen.appendChild(resetBtn);
