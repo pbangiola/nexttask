@@ -5,18 +5,19 @@ let deadline = 0;
 let spareTime = 0; 
 let taskStartTimestamp = 0; 
 let pausedSecondsRemaining = 0; 
-let sortStartTime = 0; //Global tracking for the sorting phase
 
+// Track overall session time limits and end event
+let totalAvailableTime = 0;
+let endConstraint = "";
+
+// Global tracking for sorting phase timing
+let sortStartTime = 0;
 
 // Helper: Estimate maximum comparison steps for Merge Sort
 function getEstimatedComparisons(n) {
     if (n <= 1) return 0;
     return Math.ceil(n * Math.log2(n));
 }
-
-// Track overall session time limits and end event
-let totalAvailableTime = 0;
-let endConstraint = "";
 
 // --- Persistence Layer ---
 function saveSession() {
@@ -142,7 +143,7 @@ document.getElementById('startSort').addEventListener('click', () => {
 
     let rawTasks = taskInput.split('\n').map(t => t.trim()).filter(t => t);
     
-    // NEW: Remove exact duplicate tasks
+    // Remove exact duplicate tasks
     rawTasks = [...new Set(rawTasks)];
 
     const skipSort = document.getElementById('skipSortCheckbox').checked;
@@ -155,6 +156,7 @@ document.getElementById('startSort').addEventListener('click', () => {
         saveSession();
         promptForUpfrontTimings();
     } else {
+        sortStartTime = Math.floor(Date.now() / 1000);
         startMergeSort(rawTasks);
     }
 });
@@ -223,7 +225,7 @@ function promptForUpfrontTimings() {
     const yesBtn = document.createElement('button');
     yesBtn.textContent = 'Yes';
     yesBtn.addEventListener('click', () => {
-        runSequentialTimingInput(0);
+        runSequentialTimingInput(currentTaskIndex);
     });
     gatewayScreen.appendChild(yesBtn);
 
@@ -699,24 +701,41 @@ function downloadTaskListCSV() {
 
 // Interactive Merge Sort Foundations
 function startMergeSort(array) {
-    mergeSortInteractive(array).then(sortedNames => {
-        sortedTasks = sortedNames.map(name => ({ name, estimatedTime: 0, actualTime: 0 }));
-        currentTaskIndex = 0;
+    const totalEstComparisons = getEstimatedComparisons(array.length);
+    const estSeconds = totalEstComparisons * 20;
+    const estMinutes = Math.ceil(estSeconds / 60);
+
+    mergeSortInteractive(array, estMinutes).then(sortedNames => {
+        const sortEndTime = Math.floor(Date.now() / 1000);
+        const actualSortMinutes = Math.max(1, Math.ceil((sortEndTime - sortStartTime) / 60));
+
+        const userTasks = sortedNames.map(name => ({ name, estimatedTime: 0, actualTime: 0 }));
+
+        const sortCreditTask = {
+            name: "Sorting tasks",
+            estimatedTime: estMinutes,
+            actualTime: actualSortMinutes
+        };
+
+        sortedTasks = [sortCreditTask, ...userTasks];
+        currentTaskIndex = 1; // Mark sorting task as completed automatically
+
+        saveSession();
         promptForUpfrontTimings();
     });
 }
 
-async function mergeSortInteractive(array) {
+async function mergeSortInteractive(array, estMinutes) {
     if (array.length <= 1) return array;
 
     const middle = Math.floor(array.length / 2);
-    const left = await mergeSortInteractive(array.slice(0, middle));
-    const right = await mergeSortInteractive(array.slice(middle));
+    const left = await mergeSortInteractive(array.slice(0, middle), estMinutes);
+    const right = await mergeSortInteractive(array.slice(middle), estMinutes);
 
-    return mergeInteractive(left, right);
+    return mergeInteractive(left, right, estMinutes);
 }
 
-function mergeInteractive(left, right) {
+function mergeInteractive(left, right, estMinutes) {
     return new Promise(resolve => {
         const result = [];
 
@@ -739,7 +758,19 @@ function mergeInteractive(left, right) {
                 return;
             }
 
-            document.getElementById('taskCompare').classList.remove('hidden');
+            const compareContainer = document.getElementById('taskCompare');
+            compareContainer.classList.remove('hidden');
+
+            let estHeader = document.getElementById('sortEstimateHeader');
+            if (!estHeader) {
+                estHeader = document.createElement('p');
+                estHeader.id = 'sortEstimateHeader';
+                estHeader.style.fontWeight = 'bold';
+                estHeader.style.color = '#555';
+                compareContainer.insertBefore(estHeader, compareContainer.firstChild);
+            }
+            estHeader.textContent = `Estimated sorting time remaining: ~${estMinutes} min (based on 20s per decision)`;
+
             document.getElementById('task1').textContent = left[0];
             document.getElementById('task2').textContent = right[0];
 
