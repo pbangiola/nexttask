@@ -5,7 +5,7 @@ if (!sessionId) {
     localStorage.setItem('taskSorterSessionId', sessionId);
 }
 
-let sortedTasks = []; // Holds objects: { name: "Task", estimatedTime: 0, actualTime: 0, timestamps: {} }
+let sortedTasks = []; // Array of objects: { name: "Task", estimatedTime: 0, actualTime: 0, timestamps: {} }
 let currentTaskIndex = 0;
 let timerInterval = null;
 let deadline = 0;
@@ -13,7 +13,7 @@ let spareTime = 0;
 let taskStartTimestamp = 0; 
 let pausedSecondsRemaining = 0; 
 
-// Track overall session time limits and end event
+// Track overall session time limits and end constraint
 let totalAvailableTime = 0;
 let endConstraint = "";
 
@@ -57,7 +57,7 @@ function getTotalAllocatedTime() {
     return sortedTasks.reduce((sum, task) => sum + (task.estimatedTime || 0), 0);
 }
 
-// --- Persistence Layer (Backend API with Local Cache Fallback) ---
+// --- Persistence Layer & User Analytics Sync ---
 async function saveSession() {
     const sessionState = {
         sortedTasks,
@@ -73,7 +73,6 @@ async function saveSession() {
         activeView: getActiveViewContext() 
     };
 
-    // Save locally first so UI is always responsive
     localStorage.setItem('taskSorterSession_fallback', JSON.stringify(sessionState));
 
     try {
@@ -142,6 +141,23 @@ async function clearSession() {
     localStorage.removeItem('taskSorterSession_fallback');
 }
 
+async function logTaskCompletionToBackend(task) {
+    try {
+        await fetch(`/api/session/${sessionId}/tasks/completed`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                taskName: task.name,
+                estimatedMinutes: task.estimatedTime || 0,
+                actualMinutes: task.actualTime || 0,
+                completedAt: task.timestamps?.completed || Date.now()
+            })
+        });
+    } catch (e) {
+        console.warn("Failed to push completed task log to backend:", e);
+    }
+}
+
 function getActiveViewContext() {
     if (document.getElementById('focusScreen')) return 'focus';
     if (document.getElementById('deadlinePage')) return 'deadline';
@@ -189,9 +205,8 @@ function routeToStoredView(view) {
     }
 }
 
-// --- App Initialization & Listener Setup ---
+// --- App Initialization & Event Handlers ---
 function initApp() {
-    // Attach static UI event listeners safely
     document.getElementById('csvUpload')?.addEventListener('change', handleCSVUpload);
     document.getElementById('stopWorkingBtn')?.addEventListener('click', handleStopWorking);
 
@@ -652,7 +667,7 @@ function startFocusScreen() {
 
     const doneNext = document.createElement('button');
     doneNext.textContent = 'Done, Next!';
-    doneNext.addEventListener('click', () => {
+    doneNext.addEventListener('click', async () => {
         clearInterval(timerInterval);
 
         const nowMs = Date.now();
@@ -664,6 +679,9 @@ function startFocusScreen() {
 
         const timeDifference = deadline - nowSec;
         spareTime += timeDifference;
+
+        // Log completed task to permanent user analytics backend
+        await logTaskCompletionToBackend(currentTask);
 
         pausedSecondsRemaining = 0; 
         currentTaskIndex++; 
@@ -697,7 +715,7 @@ function startFocusScreen() {
     saveSession();
 }
 
-// Step 1: Handle Stop Working with Uncompleted Task Verification Prompt
+// Stop Working routine & checklist verification
 function handleStopWorking() {
     clearInterval(timerInterval);
     
@@ -710,6 +728,8 @@ function handleStopWorking() {
         task.actualTime += Math.ceil(actualElapsedMs / (1000 * 60));
         task.timestamps.completed = nowMs;
         spareTime += (deadline - nowSec);
+        
+        logTaskCompletionToBackend(task);
         currentTaskIndex++;
     }
 
@@ -724,7 +744,6 @@ function handleStopWorking() {
     }
 }
 
-// Step 2: Checklist screen for out-of-order completed tasks
 function renderUncompletedChecklistScreen(uncompletedTasks) {
     logStepTransition('Uncompleted Tasks Out-of-Order Check');
 
@@ -754,7 +773,7 @@ function renderUncompletedChecklistScreen(uncompletedTasks) {
         checkbox.id = `uncompleted_task_${relativeIdx}`;
         checkbox.value = relativeIdx;
 
-        const label = document.label = document.createElement('label');
+        const label = document.createElement('label');
         label.htmlFor = `uncompleted_task_${relativeIdx}`;
         label.style.marginLeft = '8px';
         label.textContent = task.name;
@@ -769,7 +788,7 @@ function renderUncompletedChecklistScreen(uncompletedTasks) {
     submitBtn.textContent = 'Confirm and Finalize Session';
     submitBtn.style.marginTop = '15px';
     
-    submitBtn.addEventListener('click', () => {
+    submitBtn.addEventListener('click', async () => {
         const checkboxes = form.querySelectorAll('input[type="checkbox"]:checked');
         const checkedIndices = Array.from(checkboxes).map(cb => parseInt(cb.value, 10));
 
@@ -777,15 +796,17 @@ function renderUncompletedChecklistScreen(uncompletedTasks) {
         const stillUncompleted = [];
         const nowMs = Date.now();
 
-        uncompletedTasks.forEach((task, idx) => {
+        for (let idx = 0; idx < uncompletedTasks.length; idx++) {
+            const task = uncompletedTasks[idx];
             if (checkedIndices.includes(idx)) {
                 task.timestamps.completed = nowMs;
                 if (!task.timestamps.started) task.timestamps.started = nowMs;
                 newlyCompleted.push(task);
+                await logTaskCompletionToBackend(task);
             } else {
                 stillUncompleted.push(task);
             }
-        });
+        }
 
         const originallyCompleted = sortedTasks.slice(0, currentTaskIndex);
         sortedTasks = [...originallyCompleted, ...newlyCompleted, ...stillUncompleted];
@@ -799,7 +820,6 @@ function renderUncompletedChecklistScreen(uncompletedTasks) {
     container.appendChild(checkScreen);
 }
 
-// Step 3: Trigger dual-format file downloads and render efficiency screen
 function finalizeStopWorkingSession() {
     downloadAllTaskFiles();
     displaySpareTime();
@@ -810,7 +830,6 @@ function downloadAllTaskFiles() {
     exportUncompletedTasksTXT();
 }
 
-// Export completed tasks with statistics to CSV
 function exportCompletedTasksCSV() {
     const completed = sortedTasks.slice(0, currentTaskIndex);
     if (completed.length === 0) return;
@@ -829,7 +848,6 @@ function exportCompletedTasksCSV() {
     triggerFileDownload(csvContent, filename, 'text/csv;charset=utf-8;');
 }
 
-// Export uncompleted tasks to TXT plain text file
 function exportUncompletedTasksTXT() {
     const uncompleted = sortedTasks.slice(currentTaskIndex);
     if (uncompleted.length === 0) return;
@@ -853,7 +871,6 @@ function triggerFileDownload(content, filename, mimeType) {
     link.click();
 }
 
-// Targeted Numerical Index Insertion Panel
 function startAddTask() {
     logStepTransition('Insert New Task');
     document.getElementById('stopWorkingBtn').classList.add('hidden'); 
@@ -962,7 +979,6 @@ function startAddTask() {
     saveSession();
 }
 
-// Final Efficiency Report Screen
 function displaySpareTime() {
     logStepTransition('Final Efficiency Report');
     document.getElementById('stopWorkingBtn').classList.add('hidden');
@@ -1027,7 +1043,6 @@ function displaySpareTime() {
     saveSession();
 }
 
-// Interactive Merge Sort Foundations
 function startMergeSort(array) {
     const totalEstComparisons = getEstimatedComparisons(array.length);
     const estSeconds = totalEstComparisons * 3;
