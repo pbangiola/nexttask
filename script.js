@@ -19,6 +19,11 @@ function getEstimatedComparisons(n) {
     return Math.ceil(n * Math.log2(n));
 }
 
+// Helper: Calculate total estimated time allocated so far
+function getTotalAllocatedTime() {
+    return sortedTasks.reduce((sum, task) => sum + (task.estimatedTime || 0), 0);
+}
+
 // --- Persistence Layer ---
 function saveSession() {
     const sessionState = {
@@ -126,9 +131,46 @@ document.getElementById('timeConstraintNextBtn').addEventListener('click', () =>
     endConstraint = constraintVal;
 
     document.getElementById('timeConstraintInput').classList.add('hidden');
-    document.getElementById('taskInput').classList.remove('hidden');
+    
+    const taskInputContainer = document.getElementById('taskInput');
+    taskInputContainer.classList.remove('hidden');
+    
+    // Attach real-time listener to highlight inputs exceeding 10 min/task baseline
+    const taskTextArea = document.getElementById('tasks');
+    if (!taskTextArea.dataset.capacityListener) {
+        taskTextArea.addEventListener('input', checkTaskInputCapacity);
+        taskTextArea.dataset.capacityListener = "true";
+    }
+
     saveSession();
 });
+
+// Calculate capacity at task entry (10 mins per task assumption)
+function checkTaskInputCapacity() {
+    const textarea = document.getElementById('tasks');
+    const rawTasks = textarea.value.split('\n').map(t => t.trim()).filter(t => t);
+    
+    // Assume 10 mins per task
+    const allowedTaskCount = Math.floor(totalAvailableTime / 10);
+
+    let infoMsg = document.getElementById('capacityInfoMsg');
+    if (!infoMsg) {
+        infoMsg = document.createElement('p');
+        infoMsg.id = 'capacityInfoMsg';
+        infoMsg.style.fontWeight = 'bold';
+        textarea.parentNode.insertBefore(infoMsg, textarea.nextSibling);
+    }
+
+    if (rawTasks.length > allowedTaskCount) {
+        textarea.classList.add('over-capacity');
+        infoMsg.textContent = `Warning: Based on ~10 min/task, you can likely complete ${allowedTaskCount} task(s) in your ${totalAvailableTime} min window. Tasks past line ${allowedTaskCount} exceed available time.`;
+        infoMsg.style.color = '#d32f2f';
+    } else {
+        textarea.classList.remove('over-capacity');
+        infoMsg.textContent = `Allocated capacity: ${rawTasks.length * 10} / ${totalAvailableTime} minutes estimated.`;
+        infoMsg.style.color = '#2e7d32';
+    }
+}
 
 // Check for existing session right at boot
 window.addEventListener('DOMContentLoaded', loadSession);
@@ -240,9 +282,11 @@ function promptForUpfrontTimings() {
     saveSession();
 }
 
-// Sequential Timing Entry Routine
+// Sequential Timing Entry Routine - Cut off when available time accounted for
 function runSequentialTimingInput(index) {
-    if (index >= sortedTasks.length) {
+    const currentAllocated = getTotalAllocatedTime();
+
+    if (index >= sortedTasks.length || (totalAvailableTime > 0 && currentAllocated >= totalAvailableTime)) {
         displaySortedTasks();
         return;
     }
@@ -256,6 +300,14 @@ function runSequentialTimingInput(index) {
     const title = document.createElement('h2');
     title.textContent = `Set estimate for task (${index + 1} of ${sortedTasks.length})`;
     timingScreen.appendChild(title);
+
+    const remainingTime = totalAvailableTime > 0 ? (totalAvailableTime - currentAllocated) : null;
+    if (remainingTime !== null) {
+        const timeCapMsg = document.createElement('p');
+        timeCapMsg.style.fontWeight = 'bold';
+        timeCapMsg.textContent = `Remaining unallocated session time: ${remainingTime} min`;
+        timingScreen.appendChild(timeCapMsg);
+    }
 
     const taskLabel = document.createElement('p');
     taskLabel.innerHTML = `Task: <strong>${targetTask.name}</strong>`;
@@ -301,9 +353,13 @@ function displaySortedTasks() {
     title.textContent = 'Sorted Task List';
     taskResult.appendChild(title);
 
+    let cumulativeEstTime = 0;
     const sortedList = document.createElement('ol');
+    
     sortedTasks.forEach((task, idx) => {
         const li = document.createElement('li');
+        cumulativeEstTime += task.estimatedTime || 10; // Fallback to 10m if unassigned
+
         if (idx < currentTaskIndex) {
             const diff = task.estimatedTime - task.actualTime;
             li.textContent = `${task.name} (Done | Est: ${task.estimatedTime}m, Act: ${task.actualTime}m, Diff: ${diff}m)`;
@@ -316,6 +372,11 @@ function displaySortedTasks() {
             }
             if (idx === currentTaskIndex && pausedSecondsRemaining > 0) {
                 li.textContent += " [Paused Session In Progress]";
+            }
+
+            // Red highlight if task falls outside total session time limit
+            if (totalAvailableTime > 0 && cumulativeEstTime > totalAvailableTime) {
+                li.classList.add('over-capacity');
             }
         }
         sortedList.appendChild(li);
@@ -445,6 +506,13 @@ function startFocusScreen() {
         const minutes = Math.floor(absTime / 60);
         const seconds = absTime % 60;
         timerDisplay.textContent = `Time Remaining: ${timeRemaining >= 0 ? '' : '-'}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+
+        // Auto-cutoff: If session-wide available time elapses, end session immediately
+        if (timeRemaining <= 0) {
+            clearInterval(timerInterval);
+            alert(`Time is up! Your available session window (${endConstraint || 'time limit'}) has ended.`);
+            handleStopWorking();
+        }
     }
 
     updateTimer();
@@ -493,7 +561,7 @@ function startFocusScreen() {
     saveSession();
 }
 
-// Action Trigger for Stop Working Routine
+// Action Trigger for Stop Working / Auto Session Expiration
 function handleStopWorking() {
     clearInterval(timerInterval);
     
@@ -505,24 +573,47 @@ function handleStopWorking() {
 
     document.getElementById('stopWorkingBtn').classList.add('hidden');
     
-    downloadRemainingTasksCSV();
+    // Split exports: completed with stats vs. uncompleted without stats
+    exportCompletedTasksCSV();
+    exportUncompletedTasksCSV();
+
     displaySpareTime();
 }
 
-function downloadRemainingTasksCSV() {
+// Export finished tasks with metrics
+function exportCompletedTasksCSV() {
+    const completed = sortedTasks.slice(0, currentTaskIndex);
+    if (completed.length === 0) return;
+
     let csvContent = "Task Name,Estimated Time (Min),Actual Time (Min),Difference (Min)\n";
-    const remaining = sortedTasks.slice(currentTaskIndex);
-    
-    remaining.forEach(task => {
+    completed.forEach(task => {
         const diff = task.estimatedTime - task.actualTime;
         const sanitizedName = `"${task.name.replace(/"/g, '""')}"`;
         csvContent += `${sanitizedName},${task.estimatedTime},${task.actualTime},${diff}\n`;
     });
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    triggerCSVDownload(csvContent, 'completed_tasks_stats.csv');
+}
+
+// Export uncompleted tasks without metrics
+function exportUncompletedTasksCSV() {
+    const uncompleted = sortedTasks.slice(currentTaskIndex);
+    if (uncompleted.length === 0) return;
+
+    let csvContent = "Task Name\n";
+    uncompleted.forEach(task => {
+        const sanitizedName = `"${task.name.replace(/"/g, '""')}"`;
+        csvContent += `${sanitizedName}\n`;
+    });
+
+    triggerCSVDownload(csvContent, 'uncompleted_tasks.csv');
+}
+
+function triggerCSVDownload(content, filename) {
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = 'remaining_tasks.csv';
+    link.download = filename;
     link.click();
 }
 
@@ -666,7 +757,7 @@ function displaySpareTime() {
     completionScreen.appendChild(reportList);
 
     const downloadBtn = document.createElement('button');
-    downloadBtn.textContent = 'Download stats (CSV)';
+    downloadBtn.textContent = 'Download Stats (CSV)';
     downloadBtn.addEventListener('click', downloadTaskListCSV);
     completionScreen.appendChild(downloadBtn);
 
@@ -684,26 +775,15 @@ function displaySpareTime() {
 }
 
 function downloadTaskListCSV() {
-    let csvContent = "Task Name,Estimated Time (Min),Actual Time (Min),Difference (Min)\n";
-    
-    sortedTasks.forEach(task => {
-        const diff = task.estimatedTime - task.actualTime;
-        const sanitizedName = `"${task.name.replace(/"/g, '""')}"`;
-        csvContent += `${sanitizedName},${task.estimatedTime},${task.actualTime},${diff}\n`;
-    });
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'sorted_tasks_metrics.csv';
-    link.click();
+    exportCompletedTasksCSV();
+    exportUncompletedTasksCSV();
 }
 
 // Interactive Merge Sort Foundations
 function startMergeSort(array) {
     const totalEstComparisons = getEstimatedComparisons(array.length);
-    const estSeconds = totalEstComparisons * 3;
-    const estMinutes = Math.ceil(estSeconds / 60);
+    const estSeconds = totalEstComparisons * 3; // Adjusted estimate factor to 3s
+    const estMinutes = Math.max(1, Math.ceil(estSeconds / 60));
 
     mergeSortInteractive(array, estMinutes).then(sortedNames => {
         const sortEndTime = Math.floor(Date.now() / 1000);
@@ -769,7 +849,8 @@ function mergeInteractive(left, right, estMinutes) {
                 estHeader.style.color = '#555';
                 compareContainer.insertBefore(estHeader, compareContainer.firstChild);
             }
-            estHeader.textContent = `Estimated sorting time remaining: ~${estMinutes} min;
+            // Updated string based on 3s estimate
+            estHeader.textContent = `Estimated sorting time remaining: ~${estMinutes} min`;
 
             document.getElementById('task1').textContent = left[0];
             document.getElementById('task2').textContent = right[0];
