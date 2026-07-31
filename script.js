@@ -6,7 +6,11 @@ let spareTime = 0;
 let taskStartTimestamp = 0; 
 let pausedSecondsRemaining = 0; 
 
-// --- NEW: Persistence Layer ---
+// Track overall session time limits and end event
+let totalAvailableTime = 0;
+let endConstraint = "";
+
+// --- Persistence Layer ---
 function saveSession() {
     const sessionState = {
         sortedTasks,
@@ -15,7 +19,8 @@ function saveSession() {
         spareTime,
         taskStartTimestamp,
         pausedSecondsRemaining,
-        // Track exactly what view screen was active
+        totalAvailableTime,
+        endConstraint,
         activeView: getActiveViewContext() 
     };
     localStorage.setItem('taskSorterSession', JSON.stringify(sessionState));
@@ -33,13 +38,11 @@ function loadSession() {
         spareTime = state.spareTime || 0;
         taskStartTimestamp = state.taskStartTimestamp || 0;
         pausedSecondsRemaining = state.pausedSecondsRemaining || 0;
+        totalAvailableTime = state.totalAvailableTime || 0;
+        endConstraint = state.endConstraint || "";
 
-        if (sortedTasks.length > 0) {
-            // Hide initial mode selection and input screens
+        if (sortedTasks.length > 0 || state.activeView === 'time-constraint' || state.activeView === 'input') {
             document.getElementById('modeSelect').classList.add('hidden');
-            document.getElementById('taskInput').classList.add('hidden');
-            
-            // Route user back to where they were
             routeToStoredView(state.activeView);
         }
     } catch (e) {
@@ -58,20 +61,23 @@ function getActiveViewContext() {
     if (document.getElementById('completionScreen')) return 'completion';
     if (sortedTasks.length > 0 && document.getElementById('taskInput').classList.contains('hidden')) return 'dashboard';
     
-    // Check for modeSelect context
+    if (!document.getElementById('taskInput').classList.contains('hidden')) return 'input';
+    if (!document.getElementById('timeConstraintInput').classList.contains('hidden')) return 'time-constraint';
     if (!document.getElementById('modeSelect').classList.contains('hidden')) return 'mode-select';
 
     return 'input';
 }
 
 function routeToStoredView(view) {
-    if (view === 'focus') {
-        // Verify if deadline has already passed while backgrounded
+    if (view === 'time-constraint') {
+        document.getElementById('timeConstraintInput').classList.remove('hidden');
+    } else if (view === 'input') {
+        document.getElementById('taskInput').classList.remove('hidden');
+    } else if (view === 'focus') {
         const now = Math.floor(Date.now() / 1000);
         if (deadline > now) {
             startFocusScreen();
         } else {
-            // If it passed while away, go to dashboard or auto-handle
             displaySortedTasks();
         }
     } else if (view === 'deadline') {
@@ -90,16 +96,35 @@ function routeToStoredView(view) {
 document.getElementById('csvUpload').addEventListener('change', handleCSVUpload);
 document.getElementById('stopWorkingBtn').addEventListener('click', handleStopWorking);
 
-// Click listener to transition from Mode Selection to Task Input screen
+// Step 1 -> Step 2: Mode Selection -> Time & Constraint Screen
 document.getElementById('workBtn').addEventListener('click', () => {
     document.getElementById('modeSelect').classList.add('hidden');
+    document.getElementById('timeConstraintInput').classList.remove('hidden');
+    saveSession();
+});
+
+// Step 2 -> Step 3: Time & Constraint Screen -> Task Input Screen
+document.getElementById('timeConstraintNextBtn').addEventListener('click', () => {
+    const timeVal = parseInt(document.getElementById('availableTime').value, 10);
+    const constraintVal = document.getElementById('endConstraint').value.trim();
+
+    if (!timeVal || timeVal <= 0) {
+        alert("Please enter a valid amount of available minutes.");
+        return;
+    }
+
+    totalAvailableTime = timeVal;
+    endConstraint = constraintVal;
+
+    document.getElementById('timeConstraintInput').classList.add('hidden');
     document.getElementById('taskInput').classList.remove('hidden');
+    saveSession();
 });
 
 // Check for existing session right at boot
 window.addEventListener('DOMContentLoaded', loadSession);
 
-// Step 1: Handle Initial Task Sorter Submission
+// Handle Initial Task Sorter Submission
 document.getElementById('startSort').addEventListener('click', () => {
     const taskInput = document.getElementById('tasks').value.trim();
     if (!taskInput) {
@@ -122,7 +147,7 @@ document.getElementById('startSort').addEventListener('click', () => {
     }
 });
 
-// Step 1b: CSV Session Resumption
+// CSV Session Resumption
 function handleCSVUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -160,6 +185,7 @@ function handleCSVUpload(event) {
             return;
         }
 
+        document.getElementById('timeConstraintInput').classList.add('hidden');
         document.getElementById('taskInput').classList.add('hidden');
 
         sortedTasks = parsedTasks;
@@ -171,7 +197,7 @@ function handleCSVUpload(event) {
     reader.readAsText(file);
 }
 
-// Step 2a: Upfront Timings Gateway Motif
+// Upfront Timings Gateway Motif
 function promptForUpfrontTimings() {
     document.getElementById('taskCompare').classList.add('hidden');
     const container = document.getElementById('dynamicContainer');
@@ -200,7 +226,7 @@ function promptForUpfrontTimings() {
     saveSession();
 }
 
-// Step 2b: Sequential Timing Entry Routine
+// Sequential Timing Entry Routine
 function runSequentialTimingInput(index) {
     if (index >= sortedTasks.length) {
         displaySortedTasks();
@@ -246,7 +272,7 @@ function runSequentialTimingInput(index) {
     saveSession();
 }
 
-// Step 3: Main Dashboard Listing
+// Main Dashboard Listing
 function displaySortedTasks() {
     document.getElementById('taskCompare').classList.add('hidden');
     document.getElementById('stopWorkingBtn').classList.add('hidden'); 
@@ -307,7 +333,6 @@ function displaySortedTasks() {
     downloadBtn.addEventListener('click', downloadTaskListCSV);
     taskResult.appendChild(downloadBtn);
 
-    // Dynamic reset button so users can intentionally start completely over
     const resetBtn = document.createElement('button');
     resetBtn.textContent = 'Reset All and Start Over';
     resetBtn.style.backgroundColor = '#eceff1';
@@ -324,7 +349,7 @@ function displaySortedTasks() {
     saveSession();
 }
 
-// Step 4: Deadline Setup
+// Deadline Setup
 function startDeadlineSetting() {
     document.getElementById('stopWorkingBtn').classList.remove('hidden'); 
 
@@ -374,7 +399,7 @@ function startDeadlineSetting() {
     saveSession();
 }
 
-// Step 5: Live Execution Focus Panel
+// Live Execution Focus Panel
 function startFocusScreen() {
     document.getElementById('stopWorkingBtn').classList.remove('hidden'); 
 
@@ -470,7 +495,6 @@ function handleStopWorking() {
     displaySpareTime();
 }
 
-// Drops completed logs, slices current + downstream components
 function downloadRemainingTasksCSV() {
     let csvContent = "Task Name,Estimated Time (Min),Actual Time (Min),Difference (Min)\n";
     const remaining = sortedTasks.slice(currentTaskIndex);
@@ -488,7 +512,7 @@ function downloadRemainingTasksCSV() {
     link.click();
 }
 
-// Step 6: Targeted Numerical Index Insertion Panel
+// Targeted Numerical Index Insertion Panel
 function startAddTask() {
     document.getElementById('stopWorkingBtn').classList.add('hidden'); 
 
@@ -632,7 +656,6 @@ function displaySpareTime() {
     downloadBtn.addEventListener('click', downloadTaskListCSV);
     completionScreen.appendChild(downloadBtn);
 
-    // Reset button on completion screen
     const resetBtn = document.createElement('button');
     resetBtn.textContent = 'Start Fresh Session';
     resetBtn.style.marginLeft = '15px';
