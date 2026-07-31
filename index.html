@@ -1,4 +1,3 @@
-<!-- index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -16,13 +15,17 @@
             display: none;
         }
         button {
-            margin: 5px;
+            margin: 5px 0;
             padding: 8px 12px;
             cursor: pointer;
         }
         input, textarea {
             margin: 5px 0;
             padding: 6px;
+            display: block;
+            width: 100%;
+            max-width: 400px;
+            box-sizing: border-box;
         }
         .checkbox-container, .upload-container {
             margin: 15px 0;
@@ -64,20 +67,32 @@
 
     <h1>Task Sorter</h1>
     
-    <!-- NEW: Mode selection entry page -->
+    <!-- Step 1: Mode Selection -->
     <div id="modeSelect">
         <button id="workBtn">Work</button>
         <button id="planBtn" disabled>Plan <i>(Coming Soon)</i></button>
     </div>
 
-    <!-- Modified: Added 'hidden' class so this opens only after clicking 'Work' -->
+    <!-- NEW Step 2: Time & Constraint Entry Screen -->
+    <div id="timeConstraintInput" class="hidden">
+        <h2>Session Setup</h2>
+        <label for="availableTime">How much time do you have to work? (in minutes)</label>
+        <input type="number" id="availableTime" placeholder="e.g., 45" min="1">
+
+        <label for="endConstraint">What happens when this time is up?</label>
+        <input type="text" id="endConstraint" placeholder="e.g., class ends, leave for appointment">
+
+        <button id="timeConstraintNextBtn">Next</button>
+    </div>
+
+    <!-- Step 3: Task Entry Screen -->
     <div id="taskInput" class="hidden">
         <h2>Enter Your Tasks</h2>
         <textarea id="tasks" rows="10" cols="40" placeholder="Enter one task per line"></textarea>
         
         <div class="checkbox-container">
-            <label>
-                <input type="checkbox" id="skipSortCheckbox"> Skip sorting (use current order)
+            <label style="display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="skipSortCheckbox" style="width: auto;"> Skip sorting (use current order)
             </label>
         </div>
         <button id="startSort">Start Sorting</button>
