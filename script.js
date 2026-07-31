@@ -702,7 +702,7 @@ function downloadTaskListCSV() {
 // Interactive Merge Sort Foundations
 function startMergeSort(array) {
     const totalEstComparisons = getEstimatedComparisons(array.length);
-    const estSeconds = totalEstComparisons * 20;
+    const estSeconds = totalEstComparisons * 3;
     const estMinutes = Math.ceil(estSeconds / 60);
 
     mergeSortInteractive(array, estMinutes).then(sortedNames => {
@@ -769,7 +769,7 @@ function mergeInteractive(left, right, estMinutes) {
                 estHeader.style.color = '#555';
                 compareContainer.insertBefore(estHeader, compareContainer.firstChild);
             }
-            estHeader.textContent = `Estimated sorting time remaining: ~${estMinutes} min (based on 20s per decision)`;
+            estHeader.textContent = `Estimated sorting time remaining: ~${estMinutes} min;
 
             document.getElementById('task1').textContent = left[0];
             document.getElementById('task2').textContent = right[0];
