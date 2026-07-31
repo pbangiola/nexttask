@@ -132,7 +132,11 @@ document.getElementById('startSort').addEventListener('click', () => {
         return;
     }
 
-    const rawTasks = taskInput.split('\n').map(t => t.trim()).filter(t => t);
+    let rawTasks = taskInput.split('\n').map(t => t.trim()).filter(t => t);
+    
+    // NEW: Remove exact duplicate tasks
+    rawTasks = [...new Set(rawTasks)];
+
     const skipSort = document.getElementById('skipSortCheckbox').checked;
 
     document.getElementById('taskInput').classList.add('hidden');
