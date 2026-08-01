@@ -46,6 +46,54 @@ app.delete('/api/session/:id', (req, res) => {
     }
 });
 
+// --- Uncompleted Tasks Queue Endpoints ---
+
+// Get persistent uncompleted master task queue
+app.get('/api/session/:id/queue', (req, res) => {
+    try {
+        const queue = db.getUncompletedQueue(req.params.id);
+        res.json({ queue });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch task queue' });
+    }
+});
+
+// Save or replace task queue directly
+app.put('/api/session/:id/queue', (req, res) => {
+    try {
+        const sessionId = req.params.id;
+        const { tasks } = req.body;
+
+        if (!Array.isArray(tasks)) {
+            return res.status(400).json({ error: 'Tasks must be an array' });
+        }
+
+        db.saveUncompletedQueue(sessionId, tasks);
+        res.json({ success: true, count: tasks.length });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to update task queue' });
+    }
+});
+
+// Prepend uncompleted tasks to front of existing master task queue
+app.post('/api/session/:id/queue/prepend', (req, res) => {
+    try {
+        const sessionId = req.params.id;
+        const { uncompletedTasks } = req.body;
+
+        if (!Array.isArray(uncompletedTasks)) {
+            return res.status(400).json({ error: 'uncompletedTasks must be an array' });
+        }
+
+        db.prependUncompletedTasks(sessionId, uncompletedTasks);
+        const updatedQueue = db.getUncompletedQueue(sessionId);
+
+        res.json({ success: true, queue: updatedQueue });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to prepend uncompleted tasks' });
+    }
+});
+
 // --- User Performance Tracking & Analytics Endpoints ---
 
 // Log a completed task event to the permanent record
