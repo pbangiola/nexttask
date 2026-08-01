@@ -7,6 +7,23 @@ let currentProjectContext = null; // Wizard state payload for building nested ta
 let globalTimeoutId = null;   // Tracker identifier for 30s screen drop timeouts
 let timerInterval = null;     // Focus countdown tick reference
 
+// --- Backend SQLite Operations ---
+async function logTaskCompletionToBackend(taskName, estimatedTime, actualTime) {
+    try {
+        const response = await fetch('/api/tasks/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskName, estimatedTime, actualTime })
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            console.error("Backend DB logging error:", result.error);
+        }
+    } catch (err) {
+        console.error("Network or server failure while logging task:", err);
+    }
+}
+
 // --- Session Persistence Handlers ---
 function saveSession() {
     const sessionState = {
@@ -65,11 +82,8 @@ function getActiveViewContext() {
 }
 
 function routeToStoredView(view) {
-    if (view === 'landing') {
-        // Stay on default HTML layout input state
-        return;
-    }
-    // For any advanced app state, clear out the static landing fields
+    if (view === 'landing') return;
+
     document.getElementById('taskInputContainer').classList.add('hidden');
 
     if (view === 'focus') startFocusScreen();
@@ -163,7 +177,7 @@ function runUpfrontTimingGateway() {
     saveSession();
 }
 
-// Main Upfront Step 3b Configuration Loop Engine
+// Main Upfront Step Configuration Loop Engine
 function runSequentialTimingLoop(index) {
     clearGlobalTimeout();
     if (index >= sortedTasks.length) {
@@ -205,11 +219,13 @@ function runSequentialTimingLoop(index) {
     saveSession();
 }
 
-// --- Recursive Project Compilation Wizard ---
-function initiateProjectWizard(parentIndex) {
+// --- Recursive Multi-Tier Project Compilation Wizard ---
+function initiateProjectWizard(parentIndex, parentNameOverride = null, parentContextStack = []) {
+    const parentName = parentNameOverride || sortedTasks[parentIndex].name;
     currentProjectContext = {
         parentIndex: parentIndex,
-        parentName: sortedTasks[parentIndex].name,
+        parentName: parentName,
+        parentContextStack: parentContextStack,
         subTasks: [],
         step: 'subtask-input'
     };
@@ -250,7 +266,7 @@ function renderProjectWizardScreen() {
             <div id="projectBuilderPanel">
                 <h2>Define Sub-tasks for Project</h2>
                 <p>Parent Context: <strong>${currentProjectContext.parentName}</strong></p>
-                <textarea id="subtaskTextarea" rows="6" placeholder="Enter sub-tasks (one per line)... No file uploads allowed."></textarea>
+                <textarea id="subtaskTextarea" rows="6" placeholder="Enter sub-tasks (one per line)..."></textarea>
                 <div class="checkbox-container">
                     <label><input type="checkbox" id="subtaskSkipSort"> Skip sub-sorting trees</label>
                 </div>
@@ -318,9 +334,12 @@ function renderProjectWizardScreen() {
             clearGlobalTimeout();
             targetSub.estimatedTime = val;
             
+            // Recursive multi-tier nesting check (>15m)
             if (val > 15) {
-                alert(`Sub-task exceeds 15m. Nesting child sub-tier inside: ${targetSub.name}`);
-                targetSub.name = `${currentProjectContext.parentName}:${targetSub.name}`;
+                const nestedFullName = `${currentProjectContext.parentName}:${targetSub.name}`;
+                alert(`Sub-task exeeded 15m. Opening nested tier wizard for: ${nestedFullName}`);
+                targetSub.name = nestedFullName;
+                targetSub.isNestedParent = true;
             }
             currentProjectContext.subIndex++;
             renderProjectWizardScreen();
@@ -330,7 +349,8 @@ function renderProjectWizardScreen() {
         let listBuffer = "";
         currentProjectContext.subTaskObjects.forEach(s => {
             cumulativeSum += s.estimatedTime;
-            listBuffer += `<li>${currentProjectContext.parentName}:${s.name} (${s.estimatedTime}m)</li>`;
+            const displayName = s.name.startsWith(currentProjectContext.parentName) ? s.name : `${currentProjectContext.parentName}:${s.name}`;
+            listBuffer += `<li>${displayName} (${s.estimatedTime}m)</li>`;
         });
         container.innerHTML = `
             <div id="projectBuilderPanel">
@@ -361,7 +381,8 @@ function renderProjectWizardScreen() {
 function executeIsolatedProjectCSVDownload(projectName, subtasks) {
     let csv = "Subtask Target,Estimated Time (Min),Actual Time (Min)\n";
     subtasks.forEach(s => {
-        csv += `"${projectName}:${s.name}",${s.estimatedTime},0\n`;
+        const fullTaskName = s.name.startsWith(projectName) ? s.name : `${projectName}:${s.name}`;
+        csv += `"${fullTaskName}",${s.estimatedTime},0\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
@@ -387,7 +408,7 @@ function finalizeProjectFlattening(finalProjectTitle) {
     runSequentialTimingLoop(resumeIndex);
 }
 
-// --- Step 4: Master Dashboard Operations Pane ---
+// --- Master Dashboard Operations Pane ---
 function displaySortedTasks() {
     clearGlobalTimeout();
     document.getElementById('stopWorkingBtn').classList.add('hidden');
@@ -511,12 +532,11 @@ function executeFocusSession120Split() {
         currentTaskIndex = Math.max(0, sortedTasks.length - 1);
     }
     
-    alert(`Trimmed active configuration. Exported ${droppedTasks.length} tasks down to overflow manifestation CSV.`);
+    alert(`Trimmed active configuration. Exported ${droppedTasks.length} tasks to overflow CSV.`);
     masterSchedule = []; 
     displaySortedTasks();
 }
 
-// Exploded Project Hierarchy Dashboard Extension Router
 function renderProjectSummaryPane(parentName) {
     clearGlobalTimeout();
     const container = document.getElementById('dynamicContainer');
@@ -559,7 +579,6 @@ function renderProjectSummaryPane(parentName) {
     viewNode.appendChild(choicePanel);
 }
 
-// Anchors fixed absolute deadline values across execution track arrays
 function initializeAbsoluteScheduleTimeline() {
     overallStartTimestamp = Math.floor(Date.now() / 1000);
     let cumulativeSecondsOffset = 0;
@@ -571,7 +590,7 @@ function initializeAbsoluteScheduleTimeline() {
     });
 }
 
-// --- Step 5a & 5b: Mid-Session Checkpoint Interceptor Controls ---
+// --- Mid-Session Checkpoint Controls ---
 function startDeadlineSetting() {
     clearGlobalTimeout();
     document.getElementById('stopWorkingBtn').classList.remove('hidden');
@@ -583,7 +602,6 @@ function startDeadlineSetting() {
 
     const target = sortedTasks[currentTaskIndex];
 
-    // If task has pre-saved data and it's the very first task, auto-skip prompt
     if (target.estimatedTime > 0 && currentTaskIndex === 0) {
         startFocusScreen();
         return;
@@ -635,7 +653,7 @@ function recalculateDownstreamScheduleFailsafes() {
     }
 }
 
-// --- Step 6: Live Countdown Operations Control Window ---
+// --- Live Countdown Operations Control Window ---
 function startFocusScreen() {
     clearGlobalTimeout();
     document.getElementById('stopWorkingBtn').classList.remove('hidden');
@@ -666,14 +684,12 @@ function startFocusScreen() {
     function runEngineMetricsCalculationsUpdateTick() {
         const now = Math.floor(Date.now() / 1000);
         
-        // Time Remaining for Current Task
         const currentTaskRemainingSeconds = targetAbsoluteDeadlineTimestamp - now;
         const absCurrent = Math.abs(currentTaskRemainingSeconds);
         const cMin = Math.floor(absCurrent / 60);
         const cSec = absCurrent % 60;
         const currentSign = currentTaskRemainingSeconds >= 0 ? "" : "-";
         
-        // Time ahead/behind schedule so far
         const totalAllocatedTargetSecondsUpToNow = masterSchedule[currentTaskIndex] - overallStartTimestamp;
         const targetTimelineExpectedElapsed = overallStartTimestamp + totalAllocatedTargetSecondsUpToNow;
         const varianceSeconds = targetTimelineExpectedElapsed - now;
@@ -682,7 +698,6 @@ function startFocusScreen() {
         const vSec = absVar % 60;
         const scheduleStatusText = varianceSeconds >= 0 ? `${vMin}m ${vSec}s AHEAD of schedule` : `${vMin}m ${vSec}s BEHIND schedule`;
 
-        // Estimated Time Remaining
         let runningDownstreamTargetSecondsSum = 0;
         for (let i = currentTaskIndex; i < sortedTasks.length; i++) {
             runningDownstreamTargetSecondsSum += (sortedTasks[i].estimatedTime * 60);
@@ -706,8 +721,8 @@ function startFocusScreen() {
     if (timerInterval) clearInterval(timerInterval);
     timerInterval = setInterval(runEngineMetricsCalculationsUpdateTick, 1000);
 
-    // Done Next Execution Progression Click Hook
-    document.getElementById('btnDoneNext').onclick = () => {
+    // Done Next Execution Progression Click Hook (Logs to SQLite Backend)
+    document.getElementById('btnDoneNext').onclick = async () => {
         clearInterval(timerInterval);
         const now = Math.floor(Date.now() / 1000);
         
@@ -719,6 +734,9 @@ function startFocusScreen() {
         }
         
         target.actualTime = Math.max(1, Math.ceil(elapsedCalculationSeconds / 60));
+
+        // SQLite Logging Call
+        await logTaskCompletionToBackend(target.name, target.estimatedTime, target.actualTime);
 
         currentTaskIndex++;
         if (currentTaskIndex < sortedTasks.length) {
@@ -736,7 +754,7 @@ function startFocusScreen() {
     saveSession();
 }
 
-// --- Step 7b: Task List Queue Injection Module Screen ---
+// --- Task List Queue Injection Module Screen ---
 function startAddTask() {
     clearGlobalTimeout();
     document.getElementById('stopWorkingBtn').classList.add('hidden');
@@ -802,25 +820,69 @@ function startAddTask() {
     saveSession();
 }
 
-// --- Step 7c Action Route: Stop Working Execution Flow Trigger ---
+// --- Out-of-Order Completion Checklist Screen (Stop Working Event Handler) ---
 document.getElementById('stopWorkingBtn').onclick = () => {
     if (timerInterval) clearInterval(timerInterval);
+    document.getElementById('stopWorkingBtn').classList.add('hidden');
+    handleStopWorking();
+};
+
+function handleStopWorking() {
+    clearGlobalTimeout();
+    const container = document.getElementById('dynamicContainer');
     
-    if (document.getElementById('focusScreen') && currentTaskIndex < sortedTasks.length) {
-        const now = Math.floor(Date.now() / 1000);
-        let elapsedCalculationSeconds = 0;
-        if (currentTaskIndex === 0) {
-            elapsedCalculationSeconds = now - overallStartTimestamp;
-        } else {
-            elapsedCalculationSeconds = now - masterSchedule[currentTaskIndex - 1];
-        }
-        sortedTasks[currentTaskIndex].actualTime = Math.max(1, Math.ceil(elapsedCalculationSeconds / 60));
+    const uncompleted = sortedTasks.slice(currentTaskIndex);
+
+    if (uncompleted.length === 0) {
+        displayStatsScreen();
+        return;
     }
 
-    document.getElementById('stopWorkingBtn').classList.add('hidden');
-    executeRemainingTasksCSVExport();
-    displayStatsScreen();
-};
+    let checklistHTML = `
+        <h2>Select Completed Tasks</h2>
+        <p>Mark any remaining tasks you completed during this session:</p>
+        <form id="stopWorkingForm" style="text-align: left; margin: 20px 0;">
+    `;
+
+    uncompleted.forEach((task, idx) => {
+        const globalIdx = currentTaskIndex + idx;
+        checklistHTML += `
+            <div style="margin-bottom: 10px;">
+                <label>
+                    <input type="checkbox" name="completedTask" value="${globalIdx}">
+                    <strong>${task.name}</strong> (Est: ${task.estimatedTime}m)
+                </label>
+            </div>
+        `;
+    });
+
+    checklistHTML += `
+        </form>
+        <div class="choice-box-container">
+            <div id="btnConfirmStop" class="forced-choice-box" style="background:#e8f5e9;">Save Completed & Finalize</div>
+            <div id="btnExportRemainingCSV" class="forced-choice-box" style="background:#e3f2fd;">Download Remaining CSV</div>
+        </div>
+    `;
+
+    container.innerHTML = checklistHTML;
+
+    document.getElementById('btnConfirmStop').onclick = async () => {
+        const checkboxes = document.querySelectorAll('input[name="completedTask"]:checked');
+        const selectedIndices = Array.from(checkboxes).map(cb => parseInt(cb.value, 10));
+
+        for (let idx of selectedIndices) {
+            const task = sortedTasks[idx];
+            task.actualTime = task.estimatedTime; // Fallback estimate sync
+            await logTaskCompletionToBackend(task.name, task.estimatedTime, task.actualTime);
+        }
+
+        displayStatsScreen();
+    };
+
+    document.getElementById('btnExportRemainingCSV').onclick = () => {
+        executeRemainingTasksCSVExport();
+    };
+}
 
 function executeRemainingTasksCSVExport() {
     let csv = "Task Name,Estimated Time (Min),Actual Time (Min)\n";
@@ -835,7 +897,7 @@ function executeRemainingTasksCSVExport() {
     link.click();
 }
 
-// --- Step 8: Cumulative Evaluation Stats Screen view ---
+// --- Cumulative Evaluation Stats Screen View ---
 function displayStatsScreen() {
     clearGlobalTimeout();
     document.getElementById('stopWorkingBtn').classList.add('hidden');
@@ -921,7 +983,7 @@ function displayStatsScreen() {
         sortedTasks.forEach(t => {
             csv += `"${t.name.replace(/"/g, '""')}",${t.estimatedTime},${t.actualTime},${t.estimatedTime - t.actualTime}\n`;
         });
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const blob = new Blob([csv], { type: 'type: text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         link.download = "complete_session_metrics_log.csv";
@@ -983,5 +1045,5 @@ function mergeInteractive(left, right) {
     });
 }
 
-// Global Core Initialization Entry Event Hook
+// Global Initialization
 window.addEventListener('DOMContentLoaded', loadSession);
