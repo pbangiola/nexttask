@@ -1,136 +1,139 @@
 const express = require('express');
-const cors = require('cors');
 const path = require('path');
 const db = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// -----------------------------------------------------------------------------
-// ROUTES
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------
+// Session API Endpoints (Supporting script.js)
+// ----------------------------------------------------
 
-// GET ALL TASKS (Ordered by position ASC)
+// GET /api/session/:sessionId - Retrieve session state
+app.get('/api/session/:sessionId', (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const row = db.prepare('SELECT state FROM sessions WHERE session_id = ?').get(sessionId);
+    
+    if (!row) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    
+    res.json(JSON.parse(row.state));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/session/:sessionId - Sync session state to backend
+app.put('/api/session/:sessionId', (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const statePayload = JSON.stringify(req.body);
+
+    const stmt = db.prepare(`
+      INSERT INTO sessions (session_id, state, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(session_id) DO UPDATE SET
+        state = excluded.state,
+        updated_at = CURRENT_TIMESTAMP
+    `);
+    stmt.run(sessionId, statePayload);
+
+    res.json({ success: true, sessionId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/session/:sessionId - Clear session state
+app.delete('/api/session/:sessionId', (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    db.prepare('DELETE FROM sessions WHERE session_id = ?').run(sessionId);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/session/:sessionId/tasks/completed - Log completed tasks with metrics
+app.post('/api/session/:sessionId/tasks/completed', (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { taskName, estimatedTime, actualTimeMs } = req.body;
+
+    const stmt = db.prepare(`
+      INSERT INTO task_logs (session_id, task_name, estimated_time, actual_time_ms)
+      VALUES (?, ?, ?, ?)
+    `);
+    stmt.run(sessionId, taskName, estimatedTime || null, actualTimeMs || null);
+
+    res.status(201).json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/session/:sessionId/queue/prepend - Prepend task to session queue
+app.post('/api/session/:sessionId/queue/prepend', (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { task } = req.body;
+
+    const row = db.prepare('SELECT state FROM sessions WHERE session_id = ?').get(sessionId);
+    let state = row ? JSON.parse(row.state) : { queue: [] };
+
+    state.queue = state.queue || [];
+    state.queue.unshift(task);
+
+    const stmt = db.prepare(`
+      INSERT INTO sessions (session_id, state, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(session_id) DO UPDATE SET
+        state = excluded.state,
+        updated_at = CURRENT_TIMESTAMP
+    `);
+    stmt.run(sessionId, JSON.stringify(state));
+
+    res.json({ success: true, queue: state.queue });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------------------------------------------
+// Standard Task REST Endpoints
+// ----------------------------------------------------
+
 app.get('/api/tasks', (req, res) => {
   try {
-    const tasks = db.prepare('SELECT * FROM tasks ORDER BY position ASC, id ASC').all();
+    const tasks = db.prepare('SELECT * FROM tasks ORDER BY position ASC').all();
     res.json(tasks);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// CREATE NEW TASK
 app.post('/api/tasks', (req, res) => {
-  const { text } = req.body;
-  
-  if (!text || !text.trim()) {
-    return res.status(400).json({ error: 'Task text is required.' });
-  }
-
   try {
-    // Get the highest position currently in the list
-    const maxPosResult = db.prepare('SELECT MAX(position) AS maxPos FROM tasks').get();
-    const nextPosition = (maxPosResult.maxPos !== null) ? maxPosResult.maxPos + 1 : 0;
-    const now = new Date().toISOString();
-
-    const insertStmt = db.prepare(`
-      INSERT INTO tasks (text, completed, position, created_at, updated_at)
-      VALUES (?, 0, ?, ?, ?)
-    `);
-
-    const result = insertStmt.run(text.trim(), nextPosition, now, now);
-
-    const newTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(result.lastInsertRowid);
-    res.status(201).json(newTask);
+    const { id, text, position } = req.body;
+    const stmt = db.prepare('INSERT INTO tasks (id, text, position) VALUES (?, ?, ?)');
+    stmt.run(id, text, position || 0);
+    res.status(201).json({ id, text, position });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// UPDATE TASK STATUS OR TEXT
-app.patch('/api/tasks/:id', (req, res) => {
-  const { id } = req.params;
-  const { text, completed } = req.body;
-
-  try {
-    const existingTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-    if (!existingTask) {
-      return res.status(404).json({ error: 'Task not found.' });
-    }
-
-    const updatedText = text !== undefined ? text.trim() : existingTask.text;
-    const updatedCompleted = completed !== undefined ? (completed ? 1 : 0) : existingTask.completed;
-    const now = new Date().toISOString();
-
-    const updateStmt = db.prepare(`
-      UPDATE tasks 
-      SET text = ?, completed = ?, updated_at = ? 
-      WHERE id = ?
-    `);
-
-    updateStmt.run(updatedText, updatedCompleted, now, id);
-
-    const updatedTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-    res.json(updatedTask);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// Fallback route to serve index.html for single-page client routing
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// REORDER TASKS (Batch update positions)
-app.put('/api/tasks/reorder', (req, res) => {
-  const { orderedIds } = req.body; // Expects an array of IDs: [3, 1, 2]
-
-  if (!Array.isArray(orderedIds)) {
-    return res.status(400).json({ error: 'orderedIds array is required.' });
-  }
-
-  try {
-    const now = new Date().toISOString();
-    const updatePositionStmt = db.prepare(`
-      UPDATE tasks SET position = ?, updated_at = ? WHERE id = ?
-    `);
-
-    // Run batch updates inside a transaction for atomicity
-    const reorderTransaction = db.transaction((ids) => {
-      ids.forEach((id, index) => {
-        updatePositionStmt.run(index, now, id);
-      });
-    });
-
-    reorderTransaction(orderedIds);
-
-    const updatedTasks = db.prepare('SELECT * FROM tasks ORDER BY position ASC').all();
-    res.json(updatedTasks);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE TASK
-app.delete('/api/tasks/:id', (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const deleteStmt = db.prepare('DELETE FROM tasks WHERE id = ?');
-    const result = deleteStmt.run(id);
-
-    if (result.changes === 0) {
-      return res.status(404).json({ error: 'Task not found.' });
-    }
-
-    res.json({ success: true, id: Number(id) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// START SERVER
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
