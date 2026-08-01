@@ -18,6 +18,13 @@
             margin: 5px 0;
             padding: 8px 12px;
             cursor: pointer;
+            font-size: 15px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            background: #fff;
+        }
+        button:hover {
+            background: #f5f5f5;
         }
         input, textarea {
             margin: 5px 0;
@@ -27,16 +34,17 @@
             max-width: 400px;
             box-sizing: border-box;
         }
-        .checkbox-container, .upload-container {
+        .checkbox-container {
             margin: 15px 0;
-            padding: 10px;
-            border-radius: 4px;
         }
         .upload-container {
-            border: 1px dashed #ccc;
+            border: 2px dashed #ccc;
             background: #fafafa;
+            padding: 20px;
+            text-align: center;
+            border-radius: 6px;
+            margin-top: 20px;
         }
-        /* Side-by-side layout for explicit index inserting */
         .insertion-layout {
             display: flex;
             gap: 40px;
@@ -61,7 +69,23 @@
             border: 1px solid #e53935;
             color: #b71c1c;
             font-weight: bold;
+        }
+        #stopWorkingBtn:hover {
+            background-color: #ef9a9a;
+        }
+        .timeout-banner {
+            background: #fff3e0;
+            color: #e65100;
+            padding: 8px;
+            margin-bottom: 10px;
             border-radius: 4px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .hyperlink-style {
+            color: #0288d1;
+            text-decoration: underline;
+            cursor: pointer;
         }
     </style>
 </head>
@@ -91,28 +115,30 @@
     <!-- Step 3: Task Entry Screen -->
     <div id="taskInput" class="hidden">
         <h2>Enter Your Tasks</h2>
-        <textarea id="tasks" rows="10" cols="40" placeholder="Enter one task per line"></textarea>
+        <textarea id="tasksTextarea" rows="10" placeholder="Enter one task instruction entry per line..."></textarea>
         
         <div class="checkbox-container">
             <label style="display: flex; align-items: center; gap: 8px;">
                 <input type="checkbox" id="skipSortCheckbox" style="width: auto;"> Skip sorting (use current order)
             </label>
         </div>
-        <button id="startSort">Start Sorting</button>
+        <button id="btnSubmitText">Start Sorting</button>
 
         <div class="upload-container">
             <h3>Or Resume Previous Session</h3>
-            <input type="file" id="csvUpload" accept=".csv">
+            <input type="file" id="csvFileInput" accept=".csv">
         </div>
     </div>
 
+    <div id="dynamicContainer"></div>
+
     <div id="taskCompare" class="hidden">
         <h2>Which task comes first?</h2>
-        <button id="task1"></button>
-        <button id="task2"></button>
+        <div class="choice-box-container">
+            <div id="task1" class="forced-choice-box"></div>
+            <div id="task2" class="forced-choice-box"></div>
+        </div>
     </div>
-
-    <div id="dynamicContainer"></div>
 
     <script src="script.js"></script>
 </body>
