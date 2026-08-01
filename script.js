@@ -44,7 +44,7 @@ function getTotalAllocatedTime() {
     return sortedTasks.reduce((sum, task) => sum + (task.estimatedTime || 0), 0);
 }
 
-// --- Persistence Layer, Task Queue, & Analytics Sync ---
+// --- Persistence Layer, Task Queue, & User Analytics Sync ---
 async function saveSession() {
     const sessionState = {
         sortedTasks,
