@@ -1,6 +1,52 @@
 // --- Config ---
 const MAX_TASK_MINUTES = 20;
 
+// Holds the raw (pre-sort) task names so a mid-sort "restart this screen" can recover them
+let currentSortRawTasks = [];
+
+function showStartOverBtn() {
+    document.getElementById('startOverBtn')?.classList.remove('hidden');
+}
+
+function hideStartOverBtn() {
+    document.getElementById('startOverBtn')?.classList.add('hidden');
+}
+
+// Resets just the current step, without wiping the whole session
+function restartCurrentScreen() {
+    if (!document.getElementById('timeConstraintInput').classList.contains('hidden')) {
+        document.getElementById('availableTime').value = '';
+        document.getElementById('endConstraint').value = '';
+
+    } else if (!document.getElementById('taskInput').classList.contains('hidden')) {
+        document.getElementById('tasks').value = '';
+        document.getElementById('skipSortCheckbox').checked = false;
+
+    } else if (!document.getElementById('taskCompare').classList.contains('hidden')) {
+        // Mid-sorting: drop the in-progress sort, return to task entry with the list preserved
+        sortedTasks = [];
+        currentTaskIndex = 0;
+        document.getElementById('dynamicContainer').innerHTML = '';
+        document.getElementById('taskCompare').classList.add('hidden');
+        document.getElementById('tasks').value = currentSortRawTasks.join('\n');
+        document.getElementById('taskInput').classList.remove('hidden');
+
+    } else if (document.getElementById('timingGatewayScreen')) {
+        // Nothing entered yet on this screen - just re-render it
+        promptForUpfrontTimings();
+
+    } else if (document.getElementById('timingEntryScreen')) {
+        // Mid-estimating: clear any estimates entered so far, restart from the first task
+        for (let i = 1; i < sortedTasks.length; i++) {
+            sortedTasks[i].estimatedTime = 0;
+        }
+        runSequentialTimingInput(1);
+    }
+    // mode-select / work-choice screens have nothing to reset
+
+    saveSession();
+}
+
 // --- Session ID & Initialization ---
 let sessionId = localStorage.getItem('taskSorterSessionId');
 if (!sessionId) {
@@ -117,7 +163,10 @@ async function loadSession() {
         }
     }
 
-    if (!state) return;
+    if (!state) {
+        showStartOverBtn();
+        return;
+    }
 
     try {
         sortedTasks = state.sortedTasks || [];
@@ -218,14 +267,18 @@ function routeToStoredView(view) {
     switch (view) {
         case 'work-choice':
             document.getElementById('workChoiceStep')?.classList.remove('hidden');
+            showStartOverBtn();
             break;
         case 'time-constraint':
             document.getElementById('timeConstraintInput')?.classList.remove('hidden');
+            showStartOverBtn();
             break;
         case 'input':
             document.getElementById('taskInput')?.classList.remove('hidden');
+            showStartOverBtn();
             break;
         case 'focus':
+            hideStartOverBtn();
             if (deadline > nowSec || pausedSecondsRemaining > 0) {
                 startFocusScreen();
             } else {
@@ -233,16 +286,20 @@ function routeToStoredView(view) {
             }
             break;
         case 'deadline':
+            hideStartOverBtn();
             startDeadlineSetting();
             break;
         case 'add-task':
+            hideStartOverBtn();
             startAddTask();
             break;
         case 'completion':
+            hideStartOverBtn();
             displaySpareTime();
             break;
         case 'dashboard':
         default:
+            hideStartOverBtn();
             displaySortedTasks();
             break;
     }
@@ -253,16 +310,31 @@ function initApp() {
     document.getElementById('csvUpload')?.addEventListener('change', handleCSVUpload);
     document.getElementById('stopWorkingBtn')?.addEventListener('click', handleStopWorking);
 
+    document.getElementById('startOverBtn')?.addEventListener('click', async () => {
+        const restartCompletely = confirm(
+            "Click OK to completely restart (clear everything and start from the beginning).\nClick Cancel to just restart this screen."
+        );
+
+        if (restartCompletely) {
+            await clearSession();
+            window.location.reload();
+        } else {
+            restartCurrentScreen();
+        }
+    });
+
     document.getElementById('workBtn')?.addEventListener('click', () => {
         sessionStartTimestamp = Date.now();
         document.getElementById('modeSelect').classList.add('hidden');
         document.getElementById('workChoiceStep').classList.remove('hidden');
+        showStartOverBtn();
         saveSession();
     });
 
     document.getElementById('createNewListBtn')?.addEventListener('click', () => {
         document.getElementById('workChoiceStep').classList.add('hidden');
         document.getElementById('timeConstraintInput').classList.remove('hidden');
+        showStartOverBtn();
         saveSession();
     });
 
@@ -283,6 +355,7 @@ function initApp() {
         currentTaskIndex = 0;
 
         document.getElementById('workChoiceStep').classList.add('hidden');
+        hideStartOverBtn();
         saveSession();
 
         // No sorting, no questions - go straight into the first task.
@@ -305,6 +378,7 @@ function initApp() {
         
         const taskInputContainer = document.getElementById('taskInput');
         taskInputContainer.classList.remove('hidden');
+        showStartOverBtn();
         saveSession();
     });
 
@@ -333,6 +407,7 @@ function initApp() {
             saveSession();
             promptForUpfrontTimings();
         } else {
+            currentSortRawTasks = rawTasks;
             sortStartTime = Math.floor(Date.now() / 1000);
             startMergeSort(rawTasks);
         }
@@ -411,6 +486,7 @@ function promptForUpfrontTimings() {
     container.innerHTML = '';
 
     const gatewayScreen = document.createElement('div');
+    gatewayScreen.id = 'timingGatewayScreen';
     const question = document.createElement('h2');
     question.textContent = 'Do you want to set timings now?';
     gatewayScreen.appendChild(question);
@@ -446,6 +522,7 @@ function runSequentialTimingInput(index) {
     container.innerHTML = '';
 
     const timingScreen = document.createElement('div');
+    timingScreen.id = 'timingEntryScreen';
     const targetTask = sortedTasks[index];
 
     const title = document.createElement('h2');
@@ -493,6 +570,7 @@ function runSequentialTimingInput(index) {
 function displaySortedTasks() {
     document.getElementById('taskCompare').classList.add('hidden');
     document.getElementById('stopWorkingBtn').classList.add('hidden'); 
+    hideStartOverBtn();
     
     const container = document.getElementById('dynamicContainer');
     container.innerHTML = ''; 
@@ -579,6 +657,7 @@ function displaySortedTasks() {
 // Deadline Setup
 function startDeadlineSetting() {
     document.getElementById('stopWorkingBtn').classList.remove('hidden'); 
+    hideStartOverBtn();
 
     const nextTask = sortedTasks[currentTaskIndex];
     
@@ -838,6 +917,7 @@ function renderUncompletedChecklistScreen(uncompletedTasks) {
     });
 
     checkScreen.appendChild(form);
+    checkScreen.appendChild(submitBtn);
     container.appendChild(checkScreen);
 }
 
