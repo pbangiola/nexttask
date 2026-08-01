@@ -15,8 +15,8 @@
             display: none;
         }
         button {
-            margin: 5px;
-            padding: 12px 18px;
+            margin: 5px 0;
+            padding: 8px 12px;
             cursor: pointer;
             font-size: 15px;
             border-radius: 4px;
@@ -28,32 +28,11 @@
         }
         input, textarea {
             margin: 5px 0;
-            padding: 8px;
-            font-size: 14px;
+            padding: 6px;
+            display: block;
             width: 100%;
+            max-width: 400px;
             box-sizing: border-box;
-        }
-        .choice-box-container {
-            display: flex;
-            gap: 20px;
-            margin: 20px 0;
-        }
-        .forced-choice-box {
-            flex: 1;
-            padding: 25px;
-            border: 2px solid #333;
-            border-radius: 6px;
-            background: #fafafa;
-            text-align: center;
-            cursor: pointer;
-            font-size: 18px;
-            font-weight: bold;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            transition: background 0.2s, transform 0.1s;
-        }
-        .forced-choice-box:hover {
-            background: #f0f0f0;
-            transform: translateY(-2px);
         }
         .checkbox-container {
             margin: 15px 0;
@@ -78,6 +57,10 @@
             border-radius: 4px;
             background: #fff;
         }
+        .over-capacity {
+            color: #d32f2f;
+        }
+        /* Top right positioning for Stop Working */
         #stopWorkingBtn {
             position: absolute;
             top: 0;
@@ -111,13 +94,32 @@
 
     <h1>Task Sorter</h1>
     
-    <div id="taskInputContainer">
+    <!-- Step 1: Mode Selection -->
+    <div id="modeSelect">
+        <button id="workBtn">Work</button>
+        <button id="planBtn" disabled>Plan <i>(Coming Soon)</i></button>
+    </div>
+
+    <!-- NEW Step 2: Time & Constraint Entry Screen -->
+    <div id="timeConstraintInput" class="hidden">
+        <h2>Session Setup</h2>
+        <label for="availableTime">How much time do you have to work? (in minutes)</label>
+        <input type="number" id="availableTime" placeholder="e.g., 45" min="1">
+
+        <label for="endConstraint">What happens when this time is up?</label>
+        <input type="text" id="endConstraint" placeholder="e.g., class ends, leave for appointment">
+
+        <button id="timeConstraintNextBtn">Next</button>
+    </div>
+
+    <!-- Step 3: Task Entry Screen -->
+    <div id="taskInput" class="hidden">
         <h2>Enter Your Tasks</h2>
         <textarea id="tasksTextarea" rows="10" placeholder="Enter one task instruction entry per line..."></textarea>
         
         <div class="checkbox-container">
-            <label>
-                <input type="checkbox" id="skipSortCheckbox"> Skip sorting (use current order)
+            <label style="display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="skipSortCheckbox" style="width: auto;"> Skip sorting (use current order)
             </label>
         </div>
         <button id="btnSubmitText">Start Sorting</button>
