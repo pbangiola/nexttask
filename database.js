@@ -7,7 +7,7 @@ const dbPath = path.join(dataDir, 'task_sorter.db');
 
 const db = new Database(dbPath);
 
-// Initialize relational schema for active sessions and completed task stats
+// Initialize relational schema for sessions, completed tasks, and persistent uncompleted task queue
 db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
@@ -23,6 +23,16 @@ db.exec(`
         actual_minutes INTEGER NOT NULL,
         variance_minutes INTEGER NOT NULL,
         completed_at INTEGER NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS task_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        task_name TEXT NOT NULL,
+        estimated_minutes INTEGER DEFAULT 0,
+        sort_order INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
         FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
     );
 `);
@@ -44,7 +54,7 @@ const deleteSessionStmt = db.prepare(`
     DELETE FROM sessions WHERE id = ?;
 `);
 
-// Prepared statements for user task stats & history
+// Prepared statements for completed tasks log
 const logCompletedTaskStmt = db.prepare(`
     INSERT INTO completed_tasks (session_id, task_name, estimated_minutes, actual_minutes, variance_minutes, completed_at)
     VALUES (?, ?, ?, ?, ?, ?);
@@ -71,6 +81,23 @@ const getUserAggregateStatsStmt = db.prepare(`
         AVG(variance_minutes) as avg_variance_per_task
     FROM completed_tasks 
     WHERE session_id = ?;
+`);
+
+// Prepared statements for persistent uncompleted task queue
+const clearTaskQueueStmt = db.prepare(`
+    DELETE FROM task_queue WHERE session_id = ?;
+`);
+
+const insertQueuedTaskStmt = db.prepare(`
+    INSERT INTO task_queue (session_id, task_name, estimated_minutes, sort_order, created_at)
+    VALUES (?, ?, ?, ?, ?);
+`);
+
+const getQueuedTasksStmt = db.prepare(`
+    SELECT task_name, estimated_minutes, sort_order, created_at
+    FROM task_queue
+    WHERE session_id = ?
+    ORDER BY sort_order ASC;
 `);
 
 module.exports = {
@@ -100,5 +127,52 @@ module.exports = {
     },
     getUserAggregateStats: (sessionId) => {
         return getUserAggregateStatsStmt.get(sessionId);
+    },
+    // Replace current queue with new uncompleted task order (Prepend behavior handled before payload sent)
+    saveUncompletedQueue: (sessionId, tasks) => {
+        const transaction = db.transaction((id, taskList) => {
+            clearTaskQueueStmt.run(id);
+            const now = Date.now();
+            taskList.forEach((task, index) => {
+                const name = typeof task === 'string' ? task : task.name;
+                const est = (typeof task === 'object' && task.estimatedTime) ? task.estimatedTime : 0;
+                insertQueuedTaskStmt.run(id, name, est, index + 1, now);
+            });
+        });
+        transaction(sessionId, tasks);
+    },
+    // Prepend uncompleted tasks in front of existing queue in database
+    prependUncompletedTasks: (sessionId, uncompletedTasks) => {
+        const existingQueue = getQueuedTasksStmt.all(sessionId);
+        
+        // Merge: new uncompleted tasks first, followed by existing queue items
+        const mergedList = [];
+        
+        // Avoid duplicate task names if already in queue
+        const existingNames = new Set(existingQueue.map(q => q.task_name));
+        
+        uncompletedTasks.forEach(task => {
+            const name = typeof task === 'string' ? task : task.name;
+            const est = (typeof task === 'object' && task.estimatedTime) ? task.estimatedTime : 0;
+            mergedList.push({ name, estimatedTime: est });
+        });
+
+        existingQueue.forEach(item => {
+            if (!mergedList.some(m => m.name === item.task_name)) {
+                mergedList.push({ name: item.task_name, estimatedTime: item.estimated_minutes });
+            }
+        });
+
+        const transaction = db.transaction((id, list) => {
+            clearTaskQueueStmt.run(id);
+            const now = Date.now();
+            list.forEach((task, index) => {
+                insertQueuedTaskStmt.run(id, task.name, task.estimatedTime || 0, index + 1, now);
+            });
+        });
+        transaction(sessionId, mergedList);
+    },
+    getUncompletedQueue: (sessionId) => {
+        return getQueuedTasksStmt.all(sessionId);
     }
 };
