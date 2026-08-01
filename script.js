@@ -57,7 +57,7 @@ function getTotalAllocatedTime() {
     return sortedTasks.reduce((sum, task) => sum + (task.estimatedTime || 0), 0);
 }
 
-// --- Persistence Layer & User Analytics Sync ---
+// --- Persistence Layer, Task Queue, & User Analytics Sync ---
 async function saveSession() {
     const sessionState = {
         sortedTasks,
@@ -105,6 +105,9 @@ async function loadSession() {
         }
     }
 
+    // Check if there are saved uncompleted tasks in the master queue to populate the input box
+    await loadMasterTaskQueue();
+
     if (!state) return;
 
     try {
@@ -128,6 +131,37 @@ async function loadSession() {
         }
     } catch (e) {
         console.error("Error restoring session state:", e);
+    }
+}
+
+async function loadMasterTaskQueue() {
+    try {
+        const res = await fetch(`/api/session/${sessionId}/queue`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data.queue && data.queue.length > 0) {
+                const textarea = document.getElementById('tasks');
+                if (textarea && (!textarea.value || textarea.value.trim() === '')) {
+                    textarea.value = data.queue.map(q => q.task_name).join('\n');
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Failed to load master task queue from backend:", e);
+    }
+}
+
+async function saveUncompletedTasksToFrontOfQueue(uncompletedTasks) {
+    if (!uncompletedTasks || uncompletedTasks.length === 0) return;
+
+    try {
+        await fetch(`/api/session/${sessionId}/queue/prepend`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uncompletedTasks })
+        });
+    } catch (e) {
+        console.warn("Failed to prepend uncompleted tasks to server queue:", e);
     }
 }
 
@@ -811,6 +845,11 @@ function renderUncompletedChecklistScreen(uncompletedTasks) {
         const originallyCompleted = sortedTasks.slice(0, currentTaskIndex);
         sortedTasks = [...originallyCompleted, ...newlyCompleted, ...stillUncompleted];
         currentTaskIndex = originallyCompleted.length + newlyCompleted.length;
+
+        // Save remaining uncompleted tasks to the FRONT of the master queue
+        if (stillUncompleted.length > 0) {
+            await saveUncompletedTasksToFrontOfQueue(stillUncompleted);
+        }
 
         saveSession();
         finalizeStopWorkingSession();
