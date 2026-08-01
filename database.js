@@ -54,7 +54,7 @@ const deleteSessionStmt = db.prepare(`
     DELETE FROM sessions WHERE id = ?;
 `);
 
-// Prepared statements for completed tasks log
+// Prepared statements for user task stats & history
 const logCompletedTaskStmt = db.prepare(`
     INSERT INTO completed_tasks (session_id, task_name, estimated_minutes, actual_minutes, variance_minutes, completed_at)
     VALUES (?, ?, ?, ?, ?, ?);
