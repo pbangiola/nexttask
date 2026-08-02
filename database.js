@@ -37,7 +37,20 @@ db.exec(`
         FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
     );
 `);
-
+// One-time migration: older deployments' `sessions` table predates the `id` column.
+// SQLite can't ALTER a column into becoming a PRIMARY KEY, so rebuild if needed.
+const sessionCols = db.prepare(`PRAGMA table_info(sessions)`).all().map(c => c.name);
+if (!sessionCols.includes('id')) {
+    db.exec(`ALTER TABLE sessions RENAME TO sessions_old;`);
+    db.exec(`
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            updated_at INTEGER NOT NULL,
+            state_json TEXT NOT NULL
+        );
+    `);
+    db.exec(`DROP TABLE sessions_old;`);
+}
 // Migration for deployments where task_queue already existed without elapsed_ms
 try {
     db.exec(`ALTER TABLE task_queue ADD COLUMN elapsed_ms INTEGER DEFAULT 0;`);
