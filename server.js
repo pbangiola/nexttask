@@ -75,22 +75,20 @@ app.put('/api/session/:id/queue', (req, res) => {
     }
 });
 
-// Prepend uncompleted tasks to front of existing master task queue
-app.post('/api/session/:id/queue/prepend', (req, res) => {
+// Remove a single task from the pending queue (called whenever a task is completed)
+app.post('/api/session/:id/queue/remove', (req, res) => {
     try {
         const sessionId = req.params.id;
-        const { uncompletedTasks } = req.body;
+        const { taskName } = req.body;
 
-        if (!Array.isArray(uncompletedTasks)) {
-            return res.status(400).json({ error: 'uncompletedTasks must be an array' });
+        if (!taskName) {
+            return res.status(400).json({ error: 'taskName is required' });
         }
 
-        db.prependUncompletedTasks(sessionId, uncompletedTasks);
-        const updatedQueue = db.getUncompletedQueue(sessionId);
-
-        res.json({ success: true, queue: updatedQueue });
+        db.removeFromQueue(sessionId, taskName);
+        res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to prepend uncompleted tasks' });
+        res.status(500).json({ error: 'Failed to remove task from queue' });
     }
 });
 

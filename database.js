@@ -31,11 +31,19 @@ db.exec(`
         session_id TEXT NOT NULL,
         task_name TEXT NOT NULL,
         estimated_minutes INTEGER DEFAULT 0,
+        elapsed_ms INTEGER DEFAULT 0,
         sort_order INTEGER NOT NULL,
         created_at INTEGER NOT NULL,
         FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
     );
 `);
+
+// Migration for deployments where task_queue already existed without elapsed_ms
+try {
+    db.exec(`ALTER TABLE task_queue ADD COLUMN elapsed_ms INTEGER DEFAULT 0;`);
+} catch (e) {
+    // Column already exists - safe to ignore
+}
 
 // Prepared statements for active sessions
 const saveSessionStmt = db.prepare(`
@@ -88,13 +96,17 @@ const clearTaskQueueStmt = db.prepare(`
     DELETE FROM task_queue WHERE session_id = ?;
 `);
 
+const deleteQueuedTaskByNameStmt = db.prepare(`
+    DELETE FROM task_queue WHERE session_id = ? AND task_name = ?;
+`);
+
 const insertQueuedTaskStmt = db.prepare(`
-    INSERT INTO task_queue (session_id, task_name, estimated_minutes, sort_order, created_at)
-    VALUES (?, ?, ?, ?, ?);
+    INSERT INTO task_queue (session_id, task_name, estimated_minutes, elapsed_ms, sort_order, created_at)
+    VALUES (?, ?, ?, ?, ?, ?);
 `);
 
 const getQueuedTasksStmt = db.prepare(`
-    SELECT task_name, estimated_minutes, sort_order, created_at
+    SELECT task_name, estimated_minutes, elapsed_ms, sort_order, created_at
     FROM task_queue
     WHERE session_id = ?
     ORDER BY sort_order ASC;
@@ -128,7 +140,8 @@ module.exports = {
     getUserAggregateStats: (sessionId) => {
         return getUserAggregateStatsStmt.get(sessionId);
     },
-    // Replace current queue with new uncompleted task order (Prepend behavior handled before payload sent)
+    // Full replace: the queue always mirrors the current pending task set,
+    // kept in sync continuously rather than merged/pushed at stop-time.
     saveUncompletedQueue: (sessionId, tasks) => {
         const transaction = db.transaction((id, taskList) => {
             clearTaskQueueStmt.run(id);
@@ -136,41 +149,15 @@ module.exports = {
             taskList.forEach((task, index) => {
                 const name = typeof task === 'string' ? task : task.name;
                 const est = (typeof task === 'object' && task.estimatedTime) ? task.estimatedTime : 0;
-                insertQueuedTaskStmt.run(id, name, est, index + 1, now);
+                const elapsed = (typeof task === 'object' && task.elapsedMs) ? task.elapsedMs : 0;
+                insertQueuedTaskStmt.run(id, name, est, elapsed, index + 1, now);
             });
         });
         transaction(sessionId, tasks);
     },
-    // Prepend uncompleted tasks in front of existing queue in database
-    prependUncompletedTasks: (sessionId, uncompletedTasks) => {
-        const existingQueue = getQueuedTasksStmt.all(sessionId);
-        
-        // Merge: new uncompleted tasks first, followed by existing queue items
-        const mergedList = [];
-        
-        // Avoid duplicate task names if already in queue
-        const existingNames = new Set(existingQueue.map(q => q.task_name));
-        
-        uncompletedTasks.forEach(task => {
-            const name = typeof task === 'string' ? task : task.name;
-            const est = (typeof task === 'object' && task.estimatedTime) ? task.estimatedTime : 0;
-            mergedList.push({ name, estimatedTime: est });
-        });
-
-        existingQueue.forEach(item => {
-            if (!mergedList.some(m => m.name === item.task_name)) {
-                mergedList.push({ name: item.task_name, estimatedTime: item.estimated_minutes });
-            }
-        });
-
-        const transaction = db.transaction((id, list) => {
-            clearTaskQueueStmt.run(id);
-            const now = Date.now();
-            list.forEach((task, index) => {
-                insertQueuedTaskStmt.run(id, task.name, task.estimatedTime || 0, index + 1, now);
-            });
-        });
-        transaction(sessionId, mergedList);
+    // Remove a single task from the pending queue by name (called on completion)
+    removeFromQueue: (sessionId, taskName) => {
+        deleteQueuedTaskByNameStmt.run(sessionId, taskName);
     },
     getUncompletedQueue: (sessionId) => {
         return getQueuedTasksStmt.all(sessionId);

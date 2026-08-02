@@ -12,6 +12,75 @@ function hideStartOverBtn() {
     document.getElementById('startOverBtn')?.classList.add('hidden');
 }
 
+// Shows a three-option overlay: restart just the current step, restart the
+// whole session, or cancel and return to whatever was on screen.
+function showStartOverPrompt() {
+    if (document.getElementById('startOverModal')) return; // already open
+
+    const overlay = document.createElement('div');
+    overlay.id = 'startOverModal';
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(0,0,0,0.4)';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.zIndex = '1000';
+
+    const box = document.createElement('div');
+    box.style.backgroundColor = '#fff';
+    box.style.padding = '20px';
+    box.style.borderRadius = '8px';
+    box.style.maxWidth = '320px';
+    box.style.width = '85%';
+    box.style.textAlign = 'center';
+
+    const msg = document.createElement('p');
+    msg.textContent = 'What would you like to do?';
+    msg.style.fontWeight = 'bold';
+    box.appendChild(msg);
+
+    const restartStepBtn = document.createElement('button');
+    restartStepBtn.textContent = 'Restart This Step';
+    restartStepBtn.style.display = 'block';
+    restartStepBtn.style.width = '100%';
+    restartStepBtn.style.margin = '8px 0';
+    restartStepBtn.addEventListener('click', () => {
+        overlay.remove();
+        restartCurrentScreen();
+    });
+    box.appendChild(restartStepBtn);
+
+    const restartAllBtn = document.createElement('button');
+    restartAllBtn.textContent = 'Restart From the Beginning';
+    restartAllBtn.style.display = 'block';
+    restartAllBtn.style.width = '100%';
+    restartAllBtn.style.margin = '8px 0';
+    restartAllBtn.addEventListener('click', async () => {
+        overlay.remove();
+        await clearSession();
+        window.location.reload();
+    });
+    box.appendChild(restartAllBtn);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.display = 'block';
+    cancelBtn.style.width = '100%';
+    cancelBtn.style.margin = '8px 0';
+    cancelBtn.style.backgroundColor = '#eceff1';
+    cancelBtn.addEventListener('click', () => {
+        overlay.remove();
+    });
+    box.appendChild(cancelBtn);
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+}
+
 // Resets just the current step, without wiping the whole session
 function restartCurrentScreen() {
     if (!document.getElementById('timeConstraintInput').classList.contains('hidden')) {
@@ -164,7 +233,6 @@ async function loadSession() {
     }
 
     if (!state) {
-        showStartOverBtn();
         return;
     }
 
@@ -205,17 +273,38 @@ async function fetchExistingQueue() {
     return [];
 }
 
-async function saveUncompletedTasksToFrontOfQueue(uncompletedTasks) {
-    if (!uncompletedTasks || uncompletedTasks.length === 0) return;
+// Full replace: pushes the current pending (not-yet-completed) task list to the
+// backend queue, including each task's elapsed time so far. Called whenever the
+// pending set changes structurally (list finalized, task added).
+async function syncPendingQueueToBackend() {
+    const pending = sortedTasks.slice(currentTaskIndex).map(task => ({
+        name: task.name,
+        estimatedTime: task.estimatedTime || 0,
+        elapsedMs: task.actualTimeMs || 0
+    }));
 
     try {
-        await fetch(`/api/session/${sessionId}/queue/prepend`, {
-            method: 'POST',
+        await fetch(`/api/session/${sessionId}/queue`, {
+            method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ uncompletedTasks })
+            body: JSON.stringify({ tasks: pending })
         });
     } catch (e) {
-        console.warn("Failed to prepend uncompleted tasks to server queue:", e);
+        console.warn("Failed to sync pending queue to backend:", e);
+    }
+}
+
+// Removes a single task from the backend's pending queue. Called any time a
+// task is completed, so the queue never has to be reconciled in one big batch.
+async function removeTaskFromQueue(taskName) {
+    try {
+        await fetch(`/api/session/${sessionId}/queue/remove`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskName })
+        });
+    } catch (e) {
+        console.warn("Failed to remove task from server queue:", e);
     }
 }
 
@@ -310,18 +399,7 @@ function initApp() {
     document.getElementById('csvUpload')?.addEventListener('change', handleCSVUpload);
     document.getElementById('stopWorkingBtn')?.addEventListener('click', handleStopWorking);
 
-    document.getElementById('startOverBtn')?.addEventListener('click', async () => {
-        const restartCompletely = confirm(
-            "Click OK to completely restart (clear everything and start from the beginning).\nClick Cancel to just restart this screen."
-        );
-
-        if (restartCompletely) {
-            await clearSession();
-            window.location.reload();
-        } else {
-            restartCurrentScreen();
-        }
-    });
+    document.getElementById('startOverBtn')?.addEventListener('click', showStartOverPrompt);
 
     document.getElementById('workBtn')?.addEventListener('click', () => {
         sessionStartTimestamp = Date.now();
@@ -349,7 +427,7 @@ function initApp() {
         sortedTasks = queue.map(q => ({
             name: q.task_name,
             estimatedTime: q.estimated_minutes || 0,
-            actualTimeMs: 0,
+            actualTimeMs: q.elapsed_ms || 0,
             timestamps: { created: Date.now(), started: null, completed: null }
         }));
         currentTaskIndex = 0;
@@ -405,6 +483,7 @@ function initApp() {
             }));
             currentTaskIndex = 0;
             saveSession();
+            syncPendingQueueToBackend();
             promptForUpfrontTimings();
         } else {
             currentSortRawTasks = rawTasks;
@@ -474,6 +553,7 @@ function handleCSVUpload(event) {
         currentTaskIndex = runningCompletedCount; 
         
         saveSession();
+        syncPendingQueueToBackend();
         displaySortedTasks();
     };
     reader.readAsText(file);
@@ -748,6 +828,7 @@ function startFocusScreen() {
         spareTime += timeDifference;
 
         logTaskCompletionToBackend(currentTask);
+        removeTaskFromQueue(currentTask.name);
 
         pausedSecondsRemaining = 0;
         currentTaskIndex++;
@@ -814,7 +895,7 @@ function startFocusScreen() {
 }
 
 // Stop Working routine & checklist verification
-function handleStopWorking() {
+async function handleStopWorking() {
     clearInterval(timerInterval);
     
     if (document.getElementById('focusScreen') && currentTaskIndex < sortedTasks.length) {
@@ -832,6 +913,10 @@ function handleStopWorking() {
     }
 
     document.getElementById('stopWorkingBtn').classList.add('hidden');
+
+    // Queue now reflects whatever's genuinely still pending - this also
+    // drops the task just finished above and refreshes any estimate changes.
+    await syncPendingQueueToBackend();
 
     const uncompleted = sortedTasks.slice(currentTaskIndex);
 
@@ -899,6 +984,7 @@ function renderUncompletedChecklistScreen(uncompletedTasks) {
                 if (!task.timestamps.started) task.timestamps.started = nowMs;
                 newlyCompleted.push(task);
                 await logTaskCompletionToBackend(task);
+                await removeTaskFromQueue(task.name);
             } else {
                 stillUncompleted.push(task);
             }
@@ -907,10 +993,6 @@ function renderUncompletedChecklistScreen(uncompletedTasks) {
         const originallyCompleted = sortedTasks.slice(0, currentTaskIndex);
         sortedTasks = [...originallyCompleted, ...newlyCompleted, ...stillUncompleted];
         currentTaskIndex = originallyCompleted.length + newlyCompleted.length;
-
-        if (stillUncompleted.length > 0) {
-            await saveUncompletedTasksToFrontOfQueue(stillUncompleted);
-        }
 
         saveSession();
         finalizeStopWorkingSession();
@@ -1062,6 +1144,7 @@ function startAddTask() {
         const arrayInsertionIndex = targetSlot - 1; 
 
         sortedTasks.splice(arrayInsertionIndex, 0, newTaskObj);
+        syncPendingQueueToBackend();
         
         // If user inserted the new task as current top priority, prompt for time estimate immediately
         if (arrayInsertionIndex === currentTaskIndex) {
@@ -1203,6 +1286,7 @@ function startMergeSort(array) {
         currentTaskIndex = 1; 
 
         saveSession();
+        syncPendingQueueToBackend();
         promptForUpfrontTimings();
     });
 }
