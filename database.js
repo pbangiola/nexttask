@@ -37,21 +37,88 @@ db.exec(`
         FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
     );
 `);
-// One-time migration: older deployments' `sessions` table predates the `id` column.
-// SQLite can't ALTER a column into becoming a PRIMARY KEY, so rebuild if needed.
-const sessionCols = db.prepare(`PRAGMA table_info(sessions)`).all().map(c => c.name);
-if (!sessionCols.includes('id')) {
-    db.exec(`ALTER TABLE sessions RENAME TO sessions_old;`);
-    db.exec(`
-        CREATE TABLE sessions (
-            id TEXT PRIMARY KEY,
-            updated_at INTEGER NOT NULL,
-            state_json TEXT NOT NULL
-        );
-    `);
-    db.exec(`DROP TABLE sessions_old;`);
+
+// --- Defensive schema migrations -------------------------------------------
+// Older deployments' database files may predate columns added since. Rather
+// than patching one missing-column crash at a time, each table below is
+// checked against its expected column set on every boot. If anything is
+// missing, the table is rebuilt from scratch. These checks are cheap and are
+// no-ops once a table's schema is already correct, so they're safe to leave
+// in permanently.
+//
+// NOTE: rebuilding drops any existing rows in the affected table. If you
+// need to preserve old data, capture it (e.g. via PRAGMA table_info + a
+// manual SELECT/INSERT copy) before the DROP TABLE calls below run.
+
+function rebuildIfSchemaMismatch(tableName, expectedColumns, createTableSql) {
+    let existingColumns;
+    try {
+        existingColumns = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
+    } catch (e) {
+        existingColumns = [];
+    }
+
+    const tableExists = existingColumns.length > 0;
+    const hasAllColumns = expectedColumns.every(col => existingColumns.includes(col));
+
+    if (tableExists && !hasAllColumns) {
+        console.log(`[migration] Rebuilding "${tableName}" - missing columns: ${expectedColumns.filter(c => !existingColumns.includes(c)).join(', ')}`);
+        db.exec(`DROP TABLE IF EXISTS ${tableName};`);
+        db.exec(createTableSql);
+    }
 }
+
+// `sessions` predates the `id` column in some deployments. SQLite can't
+// ALTER a column into becoming a PRIMARY KEY, so this always rebuilds via
+// DROP + CREATE rather than ALTER TABLE.
+rebuildIfSchemaMismatch(
+    'sessions',
+    ['id', 'updated_at', 'state_json'],
+    `CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        updated_at INTEGER NOT NULL,
+        state_json TEXT NOT NULL
+    );`
+);
+
+// `completed_tasks` predates several columns (e.g. actual_minutes) in some
+// deployments.
+rebuildIfSchemaMismatch(
+    'completed_tasks',
+    ['id', 'session_id', 'task_name', 'estimated_minutes', 'actual_minutes', 'variance_minutes', 'completed_at'],
+    `CREATE TABLE completed_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        task_name TEXT NOT NULL,
+        estimated_minutes INTEGER NOT NULL,
+        actual_minutes INTEGER NOT NULL,
+        variance_minutes INTEGER NOT NULL,
+        completed_at INTEGER NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );`
+);
+
+// `task_queue` - covered by the elapsed_ms ALTER TABLE below for the common
+// case, but checked here too in case older deployments are missing other
+// columns beyond elapsed_ms.
+rebuildIfSchemaMismatch(
+    'task_queue',
+    ['id', 'session_id', 'task_name', 'estimated_minutes', 'elapsed_ms', 'sort_order', 'created_at'],
+    `CREATE TABLE task_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        task_name TEXT NOT NULL,
+        estimated_minutes INTEGER DEFAULT 0,
+        elapsed_ms INTEGER DEFAULT 0,
+        sort_order INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );`
+);
+
 // Migration for deployments where task_queue already existed without elapsed_ms
+// (kept as a fast-path; rebuildIfSchemaMismatch above already covers this case,
+// but ALTER TABLE ADD COLUMN preserves existing rows, which DROP+CREATE does not).
 try {
     db.exec(`ALTER TABLE task_queue ADD COLUMN elapsed_ms INTEGER DEFAULT 0;`);
 } catch (e) {
