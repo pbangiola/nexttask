@@ -1,188 +1,112 @@
-// ============================================================================
-// PERSISTENCE & DATA LAYER
-// ============================================================================
-async function saveSession() {
-    const sessionState = {
-        sortedTasks,
-        currentTaskIndex,
-        deadline,
-        spareTime,
-        taskStartTimestamp,
-        pausedSecondsRemaining,
-        hasHardstop,
-        totalAvailableTime,
-        endConstraint,
-        sessionStartTimestamp,
-        currentStepStartTimestamp,
-        activeView: getActiveViewContext()
+/**
+ * api.js - Database Schema & Backend Sync API
+ * Handlers for users, projects, tasks, and frozen session records.
+ */
+
+const API = {
+  // SQL Schema Definition for Backend Database Setup
+  schemaSQL: `
+    -- 1. Users
+    CREATE TABLE IF NOT EXISTS users (
+        user_id VARCHAR(64) PRIMARY KEY,
+        email VARCHAR(255) NULL,
+        first_login_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 2. Projects
+    CREATE TABLE IF NOT EXISTS projects (
+        project_id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) REFERENCES users(user_id) ON DELETE CASCADE,
+        project_name VARCHAR(255) NOT NULL,
+        parent_project_id VARCHAR(64) NULL REFERENCES projects(project_id) ON DELETE SET NULL
+    );
+
+    -- 3. Master Tasks Store
+    CREATE TABLE IF NOT EXISTS tasks (
+        task_id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) REFERENCES users(user_id) ON DELETE CASCADE,
+        project_id VARCHAR(64) NULL REFERENCES projects(project_id) ON DELETE SET NULL,
+        task_title TEXT NOT NULL,
+        list_position INT DEFAULT 0,
+        estimated_minutes INT DEFAULT 10,
+        accumulated_duration_ms BIGINT DEFAULT 0,
+        is_completed BOOLEAN DEFAULT FALSE,
+        completed_at TIMESTAMP NULL
+    );
+
+    -- 4. Sessions (Frozen Summaries)
+    CREATE TABLE IF NOT EXISTS sessions (
+        session_id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) REFERENCES users(user_id) ON DELETE CASCADE,
+        session_start_at TIMESTAMP NOT NULL,
+        session_end_at TIMESTAMP NULL,
+        time_available_minutes INT NULL,
+        stop_reason_text TEXT NULL,
+        hard_stop_time TIMESTAMP NULL,
+        soft_stop_time TIMESTAMP NULL,
+        est_time_total_minutes INT DEFAULT 0,
+        actual_time_total_minutes INT DEFAULT 0,
+        session_delta_minutes INT DEFAULT 0,
+        tasks_count INT DEFAULT 0,
+        tasks_completed_count INT DEFAULT 0,
+        tasks_uncompleted_count INT DEFAULT 0,
+        is_completed BOOLEAN DEFAULT FALSE
+    );
+
+    -- 5. Session Tasks Junction
+    CREATE TABLE IF NOT EXISTS session_tasks (
+        session_id VARCHAR(64) REFERENCES sessions(session_id) ON DELETE CASCADE,
+        task_id VARCHAR(64) REFERENCES tasks(task_id) ON DELETE CASCADE,
+        session_order INT NOT NULL,
+        PRIMARY KEY (session_id, task_id)
+    );
+  `,
+
+  /**
+   * Fetch active user tasks ordered by list_position
+   */
+  async getTasks(userId, projectId = null) {
+    const url = projectId 
+      ? `/api/tasks?user_id=${userId}&project_id=${projectId}`
+      : `/api/tasks?user_id=${userId}`;
+    
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to load tasks');
+    return await response.json();
+  },
+
+  /**
+   * Update task order after merge sort or reordering on frontend
+   * @param {Array<string>} orderedTaskIds - Array of task_id strings in sorted order
+   */
+  async updateTaskOrder(userId, orderedTaskIds) {
+    const payload = {
+      user_id: userId,
+      order: orderedTaskIds.map((id, index) => ({ task_id: id, list_position: index }))
     };
 
-    localStorage.setItem('taskSorterSession_fallback', JSON.stringify(sessionState));
-
-    try {
-        await fetch(`/api/session/${sessionId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(sessionState)
-        });
-    } catch (e) {
-        console.warn("Backend sync failed, state preserved in browser cache:", e);
-    }
-}
-
-async function loadSession() {
-    let state = null;
-    try {
-        const res = await fetch(`/api/session/${sessionId}`);
-        if (res.ok) state = await res.json();
-    } catch (e) {
-        console.warn("Could not reach backend, checking browser cache...", e);
-    }
-
-    if (!state) {
-        const saved = localStorage.getItem('taskSorterSession_fallback');
-        if (saved) {
-            try { state = JSON.parse(saved); } catch (e) {}
-        }
-    }
-
-    if (!state) return;
-
-    try {
-        sortedTasks = state.sortedTasks || [];
-        currentTaskIndex = state.currentTaskIndex || 0;
-        deadline = state.deadline || 0;
-        spareTime = state.spareTime || 0;
-        taskStartTimestamp = state.taskStartTimestamp || 0;
-        pausedSecondsRemaining = state.pausedSecondsRemaining || 0;
-        hasHardstop = state.hasHardstop || false;
-        totalAvailableTime = state.totalAvailableTime || 0;
-        endConstraint = state.endConstraint || "";
-        sessionStartTimestamp = state.sessionStartTimestamp || null;
-        currentStepStartTimestamp = state.currentStepStartTimestamp || null;
-
-        if (state.activeView && state.activeView !== 'mode-select') {
-            document.getElementById('modeSelect')?.classList.add('hidden');
-            document.getElementById('hardstopChoiceStep')?.classList.add('hidden');
-            document.getElementById('timeConstraintInput')?.classList.add('hidden');
-            document.getElementById('taskInput')?.classList.add('hidden');
-
-            routeToStoredView(state.activeView);
-        }
-    } catch (e) {
-        console.error("Error restoring session state:", e);
-    }
-}
-
-async function fetchExistingQueue() {
-    try {
-        const res = await fetch(`/api/session/${sessionId}/queue`);
-        if (res.ok) {
-            const data = await res.json();
-            return data.queue || [];
-        }
-    } catch (e) {
-        console.warn("Failed to load existing task list from backend:", e);
-    }
-    return [];
-}
-
-async function syncPendingQueueToBackend() {
-    const pending = sortedTasks.slice(currentTaskIndex).map(task => ({
-        name: task.name,
-        estimatedTime: task.estimatedTime || 0,
-        elapsedMs: task.actualTimeMs || 0
-    }));
-
-    try {
-        await fetch(`/api/session/${sessionId}/queue`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tasks: pending })
-        });
-    } catch (e) {
-        console.warn("Failed to sync pending queue to backend:", e);
-    }
-}
-
-async function removeTaskFromQueue(taskName) {
-    try {
-        await fetch(`/api/session/${sessionId}/queue/remove`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskName })
-        });
-    } catch (e) {
-        console.warn("Failed to remove task from server queue:", e);
-    }
-}
-
-async function clearSession() {
-    try {
-        await fetch(`/api/session/${sessionId}`, { method: 'DELETE' });
-    } catch (e) {
-        console.error("Failed to delete session on server:", e);
-    }
-    localStorage.removeItem('taskSorterSessionId');
-    localStorage.removeItem('taskSorterSession_fallback');
-}
-
-async function logTaskCompletionToBackend(task) {
-    try {
-        await fetch(`/api/session/${sessionId}/tasks/completed`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                taskName: task.name,
-                estimatedMinutes: task.estimatedTime || 0,
-                actualMinutes: Math.round((task.actualTimeMs || 0) / 60000),
-                completedAt: task.timestamps?.completed || Date.now()
-            })
-        });
-    } catch (e) {
-        console.warn("Failed to push completed task log to backend:", e);
-    }
-}
-
-// File Exports
-function downloadAllTaskFiles() {
-    exportCompletedTasksCSV();
-    exportUncompletedTasksTXT();
-}
-
-function exportCompletedTasksCSV() {
-    const completed = sortedTasks.slice(0, currentTaskIndex);
-    if (completed.length === 0) return;
-
-    let csvContent = "Task Name,Estimated Time (Min),Actual Time (Min),Difference (Min)\n";
-    completed.forEach(task => {
-        const actualMinutes = getActualMinutes(task);
-        const diff = task.estimatedTime - actualMinutes;
-        const sanitizedName = `"${task.name.replace(/"/g, '""')}"`;
-        csvContent += `${sanitizedName},${task.estimatedTime},${actualMinutes},${diff}\n`;
+    const response = await fetch('/api/tasks/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     });
+    return response.ok;
+  },
 
-    const filename = `completed_tasks_${getFormattedDateTimeForFilename()}.csv`;
-    triggerFileDownload(csvContent, filename, 'text/csv;charset=utf-8;');
-}
-
-function exportUncompletedTasksTXT() {
-    const uncompleted = sortedTasks.slice(currentTaskIndex);
-    if (uncompleted.length === 0) return;
-
-    let txtContent = `Uncompleted Tasks\n--------------------------------------------------\n\n`;
-    uncompleted.forEach((task, idx) => {
-        txtContent += `${idx + 1}. ${task.name}\n`;
+  /**
+   * Push frozen session summary from frontend to backend on session end
+   * @param {Object} sessionSummary - Immutable calculations computed by state.js
+   */
+  async saveSessionSummary(sessionSummary) {
+    const response = await fetch('/api/sessions/end', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sessionSummary)
     });
+    return await response.json();
+  }
+};
 
-    const filename = `uncompleted_tasks_${getFormattedDateTimeForFilename()}.txt`;
-    triggerFileDownload(txtContent, filename, 'text/plain;charset=utf-8;');
-}
-
-function triggerFileDownload(content, filename, mimeType) {
-    const blob = new Blob([content], { type: mimeType });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = filename;
-    link.click();
+if (typeof module !== 'undefined') {
+  module.exports = { API };
 }
