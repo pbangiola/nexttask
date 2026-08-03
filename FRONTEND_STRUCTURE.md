@@ -18,3 +18,7 @@ This is a first-pass structural refactor. The feature files intentionally remain
 - `js/app.js` — event listeners and initialization
 
 `script.js` is now a harmless compatibility stub. `script.original.js` contains the pre-refactor source.
+
+## Railway configuration
+
+`js/config.js` now owns the backend base URL. Replace its placeholder with the Railway public domain. See `RAILWAY_SETUP.md` for deployment steps.
