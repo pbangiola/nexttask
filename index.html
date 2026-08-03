@@ -14,14 +14,29 @@
         .hidden {
             display: none;
         }
-        button {
+        .btn {
             margin: 5px 0;
-            padding: 8px 12px;
+            padding: 8px 14px;
             cursor: pointer;
+            background-color: #1976d2;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        .btn-secondary {
+            background-color: #eceff1;
+            color: #37474f;
+            border: 1px solid #cfd8dc;
+        }
+        .btn-full {
+            display: block;
+            width: 100%;
+            margin: 8px 0;
         }
         input, textarea {
             margin: 5px 0;
-            padding: 6px;
+            padding: 8px;
             display: block;
             width: 100%;
             max-width: 400px;
@@ -36,7 +51,6 @@
             border: 1px dashed #ccc;
             background: #fafafa;
         }
-        /* Side-by-side layout for explicit index inserting */
         .insertion-layout {
             display: flex;
             gap: 40px;
@@ -49,10 +63,27 @@
             border-radius: 4px;
             background: #fff;
         }
+        .choice-container {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .choice-box {
+            flex: 1;
+            padding: 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background-color 0.2s;
+        }
+        .choice-box:hover {
+            border-color: #1976d2;
+            background-color: #f5f5f5;
+        }
         .over-capacity {
             color: #d32f2f;
         }
-        /* Top right positioning for Stop Working */
         #stopWorkingBtn {
             position: absolute;
             top: 0;
@@ -62,8 +93,9 @@
             color: #b71c1c;
             font-weight: bold;
             border-radius: 4px;
+            padding: 8px 12px;
+            cursor: pointer;
         }
-        /* Top right positioning for Start Over (offset from Stop Working, which they never share the screen with, but kept apart as a safety margin) */
         #startOverBtn {
             position: absolute;
             top: 0;
@@ -72,6 +104,30 @@
             border: 1px solid #90a4ae;
             color: #37474f;
             border-radius: 4px;
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+        /* Modal Overlays */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-box {
+            background-color: #fff;
+            padding: 24px;
+            border-radius: 8px;
+            max-width: 360px;
+            width: 85%;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         }
     </style>
 </head>
@@ -83,18 +139,33 @@
     
     <!-- Step 1: Mode Selection -->
     <div id="modeSelect">
-        <button id="workBtn">Work</button>
-        <button id="planBtn" disabled>Plan <i>(Coming Soon)</i></button>
+        <button id="workBtn" class="btn">Work</button>
+        <button id="planBtn" class="btn btn-secondary" disabled>Plan <i>(Coming Soon)</i></button>
     </div>
 
-    <!-- Step 2: New List vs. Resume Existing List -->
+    <!-- Step 2: New List vs Resume Existing List -->
     <div id="workChoiceStep" class="hidden">
         <h2>What do you want to do?</h2>
-        <button id="createNewListBtn">Create a New Task List</button>
-        <button id="resumeExistingListBtn">Resume Existing List</button>
+        <button id="createNewListBtn" class="btn">Create a New Task List</button>
+        <button id="resumeExistingListBtn" class="btn btn-secondary">Resume Existing List</button>
     </div>
 
-    <!-- Step 3: Time & Constraint Entry Screen -->
+    <!-- Step 3: Hardstop Choice ("This or That") -->
+    <div id="hardstopChoiceStep" class="hidden">
+        <h2>Do you have a strict hardstop for this working session?</h2>
+        <div class="choice-container">
+            <div id="hardstopYesBtn" class="choice-box">
+                <h3>Yes</h3>
+                <p>I have a fixed amount of time (e.g., 45 mins before a meeting).</p>
+            </div>
+            <div id="hardstopNoBtn" class="choice-box">
+                <h3>No</h3>
+                <p>I want to work through my tasks without a fixed end time.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 4: Time & Constraint Entry Screen (Shown if Hardstop = Yes) -->
     <div id="timeConstraintInput" class="hidden">
         <h2>Set Up Your Time</h2>
         <label for="availableTime">How much time do you have to work? (in minutes)</label>
@@ -103,10 +174,10 @@
         <label for="endConstraint">What happens when this time is up?</label>
         <input type="text" id="endConstraint" placeholder="e.g., class ends, leave for appointment">
 
-        <button id="timeConstraintNextBtn">Next</button>
+        <button id="timeConstraintNextBtn" class="btn">Next</button>
     </div>
 
-    <!-- Step 4: Task Entry Screen -->
+    <!-- Step 5: Task Entry Screen -->
     <div id="taskInput" class="hidden">
         <h2>Enter Your Tasks</h2>
         <textarea id="tasks" rows="10" cols="40" placeholder="Enter one task per line"></textarea>
@@ -116,7 +187,7 @@
                 <input type="checkbox" id="skipSortCheckbox" style="width: auto;"> Skip sorting (use current order)
             </label>
         </div>
-        <button id="startSort">Start Sorting</button>
+        <button id="startSort" class="btn">Start Sorting</button>
 
         <div class="upload-container">
             <h3>Or Import a Saved List</h3>
@@ -126,8 +197,8 @@
 
     <div id="taskCompare" class="hidden">
         <h2>Which task comes first?</h2>
-        <button id="task1"></button>
-        <button id="task2"></button>
+        <button id="task1" class="btn"></button>
+        <button id="task2" class="btn"></button>
     </div>
 
     <div id="dynamicContainer"></div>
