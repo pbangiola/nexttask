@@ -90,6 +90,7 @@ function restartCurrentScreen() {
     } else if (!document.getElementById('taskInput').classList.contains('hidden')) {
         document.getElementById('tasks').value = '';
         document.getElementById('skipSortCheckbox').checked = false;
+        checkTaskInputCapacity();
 
     } else if (!document.getElementById('taskCompare').classList.contains('hidden')) {
         // Mid-sorting: drop the in-progress sort, return to task entry with the list preserved
@@ -99,6 +100,7 @@ function restartCurrentScreen() {
         document.getElementById('taskCompare').classList.add('hidden');
         document.getElementById('tasks').value = currentSortRawTasks.join('\n');
         document.getElementById('taskInput').classList.remove('hidden');
+        checkTaskInputCapacity();
 
     } else if (document.getElementById('timingGatewayScreen')) {
         // Nothing entered yet on this screen - just re-render it
@@ -160,6 +162,42 @@ function getEstimatedComparisons(n) {
 // Helper: Calculate total estimated time allocated so far
 function getTotalAllocatedTime() {
     return sortedTasks.reduce((sum, task) => sum + (task.estimatedTime || 0), 0);
+}
+
+// Ported from the "main" branch: live warning on the task-entry screen, before any
+// per-task estimates exist. Uses a rough 10 min/task assumption against the available
+// time set on the previous screen, so the person gets a heads-up before they even sort.
+function checkTaskInputCapacity() {
+    const textarea = document.getElementById('tasks');
+    if (!textarea) return;
+
+    const rawTasks = textarea.value.split('\n').map(t => t.trim()).filter(t => t);
+
+    let infoMsg = document.getElementById('capacityInfoMsg');
+    if (!infoMsg) {
+        infoMsg = document.createElement('p');
+        infoMsg.id = 'capacityInfoMsg';
+        infoMsg.style.fontWeight = 'bold';
+        textarea.parentNode.insertBefore(infoMsg, textarea.nextSibling);
+    }
+
+    if (totalAvailableTime <= 0) {
+        infoMsg.textContent = '';
+        textarea.classList.remove('over-capacity');
+        return;
+    }
+
+    const allowedTaskCount = Math.floor(totalAvailableTime / 10);
+
+    if (rawTasks.length > allowedTaskCount) {
+        textarea.classList.add('over-capacity');
+        infoMsg.textContent = `Warning: Based on ~10 min/task, you can likely complete ${allowedTaskCount} task(s) in your ${totalAvailableTime} min window. Tasks past line ${allowedTaskCount} exceed available time.`;
+        infoMsg.style.color = '#d32f2f';
+    } else {
+        textarea.classList.remove('over-capacity');
+        infoMsg.textContent = `Allocated capacity: ${rawTasks.length * 10} / ${totalAvailableTime} minutes estimated.`;
+        infoMsg.style.color = '#2e7d32';
+    }
 }
 
 // Helper: Round raw elapsed milliseconds to whole minutes - for display only, never for storage
@@ -364,6 +402,7 @@ function routeToStoredView(view) {
             break;
         case 'input':
             document.getElementById('taskInput')?.classList.remove('hidden');
+            checkTaskInputCapacity();
             showStartOverBtn();
             break;
         case 'focus':
@@ -398,6 +437,7 @@ function routeToStoredView(view) {
 function initApp() {
     document.getElementById('csvUpload')?.addEventListener('change', handleCSVUpload);
     document.getElementById('stopWorkingBtn')?.addEventListener('click', handleStopWorking);
+    document.getElementById('tasks')?.addEventListener('input', checkTaskInputCapacity);
 
     document.getElementById('startOverBtn')?.addEventListener('click', showStartOverPrompt);
 
@@ -456,6 +496,7 @@ function initApp() {
         
         const taskInputContainer = document.getElementById('taskInput');
         taskInputContainer.classList.remove('hidden');
+        checkTaskInputCapacity();
         showStartOverBtn();
         saveSession();
     });
