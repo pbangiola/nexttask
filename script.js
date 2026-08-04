@@ -4,20 +4,34 @@
 /* This is a human-mediated mergesort algorithm conceived and designed by Paul Bangiola in 2024. The algorithm takes a list of user tasks and runs them through a mergesort algorithm. They are recursively split. the user is then prompted to compare them, two at a time, in order to generate a sorted task list.
 */
 
+async function newtask(taskname) {
+    const thistask =  {
+        taskid = userId + Date.now(),
+        userId = userId,
+        task_name = taskname,
+        project_id = 0,
+        estimated_minutes = 10,
+        elapsed_ms = 0,
+        sort_order =0,
+        started_at = null,
+        due_at = null,
+        completed_at = null,
+    }
+}
 //initialize mergesort
 function startMergeSort(array) {
     //set timing variables
-    sortStartTime = Date.now()
+    const sortStartTime = Date.now();
     //estimate sorting time 
-    const totalEstComparisons = getsorting estimate(array.length);
-    const estSeconds = totalEstComparisons * 3;
-    const estMinutes = Math.max(1, Math.ceil(estSeconds / 60));
+    const n = array.length;
+    const sortingdeadline = 3 * Math.ceil(n * Math.log2(n));
+    const sortingdeadline = sortingdeadline+sortStartTime
     // need to display and countdown like on focus screen
     
-    mergeSortInteractive(array, estMinutes).then(sortedNames => {
+    mergeSortInteractive(array, sortingtime).then(sortedNames => {
        
         //I think this step is why time is broken.
-        const actualSortTimeMs = Date.now() - (sortStartTime * 1000);
+        const sortingtime = Date.now() - (sortStartTime * 1000);
 
         const userTasks = sortedNames.map(name => ({ 
             name, 
@@ -25,7 +39,7 @@ function startMergeSort(array) {
             actualTimeMs: 0,
             timestamps: { created: Date.now(), started: null, completed: null }
         }));
-
+//there should be a "task completion" function that updates an item in sortedtasks with all the columns needed for completion
         const sortCreditTask = {
             name: "Sorting tasks",
             estimatedTime: estMinutes,
