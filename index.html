@@ -4,7 +4,67 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Task Sorter</title>
-    <style>
+</head>
+<body>
+    <button id="stopWorkingBtn" class="hidden">Stop Working</button>
+    <button id="startOverBtn" class="hidden">Start Over</button>
+
+    <h1>Task Sorter</h1>
+    
+    <!-- Step 1: Mode Selection -->
+    <div id="modeSelect">
+        <button id="workBtn">Work</button>
+        <button id="planBtn" disabled>Plan <i>(Coming Soon)</i></button>
+    </div>
+
+    <!-- Step 2: New List vs. Resume Existing List -->
+    <div id="workChoiceStep" class="hidden">
+        <h2>What do you want to do?</h2>
+        <button id="createNewListBtn">Create a New Task List</button>
+        <button id="resumeExistingListBtn">Resume Existing List</button>
+    </div>
+
+    <!-- Step 3: Time & Constraint Entry Screen -->
+    <div id="timeConstraintInput" class="hidden">
+        <h2>Set Up Your Time</h2>
+        <label for="availableTime">How much time do you have to work? (in minutes)</label>
+        <input type="number" id="availableTime" placeholder="e.g., 45" min="1">
+
+        <label for="endConstraint">What happens when this time is up?</label>
+        <input type="text" id="endConstraint" placeholder="e.g., class ends, leave for appointment">
+
+        <button id="timeConstraintNextBtn">Next</button>
+    </div>
+
+    <!-- Step 4: Task Entry Screen -->
+    <div id="taskInput" class="hidden">
+        <h2>Enter Your Tasks</h2>
+        <textarea id="tasks" rows="10" cols="40" placeholder="Enter one task per line"></textarea>
+        
+        <div class="checkbox-container">
+            <label style="display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="skipSortCheckbox" style="width: auto;"> Skip sorting (use current order)
+            </label>
+        </div>
+        <button id="startSort">Start Sorting</button>
+
+        <div class="upload-container">
+            <h3>Or Import a Saved List</h3>
+            <input type="file" id="csvUpload" accept=".csv">
+        </div>
+    </div>
+
+    <div id="taskCompare" class="hidden">
+        <h2>Which task comes first?</h2>
+        <button id="task1"></button>
+        <button id="task2"></button>
+    </div>
+
+    <div id="dynamicContainer"></div>
+
+    <script src="script.js"></script>
+</body>
+<style>
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
@@ -74,64 +134,4 @@
             border-radius: 4px;
         }
     </style>
-</head>
-<body>
-    <button id="stopWorkingBtn" class="hidden">Stop Working</button>
-    <button id="startOverBtn" class="hidden">Start Over</button>
-
-    <h1>Task Sorter</h1>
-    
-    <!-- Step 1: Mode Selection -->
-    <div id="modeSelect">
-        <button id="workBtn">Work</button>
-        <button id="planBtn" disabled>Plan <i>(Coming Soon)</i></button>
-    </div>
-
-    <!-- Step 2: New List vs. Resume Existing List -->
-    <div id="workChoiceStep" class="hidden">
-        <h2>What do you want to do?</h2>
-        <button id="createNewListBtn">Create a New Task List</button>
-        <button id="resumeExistingListBtn">Resume Existing List</button>
-    </div>
-
-    <!-- Step 3: Time & Constraint Entry Screen -->
-    <div id="timeConstraintInput" class="hidden">
-        <h2>Set Up Your Time</h2>
-        <label for="availableTime">How much time do you have to work? (in minutes)</label>
-        <input type="number" id="availableTime" placeholder="e.g., 45" min="1">
-
-        <label for="endConstraint">What happens when this time is up?</label>
-        <input type="text" id="endConstraint" placeholder="e.g., class ends, leave for appointment">
-
-        <button id="timeConstraintNextBtn">Next</button>
-    </div>
-
-    <!-- Step 4: Task Entry Screen -->
-    <div id="taskInput" class="hidden">
-        <h2>Enter Your Tasks</h2>
-        <textarea id="tasks" rows="10" cols="40" placeholder="Enter one task per line"></textarea>
-        
-        <div class="checkbox-container">
-            <label style="display: flex; align-items: center; gap: 8px;">
-                <input type="checkbox" id="skipSortCheckbox" style="width: auto;"> Skip sorting (use current order)
-            </label>
-        </div>
-        <button id="startSort">Start Sorting</button>
-
-        <div class="upload-container">
-            <h3>Or Import a Saved List</h3>
-            <input type="file" id="csvUpload" accept=".csv">
-        </div>
-    </div>
-
-    <div id="taskCompare" class="hidden">
-        <h2>Which task comes first?</h2>
-        <button id="task1"></button>
-        <button id="task2"></button>
-    </div>
-
-    <div id="dynamicContainer"></div>
-
-    <script src="script.js"></script>
-</body>
 </html>
