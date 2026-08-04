@@ -149,6 +149,20 @@ for (const [tableName, createSql] of Object.entries(SCHEMAS)) {
 
 // --- Prepared Statements aligned with updated relational schema ---
 
+// Prepared statements for user management
+const createUserStmt = db.prepare(`
+    INSERT INTO users (email) VALUES (?);
+`);
+
+const getUserByIdStmt = db.prepare(`
+    SELECT * FROM users WHERE userid = ?;
+`);
+
+const getUserByEmailStmt = db.prepare(`
+    SELECT * FROM users WHERE email = ?;
+`);
+
+// Prepared statements for session management
 const saveSessionStmt = db.prepare(`
     INSERT INTO sessions (sessionid, userid, session_start, hardstop, hardstop_reason, softstop, session_end)
     VALUES (?, ?, ?, ?, ?, ?, ?)
