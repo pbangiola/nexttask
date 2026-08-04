@@ -4,6 +4,119 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Task Sorter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            max-width: 800px;
+            position: relative;
+        }
+
+        /* Essential utility class - !important prevents display:flex overrides */
+        .hidden {
+            display: none !important;
+        }
+
+        button {
+            margin: 5px 0;
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+
+        input, textarea {
+            margin: 5px 0;
+            padding: 6px;
+            display: block;
+            width: 100%;
+            max-width: 400px;
+            box-sizing: border-box;
+        }
+
+        .checkbox-container, .upload-container {
+            margin: 15px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .upload-container {
+            border: 1px dashed #ccc;
+            background: #fafafa;
+        }
+
+        /* Side-by-side layout for explicit index inserting */
+        .insertion-layout {
+            display: flex;
+            gap: 40px;
+            margin-top: 15px;
+        }
+
+        .insertion-column {
+            flex: 1;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #fff;
+        }
+
+        .over-capacity {
+            color: #d32f2f;
+        }
+
+        /* Top right positioning for header action buttons */
+        #stopWorkingBtn {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background-color: #ffcdd2;
+            border: 1px solid #e53935;
+            color: #b71c1c;
+            font-weight: bold;
+            border-radius: 4px;
+        }
+
+        #startOverBtn {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background-color: #eceff1;
+            border: 1px solid #90a4ae;
+            color: #37474f;
+            border-radius: 4px;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal-box {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px; /* Fixed camelCase bug */
+            max-width: 320px;
+            width: 85%;
+            text-align: center;
+        }
+
+        .modal-btn {
+            display: block;
+            width: 100%;
+            margin: 8px 0;
+        }
+
+        .modal-btn-cancel {
+            background-color: #eceff1;
+        }
+    </style>
 </head>
 <body>
     <button id="stopWorkingBtn" class="hidden">Stop Working</button>
@@ -63,115 +176,14 @@
     <div id="dynamicContainer"></div>
 
     <div id="startOverModal" class="modal-overlay hidden">
-    <div class="modal-box">
-        <p><strong>What would you like to do?</strong></p>
-        <button id="restartStepBtn" class="modal-btn">Restart This Step</button>
-        <button id="restartAllBtn" class="modal-btn">Restart From the Beginning</button>
-        <button id="cancelModalBtn" class="modal-btn modal-btn-cancel">Cancel</button>
+        <div class="modal-box">
+            <p><strong>What would you like to do?</strong></p>
+            <button id="restartStepBtn" class="modal-btn">Restart This Step</button>
+            <button id="restartAllBtn" class="modal-btn">Restart From the Beginning</button>
+            <button id="cancelModalBtn" class="modal-btn modal-btn-cancel">Cancel</button>
+        </div>
     </div>
-</div>
     
     <script src="script.js"></script>
 </body>
-<style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            max-width: 800px;
-            position: relative;
-        }
-        .hidden {
-            display: none;
-        }
-        button {
-            margin: 5px 0;
-            padding: 8px 12px;
-            cursor: pointer;
-        }
-        input, textarea {
-            margin: 5px 0;
-            padding: 6px;
-            display: block;
-            width: 100%;
-            max-width: 400px;
-            box-sizing: border-box;
-        }
-        .checkbox-container, .upload-container {
-            margin: 15px 0;
-            padding: 10px;
-            border-radius: 4px;
-        }
-        .upload-container {
-            border: 1px dashed #ccc;
-            background: #fafafa;
-        }
-        /* Side-by-side layout for explicit index inserting */
-        .insertion-layout {
-            display: flex;
-            gap: 40px;
-            margin-top: 15px;
-        }
-        .insertion-column {
-            flex: 1;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            background: #fff;
-        }
-        .over-capacity {
-            color: #d32f2f;
-        }
-        /* Top right positioning for Stop Working */
-        #stopWorkingBtn {
-            position: absolute;
-            top: 0;
-            right: 0;
-            background-color: #ffcdd2;
-            border: 1px solid #e53935;
-            color: #b71c1c;
-            font-weight: bold;
-            border-radius: 4px;
-        }
-        /* Top right positioning for Start Over (offset from Stop Working, which they never share the screen with, but kept apart as a safety margin) */
-        #startOverBtn {
-            position: absolute;
-            top: 0;
-            right: 0;
-            background-color: #eceff1;
-            border: 1px solid #90a4ae;
-            color: #37474f;
-            border-radius: 4px;
-        }
-    .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0,0,0,0.4);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-}
-
-.modal-box {
-    background-color: #fff;
-    padding: 20px;
-    borderRadius: 8px;
-    max-width: 320px;
-    width: 85%;
-    text-align: center;
-}
-
-.modal-btn {
-    display: block;
-    width: 100%;
-    margin: 8px 0;
-}
-
-.modal-btn-cancel {
-    background-color: #eceff1;
-}
-    </style>
 </html>
