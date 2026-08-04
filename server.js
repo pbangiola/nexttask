@@ -184,6 +184,37 @@ app.delete('/api/sessions/:id', (req, res) => {
 });
 
 // ==========================================
+// USER MANAGEMENT ENDPOINTS
+// ==========================================
+
+// Create a new user explicitly
+app.post('/api/users', (req, res) => {
+    try {
+        const { email } = req.body;
+        const userId = db.createUser(email);
+        res.status(201).json({ success: true, userId });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to create user' });
+    }
+});
+
+// Fetch user profile
+app.get('/api/users/:userId', (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId, 10);
+        const user = db.getUserById(userId);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(user);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to fetch user' });
+    }
+});
+
+// ==========================================
 // SERVER INITIALIZATION
 // ==========================================
 
