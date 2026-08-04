@@ -12,7 +12,8 @@ db.exec(`
  
     CREATE TABLE IF NOT EXISTS users (
         userid INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT
+        email TEXT,
+        alias INTEGER
     );
     
     CREATE TABLE IF NOT EXISTS projects (
