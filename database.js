@@ -16,7 +16,8 @@ const SCHEMAS = {
         CREATE TABLE IF NOT EXISTS users (
             userid INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT,
-            alias INTEGER
+            alias INTEGER,
+            role TEXT DEFAULT 'customer'
         );
     `,
     projects: `
