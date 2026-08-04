@@ -32,7 +32,7 @@ const SCHEMAS = {
     `,
     task_queue: `
         CREATE TABLE IF NOT EXISTS task_queue (
-            taskid INTEGER PRIMARY KEY AUTOINCREMENT,
+            taskid INTEGER PRIMARY KEY,
             userid INTEGER NOT NULL,
             task_name TEXT NOT NULL,
             project_id INTEGER, 
