@@ -245,4 +245,24 @@ module.exports = {
     getUserAggregateStats: (userId) => {
         return getUserAggregateStatsStmt.get(userId);
     }
+    // User management
+    createUser: (email) => {
+        const info = createUserStmt.run(email || null);
+        return info.lastInsertRowid; // returns the new userid
+    },
+    getUserById: (userId) => {
+        return getUserByIdStmt.get(userId) || null;
+    },
+    getUserByEmail: (email) => {
+        return getUserByEmailStmt.get(email) || null;
+    },
+    // Useful pattern: get existing user or create a new one automatically
+    findOrCreateUser: (email) => {
+        if (email) {
+            const existing = getUserByEmailStmt.get(email);
+            if (existing) return existing.userid;
+        }
+        const info = createUserStmt.run(email || null);
+        return info.lastInsertRowid;
+    }
 };
