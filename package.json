@@ -8,8 +8,8 @@
     "dev": "node --watch server.js"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Paul Bangiola",
+  "license": "Copyright © 2026 Paul Bangiola. All Rights Reserved.",
   "dependencies": {
     "better-sqlite3": "^11.8.0",
     "cors": "^2.8.5",
