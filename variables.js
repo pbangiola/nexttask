@@ -31,9 +31,9 @@ let currentTaskIndex = 0;
 
 // Global tracking timestamps (saved in state, hidden from UI)
 let sessionStartTimestamp = Date.now();
-let setupStartTime = 0;
+let sortStartTime = 0;
 let workStartTime = null;
-let currentStepStartTimes = null;
+let currentStepStartTime = null;
 let availabletime = 0;
 let hardstop = 0;
 let hardstop_reason = "";
