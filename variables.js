@@ -30,7 +30,7 @@ let sortedTasks = []; // Array: { name, estimatedTime, actualTimeMs, timestamps:
 let currentTaskIndex = 0;
 
 // Global tracking timestamps (saved in state, hidden from UI)
-let sessionStartTimestamp = new Date();
+let sessionStartTimestamp = Date.now();
 let setupStartTime = 0;
 let workStartTime = null;
 let currentStepStartTimes = null;
