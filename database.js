@@ -7,253 +7,241 @@ const dbPath = path.join(dataDir, 'task_sorter.db');
 
 const db = new Database(dbPath);
 
-// create four tables: users, projects, tasks, and sessions
-db.exec(`
- 
-    CREATE TABLE IF NOT EXISTS users (
-        userid INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT,
-        alias INTEGER
-    );
-    
-    CREATE TABLE IF NOT EXISTS projects (
-        projectid INTEGER PRIMARY KEY AUTOINCREMENT
-        project_name TEXT NOT NULL,
-        userid INTEGER NOT NULL,
-        project_priority INTEGER,
-        parent_project INTEGER,
-        FOREIGN KEY(userid) REFERENCES users(userid) ON DELETE CASCADE
-    );
-    
-    CREATE TABLE IF NOT EXISTS task_queue (
-        taskid INTEGER PRIMARY KEY AUTOINCREMENT,
-        userid INTEGER NOT NULL,
-        task_name TEXT NOT NULL,
-        project_id INTEGER NOT NULL, 
-        estimated_minutes INTEGER DEFAULT 10,
-        elapsed_ms INTEGER DEFAULT 0,
-        sort_order INTEGER,
-        started_at TIMESTAMP,
-        due_at TIMESTAMP,
-        completed_at TIMESTAMP,
-        FOREIGN KEY(userid) REFERENCES users(userid) ON DELETE CASCADE,
-        FOREIGN KEY(projectid) REFERENCES projects(projectid) ON DELETE CASCADE
-    );
-    
-    CREATE TABLE IF NOT EXISTS sessions (
-        sessionid TEXT PRIMARY KEY,
-        userid INTEGER NOT NULL,
-        session_start TIMESTAMP NOT NULL,
-        hardstop TIMESTAMP,
-        hardstop_reason TEXT,
-        softstop TIMESTAMP,
-        session_end TIMESTAMP,
-        FOREIGN KEY(userid) REFERENCES users(userid) ON DELETE CASCADE
-    );
-`);
+// Enable Foreign Key constraints in SQLite
+db.pragma('foreign_keys = ON');
 
-// --- Defensive schema migrations -------------------------------------------
-// Older deployments' database files may predate columns added since. Rather
-// than patching one missing-column crash at a time, each table below is
-// checked against its expected column set on every boot. If anything is
-// missing, the table is rebuilt from scratch. These checks are cheap and are
-// no-ops once a table's schema is already correct, so they're safe to leave
-// in permanently.
-//
-// NOTE: rebuilding drops any existing rows in the affected table. If you
-// need to preserve old data, capture it (e.g. via PRAGMA table_info + a
-// manual SELECT/INSERT copy) before the DROP TABLE calls below run.
+// Definition of target schemas
+const SCHEMAS = {
+    users: `
+        CREATE TABLE IF NOT EXISTS users (
+            userid INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT,
+            alias INTEGER
+        );
+    `,
+    projects: `
+        CREATE TABLE IF NOT EXISTS projects (
+            projectid INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_name TEXT NOT NULL,
+            userid INTEGER NOT NULL,
+            project_priority INTEGER,
+            parent_project INTEGER,
+            FOREIGN KEY(userid) REFERENCES users(userid) ON DELETE CASCADE
+        );
+    `,
+    task_queue: `
+        CREATE TABLE IF NOT EXISTS task_queue (
+            taskid INTEGER PRIMARY KEY AUTOINCREMENT,
+            userid INTEGER NOT NULL,
+            task_name TEXT NOT NULL,
+            project_id INTEGER, 
+            estimated_minutes INTEGER DEFAULT 10,
+            elapsed_ms INTEGER DEFAULT 0,
+            sort_order INTEGER,
+            started_at TIMESTAMP,
+            due_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            FOREIGN KEY(userid) REFERENCES users(userid) ON DELETE CASCADE,
+            FOREIGN KEY(project_id) REFERENCES projects(projectid) ON DELETE CASCADE
+        );
+    `,
+    sessions: `
+        CREATE TABLE IF NOT EXISTS sessions (
+            sessionid TEXT PRIMARY KEY,
+            userid INTEGER NOT NULL,
+            session_start TIMESTAMP NOT NULL,
+            hardstop TIMESTAMP,
+            hardstop_reason TEXT,
+            softstop TIMESTAMP,
+            session_end TIMESTAMP,
+            FOREIGN KEY(userid) REFERENCES users(userid) ON DELETE CASCADE
+        );
+    `
+};
 
-function rebuildIfSchemaMismatch(tableName, expectedColumns, createTableSql) {
-    let existingColumns;
+// Introspect table structure dynamically
+function getExistingColumns(tableName) {
     try {
-        existingColumns = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
+        return db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
     } catch (e) {
-        existingColumns = [];
-    }
-
-    const tableExists = existingColumns.length > 0;
-    const hasAllColumns = expectedColumns.every(col => existingColumns.includes(col));
-
-    if (tableExists && !hasAllColumns) {
-        console.log(`[migration] Rebuilding "${tableName}" - missing columns: ${expectedColumns.filter(c => !existingColumns.includes(c)).join(', ')}`);
-        db.exec(`DROP TABLE IF EXISTS ${tableName};`);
-        db.exec(createTableSql);
+        return [];
     }
 }
 
-// `sessions` predates the `id` column in some deployments. SQLite can't
-// ALTER a column into becoming a PRIMARY KEY, so this always rebuilds via
-// DROP + CREATE rather than ALTER TABLE.
-rebuildIfSchemaMismatch(
-    'sessions',
-    ['id', 'updated_at', 'state_json'],
-    `CREATE TABLE sessions (
-        id TEXT PRIMARY KEY,
-        updated_at INTEGER NOT NULL,
-        state_json TEXT NOT NULL
-    );`
-);
+// Dynamically extract column definitions from a CREATE TABLE SQL statement
+function parseExpectedColumns(createSql) {
+    const body = createSql.slice(createSql.indexOf('(') + 1, createSql.lastIndexOf(')'));
+    const lines = body.split(',').map(l => l.trim());
+    const columns = [];
 
-// `completed_tasks` predates several columns (e.g. actual_minutes) in some
-// deployments.
-rebuildIfSchemaMismatch(
-    'completed_tasks',
-    ['id', 'session_id', 'task_name', 'estimated_minutes', 'actual_minutes', 'variance_minutes', 'completed_at'],
-    `CREATE TABLE completed_tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        task_name TEXT NOT NULL,
-        estimated_minutes INTEGER NOT NULL,
-        actual_minutes INTEGER NOT NULL,
-        variance_minutes INTEGER NOT NULL,
-        completed_at INTEGER NOT NULL,
-        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-    );`
-);
-
-// `task_queue` - covered by the elapsed_ms ALTER TABLE below for the common
-// case, but checked here too in case older deployments are missing other
-// columns beyond elapsed_ms.
-rebuildIfSchemaMismatch(
-    'task_queue',
-    ['id', 'session_id', 'task_name', 'estimated_minutes', 'elapsed_ms', 'sort_order', 'created_at'],
-    `CREATE TABLE task_queue (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        task_name TEXT NOT NULL,
-        estimated_minutes INTEGER DEFAULT 0,
-        elapsed_ms INTEGER DEFAULT 0,
-        sort_order INTEGER NOT NULL,
-        created_at INTEGER NOT NULL,
-        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-    );`
-);
-
-// Migration for deployments where task_queue already existed without elapsed_ms
-// (kept as a fast-path; rebuildIfSchemaMismatch above already covers this case,
-// but ALTER TABLE ADD COLUMN preserves existing rows, which DROP+CREATE does not).
-try {
-    db.exec(`ALTER TABLE task_queue ADD COLUMN elapsed_ms INTEGER DEFAULT 0;`);
-} catch (e) {
-    // Column already exists - safe to ignore
+    for (const line of lines) {
+        // Skip table-level constraints like FOREIGN KEY or PRIMARY KEY (col1, col2)
+        if (/^(FOREIGN\s+KEY|PRIMARY\s+KEY|UNIQUE|CHECK|CONSTRAINT)/i.test(line)) continue;
+        const colName = line.split(/\s+/)[0];
+        if (colName) columns.push(colName.replace(/["'`]/g, ''));
+    }
+    return columns;
 }
 
-// Prepared statements for active sessions
+// Safely update table structures while archiving and preserving old data
+function migrateTable(tableName, createSql) {
+    const existingCols = getExistingColumns(tableName);
+
+    // Table does not exist -> Create fresh
+    if (existingCols.length === 0) {
+        db.exec(createSql);
+        return;
+    }
+
+    const expectedCols = parseExpectedColumns(createSql);
+    const missingCols = expectedCols.filter(c => !existingCols.includes(c));
+
+    // Schema is identical -> No action required
+    if (missingCols.length === 0) return;
+
+    // Check if simple ALTER TABLE ADD COLUMN is safe (no primary key / type breaking changes)
+    const extraOldCols = existingCols.filter(c => !expectedCols.includes(c));
+    
+    if (extraOldCols.length === 0 && missingCols.length > 0) {
+        console.log(`[migration] Safe-adding columns to "${tableName}": ${missingCols.join(', ')}`);
+        for (const col of missingCols) {
+            try {
+                db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${col};`);
+            } catch (e) {
+                // Fall through to full archive and copy if ALTER TABLE fails
+                console.warn(`[migration] ALTER TABLE failed for ${tableName}.${col}, falling back to archive transfer.`);
+                break;
+            }
+        }
+        // Verify migration completed
+        if (expectedCols.every(c => getExistingColumns(tableName).includes(c))) {
+            return;
+        }
+    }
+
+    // Advanced Migration: Archive old table, create target table, transfer matching columns
+    console.log(`[migration] Schema mismatch for "${tableName}". Archiving old data and transferring compatible records...`);
+    
+    const archiveName = `_archive_${tableName}_${Date.now()}`;
+    
+    db.transaction(() => {
+        db.exec(`ALTER TABLE ${tableName} RENAME TO ${archiveName};`);
+        db.exec(createSql);
+
+        const archiveCols = getExistingColumns(archiveName);
+        const sharedCols = expectedCols.filter(c => archiveCols.includes(c));
+
+        if (sharedCols.length > 0) {
+            const colList = sharedCols.join(', ');
+            console.log(`[migration] Migrating data for "${tableName}" on columns: ${colList}`);
+            db.exec(`INSERT INTO ${tableName} (${colList}) SELECT ${colList} FROM ${archiveName};`);
+        } else {
+            console.warn(`[migration] No matching columns found between old and new "${tableName}". Data preserved in table "${archiveName}".`);
+        }
+    })();
+}
+
+// Run migrations across all defined schemas
+for (const [tableName, createSql] of Object.entries(SCHEMAS)) {
+    migrateTable(tableName, createSql);
+}
+
+// --- Prepared Statements aligned with updated relational schema ---
+
 const saveSessionStmt = db.prepare(`
-    INSERT INTO sessions (id, updated_at, state_json)
-    VALUES (?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-        updated_at = excluded.updated_at,
-        state_json = excluded.state_json;
+    INSERT INTO sessions (sessionid, userid, session_start, hardstop, hardstop_reason, softstop, session_end)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(sessionid) DO UPDATE SET
+        userid = excluded.userid,
+        session_start = excluded.session_start,
+        hardstop = excluded.hardstop,
+        hardstop_reason = excluded.hardstop_reason,
+        softstop = excluded.softstop,
+        session_end = excluded.session_end;
 `);
 
 const getSessionStmt = db.prepare(`
-    SELECT state_json FROM sessions WHERE id = ?;
+    SELECT * FROM sessions WHERE sessionid = ?;
 `);
 
 const deleteSessionStmt = db.prepare(`
-    DELETE FROM sessions WHERE id = ?;
+    DELETE FROM sessions WHERE sessionid = ?;
 `);
 
-// Prepared statements for user task stats & history
-const logCompletedTaskStmt = db.prepare(`
-    INSERT INTO completed_tasks (session_id, task_name, estimated_minutes, actual_minutes, variance_minutes, completed_at)
-    VALUES (?, ?, ?, ?, ?, ?);
+const createProjectStmt = db.prepare(`
+    INSERT INTO projects (project_name, userid, project_priority, parent_project)
+    VALUES (?, ?, ?, ?);
 `);
 
-const getUserStatsStmt = db.prepare(`
-    SELECT 
-        task_name, 
-        estimated_minutes, 
-        actual_minutes, 
-        variance_minutes, 
-        completed_at 
-    FROM completed_tasks 
-    WHERE session_id = ? 
-    ORDER BY completed_at DESC;
+const getProjectsByUserStmt = db.prepare(`
+    SELECT * FROM projects WHERE userid = ? ORDER BY project_priority ASC;
+`);
+
+const insertQueuedTaskStmt = db.prepare(`
+    INSERT INTO task_queue (userid, task_name, project_id, estimated_minutes, elapsed_ms, sort_order, started_at, due_at, completed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+`);
+
+const getTasksByUserStmt = db.prepare(`
+    SELECT * FROM task_queue WHERE userid = ? AND completed_at IS NULL ORDER BY sort_order ASC;
+`);
+
+const markTaskCompletedStmt = db.prepare(`
+    UPDATE task_queue SET completed_at = ? WHERE taskid = ? AND userid = ?;
 `);
 
 const getUserAggregateStatsStmt = db.prepare(`
     SELECT 
         COUNT(*) as total_tasks_completed,
         SUM(estimated_minutes) as total_estimated_minutes,
-        SUM(actual_minutes) as total_actual_minutes,
-        SUM(variance_minutes) as total_variance_minutes,
-        AVG(variance_minutes) as avg_variance_per_task
-    FROM completed_tasks 
-    WHERE session_id = ?;
+        SUM(elapsed_ms / 60000) as total_actual_minutes
+    FROM task_queue 
+    WHERE userid = ? AND completed_at IS NOT NULL;
 `);
 
-// Prepared statements for persistent uncompleted task queue
-const clearTaskQueueStmt = db.prepare(`
-    DELETE FROM task_queue WHERE session_id = ?;
-`);
-
-const deleteQueuedTaskByNameStmt = db.prepare(`
-    DELETE FROM task_queue WHERE session_id = ? AND task_name = ?;
-`);
-
-const insertQueuedTaskStmt = db.prepare(`
-    INSERT INTO task_queue (session_id, task_name, estimated_minutes, elapsed_ms, sort_order, created_at)
-    VALUES (?, ?, ?, ?, ?, ?);
-`);
-
-const getQueuedTasksStmt = db.prepare(`
-    SELECT task_name, estimated_minutes, elapsed_ms, sort_order, created_at
-    FROM task_queue
-    WHERE session_id = ?
-    ORDER BY sort_order ASC;
-`);
+// --- Exported Interface ---
 
 module.exports = {
-    saveSession: (id, state) => {
-        saveSessionStmt.run(id, Date.now(), JSON.stringify(state));
-    },
-    getSession: (id) => {
-        const row = getSessionStmt.get(id);
-        return row ? JSON.parse(row.state_json) : null;
-    },
-    deleteSession: (id) => {
-        deleteSessionStmt.run(id);
-    },
-    logCompletedTask: (sessionId, taskName, estimatedMin, actualMin, completedAt) => {
-        const variance = estimatedMin - actualMin;
-        logCompletedTaskStmt.run(
-            sessionId, 
-            taskName, 
-            estimatedMin, 
-            actualMin, 
-            variance, 
-            completedAt || Date.now()
+    // Session management
+    saveSession: (sessionData) => {
+        saveSessionStmt.run(
+            sessionData.sessionid,
+            sessionData.userid,
+            sessionData.session_start || Date.now(),
+            sessionData.hardstop || null,
+            sessionData.hardstop_reason || null,
+            sessionData.softstop || null,
+            sessionData.session_end || null
         );
     },
-    getUserTaskHistory: (sessionId) => {
-        return getUserStatsStmt.all(sessionId);
+    getSession: (sessionId) => {
+        return getSessionStmt.get(sessionId) || null;
     },
-    getUserAggregateStats: (sessionId) => {
-        return getUserAggregateStatsStmt.get(sessionId);
+    deleteSession: (sessionId) => {
+        deleteSessionStmt.run(sessionId);
     },
-    // Full replace: the queue always mirrors the current pending task set,
-    // kept in sync continuously rather than merged/pushed at stop-time.
-    saveUncompletedQueue: (sessionId, tasks) => {
-        const transaction = db.transaction((id, taskList) => {
-            clearTaskQueueStmt.run(id);
-            const now = Date.now();
-            taskList.forEach((task, index) => {
-                const name = typeof task === 'string' ? task : task.name;
-                const est = (typeof task === 'object' && task.estimatedTime) ? task.estimatedTime : 0;
-                const elapsed = (typeof task === 'object' && task.elapsedMs) ? task.elapsedMs : 0;
-                insertQueuedTaskStmt.run(id, name, est, elapsed, index + 1, now);
-            });
-        });
-        transaction(sessionId, tasks);
+
+    // Project management
+    createProject: (projectName, userId, priority = null, parentProject = null) => {
+        const info = createProjectStmt.run(projectName, userId, priority, parentProject);
+        return info.lastInsertRowid;
     },
-    // Remove a single task from the pending queue by name (called on completion)
-    removeFromQueue: (sessionId, taskName) => {
-        deleteQueuedTaskByNameStmt.run(sessionId, taskName);
+    getUserProjects: (userId) => {
+        return getProjectsByUserStmt.all(userId);
     },
-    getUncompletedQueue: (sessionId) => {
-        return getQueuedTasksStmt.all(sessionId);
+
+    // Task Queue management
+    addTask: (userId, taskName, projectId, estimatedMin = 10, elapsedMs = 0, sortOrder = 1, dueAt = null) => {
+        const info = insertQueuedTaskStmt.run(userId, taskName, projectId, estimatedMin, elapsedMs, sortOrder, null, dueAt, null);
+        return info.lastInsertRowid;
+    },
+    getUncompletedQueue: (userId) => {
+        return getTasksByUserStmt.all(userId);
+    },
+    completeTask: (taskId, userId, completedAt = Date.now()) => {
+        markTaskCompletedStmt.run(completedAt, taskId, userId);
+    },
+    getUserAggregateStats: (userId) => {
+        return getUserAggregateStatsStmt.get(userId);
     }
 };
