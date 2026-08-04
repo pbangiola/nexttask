@@ -1,6 +1,8 @@
 // --- Config ---
 
 // Core merge sort code
+/* This is a human-mediated mergesort algorithm conceived and designed by Paul Bangiola in 2024. The algorithm takes a list of user tasks and runs them through a mergesort algorithm. They are recursively split. the user is then prompted to compare them, two at a time, in order to generate a sorted task list.
+*/
 
 //initialize mergesort
 function startMergeSort(array) {
@@ -50,6 +52,7 @@ async function mergeSortInteractive(array, estMinutes) {
     return mergeInteractive(left, right, estMinutes);
 }
 
+//why do we have all these other button handlers when we could just call this function and then do whichever command is first?
 function mergeInteractive(left, right, estMinutes) {
     return new Promise(resolve => {
         const result = [];
@@ -101,7 +104,7 @@ function mergeInteractive(left, right, estMinutes) {
         }
 
         compareNext();
-    });
+});
 
 // --- Persistence Layer, Task Queue, & User Analytics Sync ---
 async function saveSession() {
