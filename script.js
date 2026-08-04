@@ -1,24 +1,128 @@
 // --- Config ---
 
+// Core merge sort code
+
+//initialize mergesort
+function startMergeSort(array) {
+    //set timing variables
+    sortStartTime = Date.now()
+    //estimate sorting time 
+    const totalEstComparisons = getsorting estimate(array.length);
+    const estSeconds = totalEstComparisons * 3;
+    const estMinutes = Math.max(1, Math.ceil(estSeconds / 60));
+    // need to display and countdown like on focus screen
+    
+    mergeSortInteractive(array, estMinutes).then(sortedNames => {
+       
+        //I think this step is why time sorting is broken.
+        const actualSortTimeMs = Date.now() - (sortStartTime * 1000);
+
+        const userTasks = sortedNames.map(name => ({ 
+            name, 
+            estimatedTime: 0, 
+            actualTimeMs: 0,
+            timestamps: { created: Date.now(), started: null, completed: null }
+        }));
+
+        const sortCreditTask = {
+            name: "Sorting tasks",
+            estimatedTime: estMinutes,
+            actualTimeMs: actualSortTimeMs,
+            timestamps: { created: sessionStartTimestamp, started: sessionStartTimestamp, completed: Date.now() }
+        };
+
+        sortedTasks = [sortCreditTask, ...userTasks];
+        currentTaskIndex = 1; 
+
+        saveSession();
+        syncPendingQueueToBackend();
+        promptForUpfrontTimings();
+    });
+}
+
+async function mergeSortInteractive(array, estMinutes) {
+    if (array.length <= 1) return array;
+
+    const middle = Math.floor(array.length / 2);
+    const left = await mergeSortInteractive(array.slice(0, middle), estMinutes);
+    const right = await mergeSortInteractive(array.slice(middle), estMinutes);
+
+    return mergeInteractive(left, right, estMinutes);
+}
+
+function mergeInteractive(left, right, estMinutes) {
+    return new Promise(resolve => {
+        const result = [];
+
+        function compareNext() {
+            if (!left.length && !right.length) {
+                document.getElementById('taskCompare').classList.add('hidden');
+                resolve(result);
+                return;
+            }
+            if (!left.length) {
+                result.push(...right);
+                document.getElementById('taskCompare').classList.add('hidden');
+                resolve(result);
+                return;
+            }
+            if (!right.length) {
+                result.push(...left);
+                document.getElementById('taskCompare').classList.add('hidden');
+                resolve(result);
+                return;
+            }
+
+            const compareContainer = document.getElementById('taskCompare');
+            compareContainer.classList.remove('hidden');
+
+            let estHeader = document.getElementById('sortEstimateHeader');
+            if (!estHeader) {
+                estHeader = document.createElement('p');
+                estHeader.id = 'sortEstimateHeader';
+                estHeader.style.fontWeight = 'bold';
+                estHeader.style.color = '#555';
+                compareContainer.insertBefore(estHeader, compareContainer.firstChild);
+            }
+            estHeader.textContent = `Estimated sorting time remaining: ~${estMinutes} min`;
+
+            document.getElementById('task1').textContent = left[0];
+            document.getElementById('task2').textContent = right[0];
+
+            document.getElementById('task1').onclick = () => {
+                result.push(left.shift());
+                compareNext();
+            };
+
+            document.getElementById('task2').onclick = () => {
+                result.push(right.shift());
+                compareNext();
+            };
+        }
+
+        compareNext();
+    });
+
 // --- Persistence Layer, Task Queue, & User Analytics Sync ---
 async function saveSession() {
     const sessionState = {
+        userid,
+        projectId,
+        sessionId,
         sortedTasks,
         currentTaskIndex,
-        deadline,
+        hardstop,
+        hardstop_reason,
+        cumulativestimatedtime,
         spareTime,
-        taskStartTimestamp,
-        pausedSecondsRemaining,
-        totalAvailableTime,
-        endConstraint,
-        sessionStartTimestamp,
-        currentStepStartTimestamp,
+        workStartTime,
         activeView: getActiveViewContext() 
     };
 
     localStorage.setItem('taskSorterSession_fallback', JSON.stringify(sessionState));
 
-    try {
+  /* this call is meant to save the session to the backend, but it's not the right content. I need to line this up with the server endpoints.  
+  try {
         await fetch(`/api/session/${sessionId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -26,9 +130,10 @@ async function saveSession() {
         });
     } catch (e) {
         console.warn("Backend sync failed, state preserved in browser cache:", e);
-    }
+    }*/
 }
 
+    //this should prioritze loading from local storage
 async function loadSession() {
     let state = null;
 
@@ -73,81 +178,6 @@ async function loadSession() {
         }
     } catch (e) {
         console.error("Error restoring session state:", e);
-    }
-}
-
-async function fetchExistingQueue() {
-    try {
-        const res = await fetch(`/api/session/${sessionId}/queue`);
-        if (res.ok) {
-            const data = await res.json();
-            return data.queue || [];
-        }
-    } catch (e) {
-        console.warn("Failed to load existing task list from backend:", e);
-    }
-    return [];
-}
-
-// Full replace: pushes the current pending (not-yet-completed) task list to the
-// backend queue, including each task's elapsed time so far. Called whenever the
-// pending set changes structurally (list finalized, task added).
-async function syncPendingQueueToBackend() {
-    const pending = sortedTasks.slice(currentTaskIndex).map(task => ({
-        name: task.name,
-        estimatedTime: task.estimatedTime || 0,
-        elapsedMs: task.actualTimeMs || 0
-    }));
-
-    try {
-        await fetch(`/api/session/${sessionId}/queue`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tasks: pending })
-        });
-    } catch (e) {
-        console.warn("Failed to sync pending queue to backend:", e);
-    }
-}
-
-// Removes a single task from the backend's pending queue. Called any time a
-// task is completed, so the queue never has to be reconciled in one big batch.
-async function removeTaskFromQueue(taskName) {
-    try {
-        await fetch(`/api/session/${sessionId}/queue/remove`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskName })
-        });
-    } catch (e) {
-        console.warn("Failed to remove task from server queue:", e);
-    }
-}
-
-async function clearSession() {
-    try {
-        await fetch(`/api/session/${sessionId}`, { method: 'DELETE' });
-    } catch (e) {
-        console.error("Failed to delete session on server:", e);
-    }
-    localStorage.removeItem('taskSorterSessionId');
-    localStorage.removeItem('taskSorterSession_fallback');
-}
-
-async function logTaskCompletionToBackend(task) {
-    try {
-        await fetch(`/api/session/${sessionId}/tasks/completed`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                taskName: task.name,
-                estimatedMinutes: task.estimatedTime || 0,
-                actualMinutes: Math.round((task.actualTimeMs || 0) / 60000),
-                completedAt: task.timestamps?.completed || Date.now()
-            })
-        });
-    } catch (e) {
-        console.warn("Failed to push completed task log to backend:", e);
     }
 }
 
@@ -1073,97 +1103,5 @@ function displaySpareTime() {
     saveSession();
 }
 
-function startMergeSort(array) {
-    const totalEstComparisons = getEstimatedComparisons(array.length);
-    const estSeconds = totalEstComparisons * 3;
-    const estMinutes = Math.max(1, Math.ceil(estSeconds / 60));
 
-    mergeSortInteractive(array, estMinutes).then(sortedNames => {
-        const actualSortTimeMs = Date.now() - (sortStartTime * 1000);
-
-        const userTasks = sortedNames.map(name => ({ 
-            name, 
-            estimatedTime: 0, 
-            actualTimeMs: 0,
-            timestamps: { created: Date.now(), started: null, completed: null }
-        }));
-
-        const sortCreditTask = {
-            name: "Sorting tasks",
-            estimatedTime: estMinutes,
-            actualTimeMs: actualSortTimeMs,
-            timestamps: { created: sessionStartTimestamp, started: sessionStartTimestamp, completed: Date.now() }
-        };
-
-        sortedTasks = [sortCreditTask, ...userTasks];
-        currentTaskIndex = 1; 
-
-        saveSession();
-        syncPendingQueueToBackend();
-        promptForUpfrontTimings();
-    });
-}
-
-async function mergeSortInteractive(array, estMinutes) {
-    if (array.length <= 1) return array;
-
-    const middle = Math.floor(array.length / 2);
-    const left = await mergeSortInteractive(array.slice(0, middle), estMinutes);
-    const right = await mergeSortInteractive(array.slice(middle), estMinutes);
-
-    return mergeInteractive(left, right, estMinutes);
-}
-
-function mergeInteractive(left, right, estMinutes) {
-    return new Promise(resolve => {
-        const result = [];
-
-        function compareNext() {
-            if (!left.length && !right.length) {
-                document.getElementById('taskCompare').classList.add('hidden');
-                resolve(result);
-                return;
-            }
-            if (!left.length) {
-                result.push(...right);
-                document.getElementById('taskCompare').classList.add('hidden');
-                resolve(result);
-                return;
-            }
-            if (!right.length) {
-                result.push(...left);
-                document.getElementById('taskCompare').classList.add('hidden');
-                resolve(result);
-                return;
-            }
-
-            const compareContainer = document.getElementById('taskCompare');
-            compareContainer.classList.remove('hidden');
-
-            let estHeader = document.getElementById('sortEstimateHeader');
-            if (!estHeader) {
-                estHeader = document.createElement('p');
-                estHeader.id = 'sortEstimateHeader';
-                estHeader.style.fontWeight = 'bold';
-                estHeader.style.color = '#555';
-                compareContainer.insertBefore(estHeader, compareContainer.firstChild);
-            }
-            estHeader.textContent = `Estimated sorting time remaining: ~${estMinutes} min`;
-
-            document.getElementById('task1').textContent = left[0];
-            document.getElementById('task2').textContent = right[0];
-
-            document.getElementById('task1').onclick = () => {
-                result.push(left.shift());
-                compareNext();
-            };
-
-            document.getElementById('task2').onclick = () => {
-                result.push(right.shift());
-                compareNext();
-            };
-        }
-
-        compareNext();
-    });
 }
