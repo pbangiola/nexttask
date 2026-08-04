@@ -14,7 +14,7 @@ function startMergeSort(array) {
     
     mergeSortInteractive(array, estMinutes).then(sortedNames => {
        
-        //I think this step is why time sorting is broken.
+        //I think this step is why time is broken.
         const actualSortTimeMs = Date.now() - (sortStartTime * 1000);
 
         const userTasks = sortedNames.map(name => ({ 
