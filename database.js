@@ -7,34 +7,47 @@ const dbPath = path.join(dataDir, 'task_sorter.db');
 
 const db = new Database(dbPath);
 
-// Initialize relational schema for sessions, completed tasks, and persistent uncompleted task queue
+// create four tables: users, projects, tasks, and sessions
 db.exec(`
-    CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY,
-        updated_at INTEGER NOT NULL,
-        state_json TEXT NOT NULL
+ 
+    CREATE TABLE IF NOT EXISTS users (
+        userid INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT
     );
-
-    CREATE TABLE IF NOT EXISTS completed_tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        task_name TEXT NOT NULL,
-        estimated_minutes INTEGER NOT NULL,
-        actual_minutes INTEGER NOT NULL,
-        variance_minutes INTEGER NOT NULL,
-        completed_at INTEGER NOT NULL,
-        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    
+    CREATE TABLE IF NOT EXISTS projects (
+        projectid INTEGER PRIMARY KEY AUTOINCREMENT
+        project_name TEXT NOT NULL,
+        userid INTEGER NOT NULL,
+        project_priority INTEGER,
+        parent_project INTEGER,
+        FOREIGN KEY(userid) REFERENCES users(userid) ON DELETE CASCADE
     );
-
+    
     CREATE TABLE IF NOT EXISTS task_queue (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
+        taskid INTEGER PRIMARY KEY AUTOINCREMENT,
+        userid INTEGER NOT NULL,
         task_name TEXT NOT NULL,
-        estimated_minutes INTEGER DEFAULT 0,
+        project_id INTEGER NOT NULL, 
+        estimated_minutes INTEGER DEFAULT 10,
         elapsed_ms INTEGER DEFAULT 0,
-        sort_order INTEGER NOT NULL,
-        created_at INTEGER NOT NULL,
-        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        sort_order INTEGER,
+        started_at TIMESTAMP,
+        due_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        FOREIGN KEY(userid) REFERENCES users(userid) ON DELETE CASCADE,
+        FOREIGN KEY(projectid) REFERENCES projects(projectid) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE IF NOT EXISTS sessions (
+        sessionid TEXT PRIMARY KEY,
+        userid INTEGER NOT NULL,
+        session_start TIMESTAMP NOT NULL,
+        hardstop TIMESTAMP,
+        hardstop_reason TEXT,
+        softstop TIMESTAMP,
+        session_end TIMESTAMP,
+        FOREIGN KEY(userid) REFERENCES users(userid) ON DELETE CASCADE
     );
 `);
 
