@@ -5,7 +5,7 @@ const db = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BACKEND_VERSION = 'canonical-tasks-v2';
+const BACKEND_VERSION = 'canonical-tasks-v3';
 
 const defaultAllowedOrigins = [
     'https://pbangiola.github.io',
@@ -120,12 +120,16 @@ app.post('/api/session/:id/queue/remove', (req, res) => {
     }
 });
 
+// Legacy analytics logging is best-effort only. Canonical task completion is
+// authoritative and must not fail because the old completed_tasks table rejects
+// an insert during migration.
 app.post('/api/session/:id/tasks/completed', (req, res) => {
+    const { taskName, estimatedMinutes, actualMinutes, completedAt } = req.body;
+    if (!taskName || estimatedMinutes === undefined || actualMinutes === undefined) {
+        return res.status(400).json({ error: 'Missing required task log data.' });
+    }
+
     try {
-        const { taskName, estimatedMinutes, actualMinutes, completedAt } = req.body;
-        if (!taskName || estimatedMinutes === undefined || actualMinutes === undefined) {
-            return res.status(400).json({ error: 'Missing required task log data.' });
-        }
         db.logCompletedTask(
             req.params.id,
             taskName,
@@ -133,9 +137,18 @@ app.post('/api/session/:id/tasks/completed', (req, res) => {
             parseInt(actualMinutes, 10),
             completedAt
         );
-        res.json({ success: true });
+        return res.json({ success: true, legacyAnalyticsLogged: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to log completed task' });
+        console.warn('Legacy completion analytics write skipped:', {
+            sessionId: req.params.id,
+            taskName,
+            error: err.message
+        });
+        return res.status(202).json({
+            success: true,
+            legacyAnalyticsLogged: false,
+            warning: err.message
+        });
     }
 });
 
