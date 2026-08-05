@@ -20,21 +20,16 @@ const configuredOrigins = (process.env.FRONTEND_ORIGINS || '')
     .filter(Boolean);
 
 const allowedOrigins = new Set([...defaultAllowedOrigins, ...configuredOrigins]);
+const TASK_STATUSES = new Set(['pending', 'active', 'blocked', 'completed', 'cancelled']);
 
 app.use(cors({
     origin(origin, callback) {
-        // Requests without an Origin header include Railway health checks,
-        // server-to-server requests, and direct browser navigation.
         if (!origin) return callback(null, true);
-
         const normalizedOrigin = origin.replace(/\/$/, '');
-        if (allowedOrigins.has(normalizedOrigin)) {
-            return callback(null, true);
-        }
-
+        if (allowedOrigins.has(normalizedOrigin)) return callback(null, true);
         return callback(new Error(`CORS blocked request from ${origin}`));
     },
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type']
 }));
 
@@ -45,6 +40,7 @@ app.get('/api/health', (req, res) => {
     res.json({ ok: true, service: 'task-sorter-backend', timestamp: Date.now() });
 });
 
+// Existing session endpoints remain active during migration.
 app.get('/api/session/:id', (req, res) => {
     try {
         const sessionState = db.getSession(req.params.id);
@@ -109,7 +105,6 @@ app.post('/api/session/:id/tasks/completed', (req, res) => {
         if (!taskName || estimatedMinutes === undefined || actualMinutes === undefined) {
             return res.status(400).json({ error: 'Missing required task log data.' });
         }
-
         db.logCompletedTask(
             req.params.id,
             taskName,
@@ -139,6 +134,81 @@ app.get('/api/session/:id/stats', (req, res) => {
         });
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch user statistics' });
+    }
+});
+
+// Canonical durable task API.
+app.get('/api/session/:id/tasks', (req, res) => {
+    try {
+        const status = req.query.status || null;
+        if (status && !TASK_STATUSES.has(status)) {
+            return res.status(400).json({ error: 'Invalid task status' });
+        }
+        res.json({ tasks: db.getTasks(req.params.id, status) });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch tasks' });
+    }
+});
+
+app.get('/api/session/:id/tasks/:taskId', (req, res) => {
+    try {
+        const task = db.getTask(req.params.id, req.params.taskId);
+        if (!task) return res.status(404).json({ error: 'Task not found' });
+        res.json({ task });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch task' });
+    }
+});
+
+app.put('/api/session/:id/tasks/:taskId', (req, res) => {
+    try {
+        const task = { ...req.body, id: req.params.taskId };
+        if (!task.name || !String(task.name).trim()) {
+            return res.status(400).json({ error: 'Task name is required' });
+        }
+        if (task.status && !TASK_STATUSES.has(task.status)) {
+            return res.status(400).json({ error: 'Invalid task status' });
+        }
+        res.json({ task: db.upsertTask(req.params.id, task) });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to save task' });
+    }
+});
+
+app.patch('/api/session/:id/tasks/:taskId', (req, res) => {
+    try {
+        if (req.body.status && !TASK_STATUSES.has(req.body.status)) {
+            return res.status(400).json({ error: 'Invalid task status' });
+        }
+        const task = db.updateTask(req.params.id, req.params.taskId, req.body);
+        if (!task) return res.status(404).json({ error: 'Task not found' });
+        res.json({ task });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to update task' });
+    }
+});
+
+app.post('/api/session/:id/tasks/:taskId/complete', (req, res) => {
+    try {
+        const task = db.completeTask(req.params.id, req.params.taskId, req.body.completedAt || Date.now());
+        if (!task) return res.status(404).json({ error: 'Task not found' });
+        res.json({ task });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to complete task' });
+    }
+});
+
+app.post('/api/session/:id/tasks/:taskId/block', (req, res) => {
+    try {
+        const blocker = req.body.blocker;
+        if (!blocker || !blocker.id || !blocker.name) {
+            return res.status(400).json({ error: 'blocker.id and blocker.name are required' });
+        }
+        const result = db.blockAndRequeueTasks(req.params.id, req.params.taskId, blocker);
+        if (!result) return res.status(404).json({ error: 'Blocked task not found' });
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to block and requeue tasks' });
     }
 });
 
