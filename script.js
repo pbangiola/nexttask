@@ -12,23 +12,25 @@
         return source.replace(searchValue, replacement);
     }
 
+    function replaceAllOrThrow(source, searchValue, replacement, label) {
+        if (!source.includes(searchValue)) {
+            throw new Error(`Unable to apply workflow patch: ${label}`);
+        }
+        return source.split(searchValue).join(replacement);
+    }
+
     try {
         const response = await fetch('script.original.js', { cache: 'no-store' });
-        if (!response.ok) {
-            throw new Error(`Unable to load workflow baseline (${response.status})`);
-        }
+        if (!response.ok) throw new Error(`Unable to load workflow baseline (${response.status})`);
 
         const baselineSource = await response.text();
         const workflowStart = baselineSource.indexOf(marker);
-
-        if (workflowStart === -1) {
-            throw new Error('Workflow boundary marker was not found in script.original.js');
-        }
+        if (workflowStart === -1) throw new Error('Workflow boundary marker was not found in script.original.js');
 
         let workflowSource = baselineSource.slice(workflowStart);
 
-        // Keep the timer running past zero. It simply turns red and continues
-        // counting negative time until the user explicitly completes the task.
+        // Keep the timer running past zero. It turns red and continues counting
+        // negative time until the user explicitly completes the task.
         workflowSource = replaceOrThrow(
             workflowSource,
             `        const absTime = Math.abs(timeRemaining);\n        const minutes = Math.floor(absTime / 60);\n        const seconds = absTime % 60;\n        timerDisplay.textContent = \`Time Remaining: \${timeRemaining >= 0 ? '' : '-'}\${minutes}:\${seconds < 10 ? '0' : ''}\${seconds}\`;\n\n        if (timeRemaining <= 0) {\n            clearInterval(timerInterval);\n            alert(\`Time's up for "\${currentTask.name}"! Let's move on to the next task.\`);\n            finalizeCurrentTaskAndAdvance();\n        }`,
@@ -36,7 +38,6 @@
             'focus timer behavior and formatting'
         );
 
-        // Use the same HH:MM:SS formatting on the completion summary.
         workflowSource = replaceOrThrow(
             workflowSource,
             `    spareTimeDisplay.textContent = \`Time Remaining: \${spareTime >= 0 ? '' : '-'}\${hours}:\${minutes < 10 ? '0' : ''}:\${seconds < 10 ? '0' : ''}\${seconds}\`;`,
@@ -44,10 +45,34 @@
             'completion timer formatting'
         );
 
+        // Preserve stable IDs when resuming from canonical tasks.
+        workflowSource = replaceOrThrow(
+            workflowSource,
+            `        sortedTasks = queue.map(q => ({\n            name: q.task_name,\n            estimatedTime: q.estimated_minutes || 0,\n            actualTimeMs: q.elapsed_ms || 0,\n            timestamps: { created: Date.now(), started: null, completed: null }\n        }));\n        currentTaskIndex = 0;`,
+            `        sortedTasks = queue.map(q => ({\n            id: q.id || null,\n            name: q.task_name,\n            status: q.status || 'pending',\n            estimatedTime: q.estimated_minutes || 0,\n            actualTimeMs: q.elapsed_ms || 0,\n            timestamps: { created: q.created_at || Date.now(), started: null, completed: null }\n        }));\n        sortedTasks.forEach(ensureTaskId);\n        currentTaskIndex = 0;\n        setActiveTaskFromCurrentIndex();`,
+            'canonical resume identity'
+        );
+
+        // The legacy workflow still advances an index; immediately derive the
+        // authoritative activeTaskId after each advance.
+        workflowSource = replaceAllOrThrow(
+            workflowSource,
+            `        currentTaskIndex++;`,
+            `        currentTaskIndex++;\n        setActiveTaskFromCurrentIndex();`,
+            'task advancement identity synchronization'
+        );
+
+        // Checklist completion recalculates the index in one assignment.
+        workflowSource = replaceOrThrow(
+            workflowSource,
+            `        currentTaskIndex = originallyCompleted.length + newlyCompleted.length;\n\n        saveSession();`,
+            `        currentTaskIndex = originallyCompleted.length + newlyCompleted.length;\n        setActiveTaskFromCurrentIndex();\n\n        saveSession();`,
+            'checklist active task synchronization'
+        );
+
         (0, eval)(`${workflowSource}\n//# sourceURL=task-sorter-workflow.js`);
     } catch (error) {
         console.error('Task Sorter workflow failed to initialize:', error);
-
         const container = document.getElementById('dynamicContainer');
         if (container) {
             container.innerHTML = '';
