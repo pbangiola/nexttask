@@ -50,6 +50,13 @@ const getOpenTasksStmt = db.prepare(`
     ORDER BY sort_order ASC, created_at ASC;
 `);
 
+const moveOpenTasksToSessionStmt = db.prepare(`
+    UPDATE tasks
+    SET session_id = ?, updated_at = ?
+    WHERE user_id = ?
+      AND status NOT IN ('completed', 'cancelled');
+`);
+
 module.exports = {
     ensureUser(userId) {
         const now = Date.now();
@@ -68,6 +75,13 @@ module.exports = {
 
     getOpenTasks(userId) {
         this.ensureUser(userId);
+        return getOpenTasksStmt.all(String(userId));
+    },
+
+    importOpenTasksIntoSession(userId, sessionId) {
+        this.ensureUser(userId);
+        this.claimUnownedTasks(userId);
+        moveOpenTasksToSessionStmt.run(String(sessionId), Date.now(), String(userId));
         return getOpenTasksStmt.all(String(userId));
     }
 };
