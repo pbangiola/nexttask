@@ -5,12 +5,10 @@ function apiUrl(path) {
 
 function ensureTaskId(task) {
     if (task.id) return task.id;
-
     const createdAt = task.timestamps?.created || Date.now();
     const randomPart = typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
         : Math.random().toString(36).slice(2, 10);
-
     task.id = `task_${sessionId}_${createdAt}_${randomPart}`;
     return task.id;
 }
@@ -22,13 +20,11 @@ function syncCurrentTaskIndexFromActiveId() {
         activeTaskId = sortedTasks[currentTaskIndex]?.id || null;
         return;
     }
-
     const activeIndex = sortedTasks.findIndex(task => task.id === activeTaskId);
     if (activeIndex >= 0) {
         currentTaskIndex = activeIndex;
         return;
     }
-
     activeTaskId = null;
     syncCurrentTaskIndexFromActiveId();
 }
@@ -40,18 +36,14 @@ function setActiveTask(taskOrId) {
 
 function getActiveTask() {
     syncCurrentTaskIndexFromActiveId();
-    return activeTaskId
-        ? sortedTasks.find(task => task.id === activeTaskId) || null
-        : null;
+    return activeTaskId ? sortedTasks.find(task => task.id === activeTaskId) || null : null;
 }
 
-function advanceActiveTask() {
-    const activeIndex = sortedTasks.findIndex(task => task.id === activeTaskId);
-    const nextTask = sortedTasks.slice(Math.max(0, activeIndex + 1))
-        .find(task => task.status !== 'completed' && !task.timestamps?.completed);
-    activeTaskId = nextTask?.id || null;
-    syncCurrentTaskIndexFromActiveId();
-    return nextTask || null;
+function setActiveTaskFromCurrentIndex() {
+    const task = sortedTasks[currentTaskIndex] || null;
+    activeTaskId = task?.id || null;
+    if (task && task.status !== 'blocked') task.status = 'active';
+    return task;
 }
 
 function canonicalRowToTask(row) {
@@ -111,14 +103,14 @@ async function saveCanonicalTask(task, sortOrder, status = task.status || 'pendi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     });
-
     if (!response.ok) throw new Error(`Canonical task save failed (${response.status})`);
     return response.json();
 }
 
 async function saveSession() {
     sortedTasks.forEach(ensureTaskId);
-    syncCurrentTaskIndexFromActiveId();
+    if (activeTaskId) syncCurrentTaskIndexFromActiveId();
+    else setActiveTaskFromCurrentIndex();
 
     const sessionState = {
         sortedTasks,
@@ -136,7 +128,6 @@ async function saveSession() {
     };
 
     localStorage.setItem('taskSorterSession_fallback', JSON.stringify(sessionState));
-
     try {
         await fetch(apiUrl(`/api/session/${sessionId}`), {
             method: 'PUT',
@@ -150,13 +141,11 @@ async function saveSession() {
 
 async function loadSession() {
     let state = null;
-
-    // Canonical tasks are now the preferred source of truth.
     const canonicalRows = await fetchCanonicalTasks();
     if (canonicalRows.length > 0) {
         sortedTasks = canonicalRows.map(canonicalRowToTask);
         const active = sortedTasks.find(task => task.status === 'active')
-            || sortedTasks.find(task => task.status !== 'completed');
+            || sortedTasks.find(task => task.status !== 'completed' && task.status !== 'cancelled');
         activeTaskId = active?.id || null;
         syncCurrentTaskIndexFromActiveId();
     }
@@ -175,33 +164,32 @@ async function loadSession() {
         }
     }
 
-    if (state) {
-        try {
-            if (sortedTasks.length === 0) {
-                sortedTasks = state.sortedTasks || [];
-                sortedTasks.forEach(ensureTaskId);
-                activeTaskId = state.activeTaskId || sortedTasks[state.currentTaskIndex || 0]?.id || null;
-                syncCurrentTaskIndexFromActiveId();
-            }
+    if (!state) return;
 
-            deadline = state.deadline || 0;
-            spareTime = state.spareTime || 0;
-            taskStartTimestamp = state.taskStartTimestamp || 0;
-            pausedSecondsRemaining = state.pausedSecondsRemaining || 0;
-            totalAvailableTime = state.totalAvailableTime || 0;
-            endConstraint = state.endConstraint || '';
-            sessionStartTimestamp = state.sessionStartTimestamp || null;
-            currentStepStartTimestamp = state.currentStepStartTimestamp || null;
-
-            if (state.activeView && state.activeView !== 'mode-select') {
-                document.getElementById('modeSelect')?.classList.add('hidden');
-                document.getElementById('timeConstraintInput')?.classList.add('hidden');
-                document.getElementById('taskInput')?.classList.add('hidden');
-                routeToStoredView(state.activeView);
-            }
-        } catch (e) {
-            console.error('Error restoring session state:', e);
+    try {
+        if (sortedTasks.length === 0) {
+            sortedTasks = state.sortedTasks || [];
+            sortedTasks.forEach(ensureTaskId);
+            activeTaskId = state.activeTaskId || sortedTasks[state.currentTaskIndex || 0]?.id || null;
+            syncCurrentTaskIndexFromActiveId();
         }
+        deadline = state.deadline || 0;
+        spareTime = state.spareTime || 0;
+        taskStartTimestamp = state.taskStartTimestamp || 0;
+        pausedSecondsRemaining = state.pausedSecondsRemaining || 0;
+        totalAvailableTime = state.totalAvailableTime || 0;
+        endConstraint = state.endConstraint || '';
+        sessionStartTimestamp = state.sessionStartTimestamp || null;
+        currentStepStartTimestamp = state.currentStepStartTimestamp || null;
+
+        if (state.activeView && state.activeView !== 'mode-select') {
+            document.getElementById('modeSelect')?.classList.add('hidden');
+            document.getElementById('timeConstraintInput')?.classList.add('hidden');
+            document.getElementById('taskInput')?.classList.add('hidden');
+            routeToStoredView(state.activeView);
+        }
+    } catch (e) {
+        console.error('Error restoring session state:', e);
     }
 }
 
@@ -219,8 +207,6 @@ async function fetchExistingQueue() {
                 created_at: row.created_at
             }));
     }
-
-    // Temporary fallback for sessions created before the canonical task model.
     try {
         const res = await fetch(apiUrl(`/api/session/${sessionId}/queue`));
         if (res.ok) {
@@ -235,13 +221,12 @@ async function fetchExistingQueue() {
 
 async function syncPendingQueueToBackend() {
     sortedTasks.forEach(ensureTaskId);
-    syncCurrentTaskIndexFromActiveId();
+    if (!activeTaskId) setActiveTaskFromCurrentIndex();
+    else syncCurrentTaskIndexFromActiveId();
 
     const pendingTasks = sortedTasks.filter(task => task.status !== 'completed' && !task.timestamps?.completed);
-
     await saveSession();
 
-    // Canonical writes are primary.
     try {
         await Promise.all(pendingTasks.map((task, index) => {
             const status = task.id === activeTaskId ? 'active' : (task.status === 'blocked' ? 'blocked' : 'pending');
@@ -252,13 +237,11 @@ async function syncPendingQueueToBackend() {
         console.warn('Failed to sync canonical tasks:', e);
     }
 
-    // Legacy queue write remains temporarily for rollback compatibility.
     const pending = pendingTasks.map(task => ({
         name: task.name,
         estimatedTime: task.estimatedTime || 0,
         elapsedMs: task.actualTimeMs || 0
     }));
-
     try {
         await fetch(apiUrl(`/api/session/${sessionId}/queue`), {
             method: 'PUT',
@@ -268,7 +251,6 @@ async function syncPendingQueueToBackend() {
     } catch (e) {
         console.warn('Failed to sync legacy pending queue:', e);
     }
-
     await saveSession();
 }
 
@@ -310,7 +292,6 @@ async function logTaskCompletionToBackend(task) {
         console.warn('Failed to mark canonical task complete:', e);
     }
 
-    // Temporary legacy analytics write.
     try {
         await fetch(apiUrl(`/api/session/${sessionId}/tasks/completed`), {
             method: 'POST',
@@ -325,9 +306,6 @@ async function logTaskCompletionToBackend(task) {
     } catch (e) {
         console.warn('Failed to push legacy completed task log:', e);
     }
-
-    if (activeTaskId === task.id) advanceActiveTask();
-    await saveSession();
 }
 
 function getActiveViewContext() {
@@ -345,7 +323,6 @@ function getActiveViewContext() {
 
 function routeToStoredView(view) {
     const nowSec = Math.floor(Date.now() / 1000);
-
     switch (view) {
         case 'work-choice':
             document.getElementById('workChoiceStep')?.classList.remove('hidden');
