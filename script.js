@@ -53,8 +53,160 @@
             'canonical resume identity'
         );
 
+        // Import either the completed-task CSV export or the uncompleted-task TXT export.
+        const oldImportStart = `// CSV Session Resumption\nfunction handleCSVUpload(event) {`;
+        const oldImportEnd = `\n// Upfront Timings Gateway Motif`;
+        const importStartIndex = workflowSource.indexOf(oldImportStart);
+        const importEndIndex = workflowSource.indexOf(oldImportEnd, importStartIndex);
+        if (importStartIndex === -1 || importEndIndex === -1) {
+            throw new Error('Unable to apply workflow patch: CSV/TXT importer');
+        }
+
+        const importerSource = `// CSV or TXT Session Resumption
+function handleCSVUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    if (!['csv', 'txt'].includes(extension)) {
+        alert('Please choose a CSV or TXT task file.');
+        event.target.value = '';
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const text = String(e.target.result || '');
+            const parsedTasks = extension === 'csv'
+                ? parseTasksFromCSV(text)
+                : parseTasksFromTXT(text);
+
+            if (parsedTasks.length === 0) {
+                alert("We couldn't find any tasks in that file.");
+                return;
+            }
+
+            if (!sessionStartTimestamp) sessionStartTimestamp = Date.now();
+            document.getElementById('timeConstraintInput')?.classList.add('hidden');
+            document.getElementById('taskInput')?.classList.add('hidden');
+
+            sortedTasks = parsedTasks;
+            currentTaskIndex = parsedTasks.findIndex(task => task.status !== 'completed');
+            if (currentTaskIndex === -1) currentTaskIndex = parsedTasks.length;
+            setActiveTaskFromCurrentIndex();
+
+            saveSession();
+            syncPendingQueueToBackend();
+            displaySortedTasks();
+            event.target.value = '';
+        } catch (error) {
+            console.error('Task file import failed:', error);
+            alert('That file could not be imported. Check its formatting and try again.');
+        }
+    };
+    reader.onerror = function() {
+        alert('The file could not be read.');
+    };
+    reader.readAsText(file);
+}
+
+function createImportedTask(name, estimatedTime = 0, actualMinutes = 0) {
+    const completed = actualMinutes > 0;
+    const task = {
+        name,
+        status: completed ? 'completed' : 'pending',
+        estimatedTime,
+        actualTimeMs: actualMinutes * 60000,
+        timestamps: {
+            created: Date.now(),
+            started: null,
+            completed: completed ? Date.now() : null
+        }
+    };
+    ensureTaskId(task);
+    return task;
+}
+
+function parseTasksFromTXT(text) {
+    return text
+        .split(/\\r?\\n/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .filter(line => !/^uncompleted tasks$/i.test(line) && !/^-{3,}$/.test(line))
+        .map(line => line.replace(/^\\d+\\.\\s*/, '').trim())
+        .filter(Boolean)
+        .map(name => createImportedTask(name));
+}
+
+function parseTasksFromCSV(text) {
+    const lines = text.split(/\\r?\\n/).map(line => line.trim()).filter(Boolean);
+    if (lines.length === 0) return [];
+
+    const firstRow = parseCSVRow(lines[0]);
+    const hasHeader = firstRow.some(value => /task name|estimated time|actual time/i.test(value));
+    const startIndex = hasHeader ? 1 : 0;
+    const tasks = [];
+
+    for (let index = startIndex; index < lines.length; index++) {
+        const columns = parseCSVRow(lines[index]);
+        const name = String(columns[0] || '').trim();
+        if (!name) continue;
+        const estimatedTime = parseInt(columns[1], 10) || 0;
+        const actualMinutes = parseInt(columns[2], 10) || 0;
+        tasks.push(createImportedTask(name, estimatedTime, actualMinutes));
+    }
+    return tasks;
+}
+
+function parseCSVRow(row) {
+    const values = [];
+    let currentValue = '';
+    let insideQuotes = false;
+
+    for (let index = 0; index < row.length; index++) {
+        const character = row[index];
+        if (character === '"') {
+            if (insideQuotes && row[index + 1] === '"') {
+                currentValue += '"';
+                index++;
+            } else {
+                insideQuotes = !insideQuotes;
+            }
+        } else if (character === ',' && !insideQuotes) {
+            values.push(currentValue);
+            currentValue = '';
+        } else {
+            currentValue += character;
+        }
+    }
+    values.push(currentValue);
+    return values;
+}
+`;
+        workflowSource = workflowSource.slice(0, importStartIndex)
+            + importerSource
+            + workflowSource.slice(importEndIndex);
+
+        // When inserting at the current slot, the new task becomes active before
+        // any save. Otherwise activeTaskId would pull the index back to the old task.
+        workflowSource = replaceOrThrow(
+            workflowSource,
+            `        const arrayInsertionIndex = targetSlot - 1; \n\n        sortedTasks.splice(arrayInsertionIndex, 0, newTaskObj);\n        syncPendingQueueToBackend();\n        \n        // If user inserted the new task as current top priority, prompt for time estimate immediately\n        if (arrayInsertionIndex === currentTaskIndex) {\n            promptTimingForNewActiveTask(currentTaskIndex);\n        } else {\n            displaySortedTasks();\n        }`,
+            `        ensureTaskId(newTaskObj);\n        const arrayInsertionIndex = targetSlot - 1;\n        sortedTasks.splice(arrayInsertionIndex, 0, newTaskObj);\n\n        if (arrayInsertionIndex === currentTaskIndex) {\n            setActiveTask(newTaskObj);\n            syncPendingQueueToBackend();\n            promptTimingForNewActiveTask(currentTaskIndex);\n        } else {\n            syncPendingQueueToBackend();\n            displaySortedTasks();\n        }`,
+            'current-slot task insertion'
+        );
+
+        // Ending a session pauses the active task; it must not silently complete it.
+        workflowSource = replaceOrThrow(
+            workflowSource,
+            `    if (document.getElementById('focusScreen') && currentTaskIndex < sortedTasks.length) {\n        const nowMs = Date.now();\n        const nowSec = Math.floor(nowMs / 1000);\n        const task = sortedTasks[currentTaskIndex];\n        \n        const actualElapsedMs = nowMs - (task.timestamps?.lastStarted || (taskStartTimestamp * 1000));\n        task.actualTimeMs = (task.actualTimeMs || 0) + actualElapsedMs;\n        task.timestamps.completed = nowMs;\n        spareTime += (deadline - nowSec);\n        \n        logTaskCompletionToBackend(task);\n        currentTaskIndex++;\n    }`,
+            `    if (document.getElementById('focusScreen') && currentTaskIndex < sortedTasks.length) {\n        const nowMs = Date.now();\n        const nowSec = Math.floor(nowMs / 1000);\n        const task = sortedTasks[currentTaskIndex];\n\n        const actualElapsedMs = nowMs - (task.timestamps?.lastStarted || (taskStartTimestamp * 1000));\n        task.actualTimeMs = (task.actualTimeMs || 0) + Math.max(0, actualElapsedMs);\n        pausedSecondsRemaining = deadline - nowSec;\n        task.status = 'active';\n        task.timestamps.lastStarted = null;\n        setActiveTask(task);\n        await syncPendingQueueToBackend();\n    }`,
+            'end-session pause behavior'
+        );
+
         // The legacy workflow still advances an index; immediately derive the
-        // authoritative activeTaskId after each advance.
+        // authoritative activeTaskId after each true completion.
         workflowSource = replaceAllOrThrow(
             workflowSource,
             `        currentTaskIndex++;`,
@@ -62,7 +214,6 @@
             'task advancement identity synchronization'
         );
 
-        // Checklist completion recalculates the index in one assignment.
         workflowSource = replaceOrThrow(
             workflowSource,
             `        currentTaskIndex = originallyCompleted.length + newlyCompleted.length;\n\n        saveSession();`,
