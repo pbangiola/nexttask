@@ -15,13 +15,26 @@ router.put('/users/:userId', (req, res) => {
 
 router.get('/users/:userId/tasks', (req, res) => {
     try {
-        // Existing rows predate user ownership. With only one current user,
-        // claim those rows once so the migration does not strand their tasks.
         userStore.claimUnownedTasks(req.params.userId);
         res.json({ tasks: userStore.getOpenTasks(req.params.userId) });
     } catch (error) {
         console.error('Failed to load user tasks:', error);
         res.status(500).json({ error: 'Failed to load user tasks', detail: error.message });
+    }
+});
+
+router.post('/users/:userId/tasks/import', (req, res) => {
+    try {
+        const { sessionId } = req.body;
+        if (!sessionId) {
+            return res.status(400).json({ error: 'sessionId is required' });
+        }
+
+        const tasks = userStore.importOpenTasksIntoSession(req.params.userId, sessionId);
+        res.json({ tasks, sessionId });
+    } catch (error) {
+        console.error('Failed to import user tasks:', error);
+        res.status(500).json({ error: 'Failed to import user tasks', detail: error.message });
     }
 });
 
