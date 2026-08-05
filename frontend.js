@@ -4,6 +4,7 @@ this file contains functions for the browser level script to synchronize with th
 
 async function fetchExistingQueue() {
     try {
+        //this is wrong. it should pull the user's task list, not the session queue. the session queue is a temporary thing that is not persisted.
         const res = await fetch(`/api/session/${sessionId}/queue`);
         if (res.ok) {
             const data = await res.json();

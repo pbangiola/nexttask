@@ -3,8 +3,167 @@
 // Core merge sort code
 /* This is a human-mediated mergesort algorithm conceived and designed by Paul Bangiola in 2024. The algorithm takes a list of user tasks and runs them through a mergesort algorithm. They are recursively split. the user is then prompted to compare them, two at a time, in order to generate a sorted task list.
 */
+// --- App Initialization & Event Handlers ---
+function initApp() {
+    document.getElementById('csvUpload')?.addEventListener('change', handleCSVUpload);
+    document.getElementById('stopWorkingBtn')?.addEventListener('click', handleStopWorking);
+    document.getElementById('tasks')?.addEventListener('input', checkTaskInputCapacity);
 
-async function newtask(taskname) {
+    document.getElementById('startOverBtn')?.addEventListener('click', showStartOverPrompt);
+
+    document.getElementById('workBtn')?.addEventListener('click', () => {
+        sessionStartTimestamp = Date.now();
+        document.getElementById('modeSelect').classList.add('hidden');
+        document.getElementById('workChoiceStep').classList.remove('hidden');
+        showStartOverBtn();
+        saveSession();
+    });
+
+    document.getElementById('createNewListBtn')?.addEventListener('click', () => {
+        document.getElementById('workChoiceStep').classList.add('hidden');
+        document.getElementById('timeConstraintInput').classList.remove('hidden');
+        showStartOverBtn();
+        saveSession();
+    });
+
+   document.getElementById('resumeExistingListBtn')?.addEventListener('click', async () => {
+    // Attempt to load the saved session state (local first, then server fallback)
+    const loaded = await loadSession();
+
+    if (!loaded || !sortedTasks || sortedTasks.length === 0) {
+        alert("There's no saved list to resume yet — let's start a new one.");
+        return;
+    }
+
+    // UI Transition
+    document.getElementById('workChoiceStep')?.classList.add('hidden');
+    if (typeof hideStartOverBtn === 'function') hideStartOverBtn();
+    
+    // Save state update and trigger task flow
+    saveSession();
+    if (typeof startDeadlineSetting === 'function') startDeadlineSetting();
+});
+
+    document.getElementById('timeConstraintNextBtn')?.addEventListener('click', () => {
+        const timeVal = parseInt(document.getElementById('availableTime').value, 10);
+        const constraintVal = document.getElementById('endConstraint').value.trim();
+
+        if (!timeVal || timeVal <= 0) {
+            alert("How many minutes do you have? Enter a number to continue.");
+            return;
+        }
+
+        totalAvailableTime = timeVal;
+        endConstraint = constraintVal;
+
+        document.getElementById('timeConstraintInput').classList.add('hidden');
+        
+        const taskInputContainer = document.getElementById('taskInput');
+        taskInputContainer.classList.remove('hidden');
+        checkTaskInputCapacity();
+        showStartOverBtn();
+        saveSession();
+    });
+
+    document.getElementById('startSort')?.addEventListener('click', () => {
+        const taskInput = document.getElementById('tasks').value.trim();
+        if (!taskInput) {
+            alert('Add at least one task to get started.');
+            return;
+        }
+
+        let rawTasks = taskInput.split('\n').map(t => t.trim()).filter(t => t);
+        rawTasks = [...new Set(rawTasks)];
+
+        const skipSort = document.getElementById('skipSortCheckbox').checked;
+
+        document.getElementById('taskInput').classList.add('hidden');
+
+        if (skipSort || rawTasks.length <= 1) {
+            sortedTasks = rawTasks.map(name => ({ 
+                name, 
+                estimatedTime: 0, 
+                actualTimeMs: 0,
+                timestamps: { created: Date.now(), started: null, completed: null } 
+            }));
+            currentTaskIndex = 0;
+            saveSession();
+            syncPendingQueueToBackend();
+            promptForUpfrontTimings();
+        } else {
+            currentSortRawTasks = rawTasks;
+            sortStartTime = Math.floor(Date.now() / 1000);
+            startMergeSort(rawTasks);
+        }
+    });
+
+    loadSession();
+}
+
+async function loadSession() {
+    let state = null;
+
+    // 1. Prioritize reading from local cache
+    const saved = localStorage.getItem('taskSorterSession_fallback');
+    if (saved) {
+        try { 
+            state = JSON.parse(saved); 
+        } catch (e) {
+            console.warn("Failed to parse taskSorterSession_fallback:", e);
+        }
+    }
+
+    // 2. Only fetch from backend if local storage is missing or empty
+    if (!state) {
+        // Ensure sessionId exists before attempting a fetch
+        if (typeof sessionId !== 'undefined' && sessionId) {
+            try {
+                const res = await fetch(`/api/session/${sessionId}`);
+                if (res.ok) {
+                    state = await res.json();
+                }
+            } catch (e) {
+                console.warn("Could not reach backend or restore session from server:", e);
+            }
+        }
+    }
+
+    // If neither local nor server has a saved session, exit cleanly
+    if (!state) {
+        return false;
+    }
+
+    // 3. Hydrate state variables
+    try {
+        sortedTasks = state.sortedTasks || [];
+        currentTaskIndex = state.currentTaskIndex || 0;
+        deadline = state.deadline || 0;
+        spareTime = state.spareTime || 0;
+        taskStartTimestamp = state.taskStartTimestamp || 0;
+        pausedSecondsRemaining = state.pausedSecondsRemaining || 0;
+        totalAvailableTime = state.totalAvailableTime || 0;
+        endConstraint = state.endConstraint || "";
+        sessionStartTimestamp = state.sessionStartTimestamp || null;
+        currentStepStartTimestamp = state.currentStepStartTimestamp || null;
+
+        // Restore view state if activeView exists
+        if (state.activeView && state.activeView !== 'mode-select') {
+            document.getElementById('modeSelect')?.classList.add('hidden');
+            document.getElementById('timeConstraintInput')?.classList.add('hidden');
+            document.getElementById('taskInput')?.classList.add('hidden');
+
+            if (typeof routeToStoredView === 'function') {
+                routeToStoredView(state.activeView);
+            }
+        }
+
+        return true; // Successfully restored
+    } catch (e) {
+        console.error("Error restoring session state:", e);
+        return false;
+    }
+}
+function newtask(taskname) {
     const thistask =  {
         taskid = userId + Date.now(),
         userId = userId,
@@ -16,8 +175,10 @@ async function newtask(taskname) {
         started_at = null,
         due_at = null,
         completed_at = null,
-    }
+    };
+    return thistask;
 }
+
 //initialize mergesort
 function startMergeSort(array) {
     //set timing variables
@@ -117,86 +278,13 @@ function mergeInteractive(left, right, estMinutes) {
             };
         }
 
-        compareNext();
-});
+        compareNext();}
+)
+};
 
-// --- Persistence Layer, Task Queue, & User Analytics Sync ---
-async function saveSession() {
-    const sessionState = {
-        userid,
-        projectId,
-        sessionId,
-        sortedTasks,
-        currentTaskIndex,
-        hardstop,
-        hardstop_reason,
-        cumulativestimatedtime,
-        spareTime,
-        workStartTime,
-        activeView: getActiveViewContext() 
-    };
 
-    localStorage.setItem('taskSorterSession_fallback', JSON.stringify(sessionState));
 
-  /* this call is meant to save the session to the backend, but it's not the right content. I need to line this up with the server endpoints.  
-  try {
-        await fetch(`/api/session/${sessionId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(sessionState)
-        });
-    } catch (e) {
-        console.warn("Backend sync failed, state preserved in browser cache:", e);
-    }*/
-}
-
-    //this should prioritze loading from local storage
-async function loadSession() {
-    let state = null;
-
-    try {
-        const res = await fetch(`/api/session/${sessionId}`);
-        if (res.ok) {
-            state = await res.json();
-        }
-    } catch (e) {
-        console.warn("Could not reach backend, checking browser cache...", e);
-    }
-
-    if (!state) {
-        const saved = localStorage.getItem('taskSorterSession_fallback');
-        if (saved) {
-            try { state = JSON.parse(saved); } catch (e) {}
-        }
-    }
-
-    if (!state) {
-        return;
-    }
-
-    try {
-        sortedTasks = state.sortedTasks || [];
-        currentTaskIndex = state.currentTaskIndex || 0;
-        deadline = state.deadline || 0;
-        spareTime = state.spareTime || 0;
-        taskStartTimestamp = state.taskStartTimestamp || 0;
-        pausedSecondsRemaining = state.pausedSecondsRemaining || 0;
-        totalAvailableTime = state.totalAvailableTime || 0;
-        endConstraint = state.endConstraint || "";
-        sessionStartTimestamp = state.sessionStartTimestamp || null;
-        currentStepStartTimestamp = state.currentStepStartTimestamp || null;
-
-        if (state.activeView && state.activeView !== 'mode-select') {
-            document.getElementById('modeSelect')?.classList.add('hidden');
-            document.getElementById('timeConstraintInput')?.classList.add('hidden');
-            document.getElementById('taskInput')?.classList.add('hidden');
-
-            routeToStoredView(state.activeView);
-        }
-    } catch (e) {
-        console.error("Error restoring session state:", e);
-    }
-}
+    
 
 function getActiveViewContext() {
     if (document.getElementById('focusScreen')) return 'focus';
@@ -258,108 +346,6 @@ function routeToStoredView(view) {
     }
 }
 
-// --- App Initialization & Event Handlers ---
-function initApp() {
-    document.getElementById('csvUpload')?.addEventListener('change', handleCSVUpload);
-    document.getElementById('stopWorkingBtn')?.addEventListener('click', handleStopWorking);
-    document.getElementById('tasks')?.addEventListener('input', checkTaskInputCapacity);
-
-    document.getElementById('startOverBtn')?.addEventListener('click', showStartOverPrompt);
-
-    document.getElementById('workBtn')?.addEventListener('click', () => {
-        sessionStartTimestamp = Date.now();
-        document.getElementById('modeSelect').classList.add('hidden');
-        document.getElementById('workChoiceStep').classList.remove('hidden');
-        showStartOverBtn();
-        saveSession();
-    });
-
-    document.getElementById('createNewListBtn')?.addEventListener('click', () => {
-        document.getElementById('workChoiceStep').classList.add('hidden');
-        document.getElementById('timeConstraintInput').classList.remove('hidden');
-        showStartOverBtn();
-        saveSession();
-    });
-
-    document.getElementById('resumeExistingListBtn')?.addEventListener('click', async () => {
-        const queue = await fetchExistingQueue();
-
-        if (queue.length === 0) {
-            alert("There's no saved list to resume yet — let's start a new one.");
-            return;
-        }
-
-        sortedTasks = queue.map(q => ({
-            name: q.task_name,
-            estimatedTime: q.estimated_minutes || 0,
-            actualTimeMs: q.elapsed_ms || 0,
-            timestamps: { created: Date.now(), started: null, completed: null }
-        }));
-        currentTaskIndex = 0;
-
-        document.getElementById('workChoiceStep').classList.add('hidden');
-        hideStartOverBtn();
-        saveSession();
-
-        // No sorting, no questions - go straight into the first task.
-        startDeadlineSetting();
-    });
-
-    document.getElementById('timeConstraintNextBtn')?.addEventListener('click', () => {
-        const timeVal = parseInt(document.getElementById('availableTime').value, 10);
-        const constraintVal = document.getElementById('endConstraint').value.trim();
-
-        if (!timeVal || timeVal <= 0) {
-            alert("How many minutes do you have? Enter a number to continue.");
-            return;
-        }
-
-        totalAvailableTime = timeVal;
-        endConstraint = constraintVal;
-
-        document.getElementById('timeConstraintInput').classList.add('hidden');
-        
-        const taskInputContainer = document.getElementById('taskInput');
-        taskInputContainer.classList.remove('hidden');
-        checkTaskInputCapacity();
-        showStartOverBtn();
-        saveSession();
-    });
-
-    document.getElementById('startSort')?.addEventListener('click', () => {
-        const taskInput = document.getElementById('tasks').value.trim();
-        if (!taskInput) {
-            alert('Add at least one task to get started.');
-            return;
-        }
-
-        let rawTasks = taskInput.split('\n').map(t => t.trim()).filter(t => t);
-        rawTasks = [...new Set(rawTasks)];
-
-        const skipSort = document.getElementById('skipSortCheckbox').checked;
-
-        document.getElementById('taskInput').classList.add('hidden');
-
-        if (skipSort || rawTasks.length <= 1) {
-            sortedTasks = rawTasks.map(name => ({ 
-                name, 
-                estimatedTime: 0, 
-                actualTimeMs: 0,
-                timestamps: { created: Date.now(), started: null, completed: null } 
-            }));
-            currentTaskIndex = 0;
-            saveSession();
-            syncPendingQueueToBackend();
-            promptForUpfrontTimings();
-        } else {
-            currentSortRawTasks = rawTasks;
-            sortStartTime = Math.floor(Date.now() / 1000);
-            startMergeSort(rawTasks);
-        }
-    });
-
-    loadSession();
-}
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initApp);
@@ -367,7 +353,7 @@ if (document.readyState === 'loading') {
     initApp();
 }
 
-// CSV Session Resumption
+/* CSV Session Resumption this needs to get rewritten
 function handleCSVUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -424,7 +410,7 @@ function handleCSVUpload(event) {
     };
     reader.readAsText(file);
 }
-
+*/
 // Upfront Timings Gateway Motif
 function promptForUpfrontTimings() {
     document.getElementById('taskCompare').classList.add('hidden');
@@ -455,7 +441,7 @@ function promptForUpfrontTimings() {
     saveSession();
 }
 
-// Sequential Timing Entry Routine
+// Sequential Timing Entry Routine. this can get simplified.
 function runSequentialTimingInput(index) {
     const currentAllocated = getTotalAllocatedTime();
 
@@ -1120,5 +1106,3 @@ function displaySpareTime() {
     saveSession();
 }
 
-
-}

@@ -17,6 +17,7 @@ const SCHEMAS = {
             userid INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT,
             alias INTEGER,
+            creation INTEGER,
             role TEXT DEFAULT 'customer'
         );
     `,
@@ -214,7 +215,7 @@ const getUserAggregateStatsStmt = db.prepare(`
     WHERE userid = ? AND completed_at IS NOT NULL;
 `);
 
-// --- Exported Interface ---
+// --- Import/Export methods ---
 
 module.exports = {
     // Session management
@@ -258,7 +259,7 @@ module.exports = {
     },
     getUserAggregateStats: (userId) => {
         return getUserAggregateStatsStmt.get(userId);
-    }
+    },
     // User management
     createUser: (email) => {
         const info = createUserStmt.run(email || null);

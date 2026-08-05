@@ -2,13 +2,14 @@
 //ux functions
 
 //reset button
+function hideStartOverBtn() {
+    document.getElementById('startOverBtn')?.classList.add('hidden');
+}
+
 function showStartOverBtn() {
     document.getElementById('startOverBtn')?.classList.remove('hidden');
 }
 
-function hideStartOverBtn() {
-    document.getElementById('startOverBtn')?.classList.add('hidden');
-}
 
 // Shows a three-option overlay: restart just the current step, restart the
 // whole session, or cancel and return to whatever was on screen.

@@ -40,7 +40,7 @@ let hardstop_reason = "";
 let spareTime = 0; 
 let cumulativestimatedtime = 0;
 
-const MAX_TASK_MINUTES = 30;
+const MAX_TASK_MINUTES = 60;
 //sets maximum task length
 
 
