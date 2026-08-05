@@ -1,6 +1,9 @@
 // --- Front-End Configuration and Shared State ---
 const MAX_TASK_MINUTES = 20;
 
+// GitHub Pages hosts only the frontend. API requests must go to the deployed backend.
+const API_BASE_URL = 'https://nexttask-7rj8.onrender.com';
+
 // Holds raw task names while an interactive sort is in progress.
 let currentSortRawTasks = [];
 
