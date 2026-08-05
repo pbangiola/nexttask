@@ -2,10 +2,12 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const db = require('./database');
+const userStore = require('./user-store');
+const userRoutes = require('./user-routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BACKEND_VERSION = 'canonical-tasks-v4';
+const BACKEND_VERSION = 'user-owned-tasks-v1';
 
 const defaultAllowedOrigins = [
     'https://pbangiola.github.io',
@@ -36,26 +38,27 @@ app.use(cors({
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, './')));
+app.use('/api', userRoutes);
 
 app.get('/api/health', (req, res) => {
     try {
         db.getTasks('__healthcheck__');
+        userStore.ensureUser('__healthcheck__');
         res.json({
             ok: true,
             service: 'task-sorter-backend',
             version: BACKEND_VERSION,
-            capabilities: ['sessions', 'legacy-queue', 'canonical-tasks'],
+            capabilities: ['users', 'sessions', 'canonical-tasks', 'user-task-resume'],
             canonicalTasksAvailable: true,
+            userTasksAvailable: true,
             timestamp: Date.now()
         });
     } catch (err) {
-        console.error('Canonical task health check failed:', err);
+        console.error('Backend health check failed:', err);
         res.status(500).json({
             ok: false,
             service: 'task-sorter-backend',
             version: BACKEND_VERSION,
-            capabilities: ['sessions', 'legacy-queue'],
-            canonicalTasksAvailable: false,
             error: err.message,
             timestamp: Date.now()
         });
@@ -65,21 +68,19 @@ app.get('/api/health', (req, res) => {
 app.get('/api/session/:id', (req, res) => {
     try {
         const sessionState = db.getSession(req.params.id);
-        // A new session ID has no persisted row yet. Return a clean empty state
-        // instead of a 404 so starting a new session is not treated as an error.
-        if (!sessionState) return res.json(null);
-        res.json(sessionState);
+        res.json(sessionState || null);
     } catch (err) {
-        res.status(500).json({ error: 'Failed to retrieve session' });
+        res.status(500).json({ error: 'Failed to retrieve session', detail: err.message });
     }
 });
 
 app.put('/api/session/:id', (req, res) => {
     try {
+        if (req.body.userId) userStore.ensureUser(req.body.userId);
         db.saveSession(req.params.id, req.body);
         res.json({ success: true, timestamp: Date.now() });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to save session' });
+        res.status(500).json({ error: 'Failed to save session', detail: err.message });
     }
 });
 
@@ -88,7 +89,7 @@ app.delete('/api/session/:id', (req, res) => {
         db.deleteSession(req.params.id);
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to clear session' });
+        res.status(500).json({ error: 'Failed to clear session', detail: err.message });
     }
 });
 
@@ -96,7 +97,7 @@ app.get('/api/session/:id/queue', (req, res) => {
     try {
         res.json({ queue: db.getUncompletedQueue(req.params.id) });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch task queue' });
+        res.status(500).json({ error: 'Failed to fetch task queue', detail: err.message });
     }
 });
 
@@ -107,7 +108,7 @@ app.put('/api/session/:id/queue', (req, res) => {
         db.saveUncompletedQueue(req.params.id, tasks);
         res.json({ success: true, count: tasks.length });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to update task queue' });
+        res.status(500).json({ error: 'Failed to update task queue', detail: err.message });
     }
 });
 
@@ -118,13 +119,10 @@ app.post('/api/session/:id/queue/remove', (req, res) => {
         db.removeFromQueue(req.params.id, taskName);
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to remove task from queue' });
+        res.status(500).json({ error: 'Failed to remove task from queue', detail: err.message });
     }
 });
 
-// Legacy analytics logging is best-effort only. Canonical task completion is
-// authoritative and must not fail because the old completed_tasks table rejects
-// an insert during migration.
 app.post('/api/session/:id/tasks/completed', (req, res) => {
     const { taskName, estimatedMinutes, actualMinutes, completedAt } = req.body;
     if (!taskName || estimatedMinutes === undefined || actualMinutes === undefined) {
@@ -146,11 +144,7 @@ app.post('/api/session/:id/tasks/completed', (req, res) => {
             taskName,
             error: err.message
         });
-        return res.status(202).json({
-            success: true,
-            legacyAnalyticsLogged: false,
-            warning: err.message
-        });
+        return res.status(202).json({ success: true, legacyAnalyticsLogged: false });
     }
 });
 
@@ -169,7 +163,7 @@ app.get('/api/session/:id/stats', (req, res) => {
             history
         });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch user statistics' });
+        res.status(500).json({ error: 'Failed to fetch user statistics', detail: err.message });
     }
 });
 
@@ -202,10 +196,17 @@ app.put('/api/session/:id/tasks/:taskId', (req, res) => {
         if (!task.name || !String(task.name).trim()) {
             return res.status(400).json({ error: 'Task name is required' });
         }
+        if (!task.userId) {
+            return res.status(400).json({ error: 'userId is required' });
+        }
         if (task.status && !TASK_STATUSES.has(task.status)) {
             return res.status(400).json({ error: 'Invalid task status' });
         }
-        res.json({ task: db.upsertTask(req.params.id, task) });
+
+        userStore.ensureUser(task.userId);
+        const savedTask = db.upsertTask(req.params.id, task);
+        userStore.attachTask(task.userId, req.params.taskId);
+        res.json({ task: { ...savedTask, user_id: task.userId } });
     } catch (err) {
         console.error('Failed to save canonical task:', err);
         res.status(500).json({ error: 'Failed to save task', detail: err.message });
@@ -219,6 +220,7 @@ app.patch('/api/session/:id/tasks/:taskId', (req, res) => {
         }
         const task = db.updateTask(req.params.id, req.params.taskId, req.body);
         if (!task) return res.status(404).json({ error: 'Task not found' });
+        if (req.body.userId) userStore.attachTask(req.body.userId, req.params.taskId);
         res.json({ task });
     } catch (err) {
         console.error('Failed to update canonical task:', err);
@@ -245,6 +247,10 @@ app.post('/api/session/:id/tasks/:taskId/block', (req, res) => {
         }
         const result = db.blockAndRequeueTasks(req.params.id, req.params.taskId, blocker);
         if (!result) return res.status(404).json({ error: 'Blocked task not found' });
+        if (req.body.userId) {
+            userStore.attachTask(req.body.userId, blocker.id);
+            userStore.attachTask(req.body.userId, req.params.taskId);
+        }
         res.json(result);
     } catch (err) {
         console.error('Failed to block canonical task:', err);
