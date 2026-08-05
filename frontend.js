@@ -1,4 +1,8 @@
 // --- Persistence Layer, Task Queue, & User Analytics Sync ---
+function apiUrl(path) {
+    return `${API_BASE_URL}${path}`;
+}
+
 async function saveSession() {
     const sessionState = {
         sortedTasks,
@@ -17,7 +21,7 @@ async function saveSession() {
     localStorage.setItem('taskSorterSession_fallback', JSON.stringify(sessionState));
 
     try {
-        await fetch(`/api/session/${sessionId}`, {
+        await fetch(apiUrl(`/api/session/${sessionId}`), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(sessionState)
@@ -31,7 +35,7 @@ async function loadSession() {
     let state = null;
 
     try {
-        const res = await fetch(`/api/session/${sessionId}`);
+        const res = await fetch(apiUrl(`/api/session/${sessionId}`));
         if (res.ok) state = await res.json();
     } catch (e) {
         console.warn('Could not reach backend, checking browser cache...', e);
@@ -71,7 +75,7 @@ async function loadSession() {
 
 async function fetchExistingQueue() {
     try {
-        const res = await fetch(`/api/session/${sessionId}/queue`);
+        const res = await fetch(apiUrl(`/api/session/${sessionId}/queue`));
         if (res.ok) {
             const data = await res.json();
             return data.queue || [];
@@ -90,7 +94,7 @@ async function syncPendingQueueToBackend() {
     }));
 
     try {
-        await fetch(`/api/session/${sessionId}/queue`, {
+        await fetch(apiUrl(`/api/session/${sessionId}/queue`), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ tasks: pending })
@@ -102,7 +106,7 @@ async function syncPendingQueueToBackend() {
 
 async function removeTaskFromQueue(taskName) {
     try {
-        await fetch(`/api/session/${sessionId}/queue/remove`, {
+        await fetch(apiUrl(`/api/session/${sessionId}/queue/remove`), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ taskName })
@@ -114,7 +118,7 @@ async function removeTaskFromQueue(taskName) {
 
 async function clearSession() {
     try {
-        await fetch(`/api/session/${sessionId}`, { method: 'DELETE' });
+        await fetch(apiUrl(`/api/session/${sessionId}`), { method: 'DELETE' });
     } catch (e) {
         console.error('Failed to delete session on server:', e);
     }
@@ -124,7 +128,7 @@ async function clearSession() {
 
 async function logTaskCompletionToBackend(task) {
     try {
-        await fetch(`/api/session/${sessionId}/tasks/completed`, {
+        await fetch(apiUrl(`/api/session/${sessionId}/tasks/completed`), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
