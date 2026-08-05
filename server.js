@@ -5,6 +5,7 @@ const db = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const BACKEND_VERSION = 'canonical-tasks-v1';
 
 const defaultAllowedOrigins = [
     'https://pbangiola.github.io',
@@ -37,10 +38,15 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, './')));
 
 app.get('/api/health', (req, res) => {
-    res.json({ ok: true, service: 'task-sorter-backend', timestamp: Date.now() });
+    res.json({
+        ok: true,
+        service: 'task-sorter-backend',
+        version: BACKEND_VERSION,
+        capabilities: ['sessions', 'legacy-queue', 'canonical-tasks'],
+        timestamp: Date.now()
+    });
 });
 
-// Existing session endpoints remain active during migration.
 app.get('/api/session/:id', (req, res) => {
     try {
         const sessionState = db.getSession(req.params.id);
@@ -137,7 +143,6 @@ app.get('/api/session/:id/stats', (req, res) => {
     }
 });
 
-// Canonical durable task API.
 app.get('/api/session/:id/tasks', (req, res) => {
     try {
         const status = req.query.status || null;
@@ -221,6 +226,6 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`Task Sorter Server running on port ${PORT}`);
+    console.log(`Task Sorter Server ${BACKEND_VERSION} running on port ${PORT}`);
     console.log(`Allowed frontend origins: ${Array.from(allowedOrigins).join(', ')}`);
 });
