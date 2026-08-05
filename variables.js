@@ -1,5 +1,5 @@
 // --- Front-End Configuration and Shared State ---
-const MAX_TASK_MINUTES = 20;
+const MAX_TASK_MINUTES = 60;
 
 // GitHub Pages hosts only the frontend. API requests go to Railway.
 const API_BASE_URL = 'https://nexttask-production.up.railway.app';
