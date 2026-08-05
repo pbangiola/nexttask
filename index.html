@@ -63,7 +63,7 @@
             font-weight: bold;
             border-radius: 4px;
         }
-        /* Top right positioning for Start Over (offset from Stop Working, which they never share the screen with, but kept apart as a safety margin) */
+        /* Top right positioning for Start Over */
         #startOverBtn {
             position: absolute;
             top: 0;
@@ -132,7 +132,10 @@
 
     <div id="dynamicContainer"></div>
 
-    <script src="js/core/config.js"></script>
+    <!-- Shared state and dependencies must load before workflow bootstrap. -->
+    <script src="variables.js"></script>
+    <script src="functions.js"></script>
+    <script src="frontend.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
