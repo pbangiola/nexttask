@@ -19,6 +19,30 @@
         return source.split(searchValue).join(replacement);
     }
 
+    // Preserve the original canonical writer, but make failures actionable.
+    // This remains outside the evaluated workflow because frontend.js loads first.
+    if (typeof saveCanonicalTask === 'function' && !saveCanonicalTask.__diagnosticWrapped) {
+        const originalSaveCanonicalTask = saveCanonicalTask;
+        const diagnosticSaveCanonicalTask = async function(task, sortOrder, status) {
+            try {
+                return await originalSaveCanonicalTask(task, sortOrder, status);
+            } catch (error) {
+                const taskId = task?.id || '(missing id)';
+                console.error('Canonical task write failed', {
+                    sessionId,
+                    taskId,
+                    taskName: task?.name,
+                    status,
+                    sortOrder,
+                    error
+                });
+                throw error;
+            }
+        };
+        diagnosticSaveCanonicalTask.__diagnosticWrapped = true;
+        saveCanonicalTask = diagnosticSaveCanonicalTask;
+    }
+
     try {
         const response = await fetch('script.original.js', { cache: 'no-store' });
         if (!response.ok) throw new Error(`Unable to load workflow baseline (${response.status})`);
@@ -203,6 +227,15 @@ function parseCSVRow(row) {
             `    if (document.getElementById('focusScreen') && currentTaskIndex < sortedTasks.length) {\n        const nowMs = Date.now();\n        const nowSec = Math.floor(nowMs / 1000);\n        const task = sortedTasks[currentTaskIndex];\n        \n        const actualElapsedMs = nowMs - (task.timestamps?.lastStarted || (taskStartTimestamp * 1000));\n        task.actualTimeMs = (task.actualTimeMs || 0) + actualElapsedMs;\n        task.timestamps.completed = nowMs;\n        spareTime += (deadline - nowSec);\n        \n        logTaskCompletionToBackend(task);\n        currentTaskIndex++;\n    }`,
             `    if (document.getElementById('focusScreen') && currentTaskIndex < sortedTasks.length) {\n        const nowMs = Date.now();\n        const nowSec = Math.floor(nowMs / 1000);\n        const task = sortedTasks[currentTaskIndex];\n\n        const actualElapsedMs = nowMs - (task.timestamps?.lastStarted || (taskStartTimestamp * 1000));\n        task.actualTimeMs = (task.actualTimeMs || 0) + Math.max(0, actualElapsedMs);\n        pausedSecondsRemaining = deadline - nowSec;\n        task.status = 'active';\n        task.timestamps.lastStarted = null;\n        setActiveTask(task);\n        await syncPendingQueueToBackend();\n    }`,
             'end-session pause behavior'
+        );
+
+        // End-session reporting must distinguish work that is actually complete
+        // from active or pending tasks. The old report described every row as finished.
+        workflowSource = replaceOrThrow(
+            workflowSource,
+            `    const breakdownTitle = document.createElement('h3');\n    breakdownTitle.textContent = 'How Each Task Went:';\n    completionScreen.appendChild(breakdownTitle);\n\n    const reportList = document.createElement('ul');\n    sortedTasks.forEach(task => {\n        const item = document.createElement('li');\n        const actualMinutes = getActualMinutes(task);\n        item.textContent = \`\${task.name} — \${describeTaskTiming(task.estimatedTime, actualMinutes)}\`;\n        reportList.appendChild(item);\n    });\n    completionScreen.appendChild(reportList);`,
+            `    const completedTasks = sortedTasks.filter(task => task.status === 'completed' || Boolean(task.timestamps?.completed));\n    const remainingTasks = sortedTasks.filter(task => task.status !== 'completed' && !task.timestamps?.completed);\n\n    if (completedTasks.length > 0) {\n        const breakdownTitle = document.createElement('h3');\n        breakdownTitle.textContent = 'Completed Tasks:';\n        completionScreen.appendChild(breakdownTitle);\n\n        const reportList = document.createElement('ul');\n        completedTasks.forEach(task => {\n            const item = document.createElement('li');\n            const actualMinutes = getActualMinutes(task);\n            item.textContent = \`\${task.name} — \${describeTaskTiming(task.estimatedTime, actualMinutes)}\`;\n            reportList.appendChild(item);\n        });\n        completionScreen.appendChild(reportList);\n    }\n\n    if (remainingTasks.length > 0) {\n        const remainingTitle = document.createElement('h3');\n        remainingTitle.textContent = 'Remaining Tasks:';\n        completionScreen.appendChild(remainingTitle);\n\n        const remainingList = document.createElement('ul');\n        remainingTasks.forEach(task => {\n            const item = document.createElement('li');\n            const label = task.status === 'blocked' ? 'Blocked' : task.status === 'active' ? 'In progress' : 'Not completed';\n            item.textContent = \`\${task.name} — \${label}\`;\n            remainingList.appendChild(item);\n        });\n        completionScreen.appendChild(remainingList);\n    }`,
+            'truthful end-session reporting'
         );
 
         // The legacy workflow still advances an index; immediately derive the
