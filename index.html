@@ -11,14 +11,8 @@
             max-width: 800px;
             position: relative;
         }
-        .hidden {
-            display: none;
-        }
-        button {
-            margin: 5px 0;
-            padding: 8px 12px;
-            cursor: pointer;
-        }
+        .hidden { display: none; }
+        button { margin: 5px 0; padding: 8px 12px; cursor: pointer; }
         input, textarea {
             margin: 5px 0;
             padding: 6px;
@@ -32,16 +26,8 @@
             padding: 10px;
             border-radius: 4px;
         }
-        .upload-container {
-            border: 1px dashed #ccc;
-            background: #fafafa;
-        }
-        /* Side-by-side layout for explicit index inserting */
-        .insertion-layout {
-            display: flex;
-            gap: 40px;
-            margin-top: 15px;
-        }
+        .upload-container { border: 1px dashed #ccc; background: #fafafa; }
+        .insertion-layout { display: flex; gap: 40px; margin-top: 15px; }
         .insertion-column {
             flex: 1;
             padding: 15px;
@@ -49,10 +35,7 @@
             border-radius: 4px;
             background: #fff;
         }
-        .over-capacity {
-            color: #d32f2f;
-        }
-        /* Top right positioning for Stop Working */
+        .over-capacity { color: #d32f2f; }
         #stopWorkingBtn {
             position: absolute;
             top: 0;
@@ -63,7 +46,6 @@
             font-weight: bold;
             border-radius: 4px;
         }
-        /* Top right positioning for Start Over */
         #startOverBtn {
             position: absolute;
             top: 0;
@@ -80,44 +62,36 @@
     <button id="startOverBtn" class="hidden">Start Over</button>
 
     <h1>Task Sorter</h1>
-    
-    <!-- Step 1: Mode Selection -->
+
     <div id="modeSelect">
         <button id="workBtn">Work</button>
         <button id="planBtn" disabled>Plan <i>(Coming Soon)</i></button>
     </div>
 
-    <!-- Step 2: New List vs. Resume Existing List -->
     <div id="workChoiceStep" class="hidden">
         <h2>What do you want to do?</h2>
         <button id="createNewListBtn">Create a New Task List</button>
         <button id="resumeExistingListBtn">Resume Existing List</button>
     </div>
 
-    <!-- Step 3: Time & Constraint Entry Screen -->
     <div id="timeConstraintInput" class="hidden">
         <h2>Set Up Your Time</h2>
         <label for="availableTime">How much time do you have to work? (in minutes)</label>
         <input type="number" id="availableTime" placeholder="e.g., 45" min="1">
-
         <label for="endConstraint">What happens when this time is up?</label>
         <input type="text" id="endConstraint" placeholder="e.g., class ends, leave for appointment">
-
         <button id="timeConstraintNextBtn">Next</button>
     </div>
 
-    <!-- Step 4: Task Entry Screen -->
     <div id="taskInput" class="hidden">
         <h2>Enter Your Tasks</h2>
         <textarea id="tasks" rows="10" cols="40" placeholder="Enter one task per line"></textarea>
-        
         <div class="checkbox-container">
             <label style="display: flex; align-items: center; gap: 8px;">
                 <input type="checkbox" id="skipSortCheckbox" style="width: auto;"> Skip sorting (use current order)
             </label>
         </div>
         <button id="startSort">Start Sorting</button>
-
         <div class="upload-container">
             <h3>Or Import a Saved List</h3>
             <input type="file" id="csvUpload" accept=".csv">
@@ -132,10 +106,9 @@
 
     <div id="dynamicContainer"></div>
 
-    <!-- Shared state and dependencies must load before workflow bootstrap. -->
-    <script src="variables.js"></script>
-    <script src="functions.js"></script>
-    <script src="frontend.js"></script>
-    <script src="script.js?v=20260804-2"></script>
+    <script src="variables.js?v=20260804-3"></script>
+    <script src="functions.js?v=20260804-3"></script>
+    <script src="frontend.js?v=20260804-3"></script>
+    <script src="script.js?v=20260804-3"></script>
 </body>
 </html>
