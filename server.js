@@ -5,7 +5,7 @@ const db = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BACKEND_VERSION = 'canonical-tasks-v1';
+const BACKEND_VERSION = 'canonical-tasks-v2';
 
 const defaultAllowedOrigins = [
     'https://pbangiola.github.io',
@@ -38,13 +38,28 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, './')));
 
 app.get('/api/health', (req, res) => {
-    res.json({
-        ok: true,
-        service: 'task-sorter-backend',
-        version: BACKEND_VERSION,
-        capabilities: ['sessions', 'legacy-queue', 'canonical-tasks'],
-        timestamp: Date.now()
-    });
+    try {
+        db.getTasks('__healthcheck__');
+        res.json({
+            ok: true,
+            service: 'task-sorter-backend',
+            version: BACKEND_VERSION,
+            capabilities: ['sessions', 'legacy-queue', 'canonical-tasks'],
+            canonicalTasksAvailable: true,
+            timestamp: Date.now()
+        });
+    } catch (err) {
+        console.error('Canonical task health check failed:', err);
+        res.status(500).json({
+            ok: false,
+            service: 'task-sorter-backend',
+            version: BACKEND_VERSION,
+            capabilities: ['sessions', 'legacy-queue'],
+            canonicalTasksAvailable: false,
+            error: err.message,
+            timestamp: Date.now()
+        });
+    }
 });
 
 app.get('/api/session/:id', (req, res) => {
@@ -151,7 +166,8 @@ app.get('/api/session/:id/tasks', (req, res) => {
         }
         res.json({ tasks: db.getTasks(req.params.id, status) });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch tasks' });
+        console.error('Failed to fetch canonical tasks:', err);
+        res.status(500).json({ error: 'Failed to fetch tasks', detail: err.message });
     }
 });
 
@@ -161,7 +177,7 @@ app.get('/api/session/:id/tasks/:taskId', (req, res) => {
         if (!task) return res.status(404).json({ error: 'Task not found' });
         res.json({ task });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch task' });
+        res.status(500).json({ error: 'Failed to fetch task', detail: err.message });
     }
 });
 
@@ -176,7 +192,8 @@ app.put('/api/session/:id/tasks/:taskId', (req, res) => {
         }
         res.json({ task: db.upsertTask(req.params.id, task) });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to save task' });
+        console.error('Failed to save canonical task:', err);
+        res.status(500).json({ error: 'Failed to save task', detail: err.message });
     }
 });
 
@@ -189,7 +206,8 @@ app.patch('/api/session/:id/tasks/:taskId', (req, res) => {
         if (!task) return res.status(404).json({ error: 'Task not found' });
         res.json({ task });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to update task' });
+        console.error('Failed to update canonical task:', err);
+        res.status(500).json({ error: 'Failed to update task', detail: err.message });
     }
 });
 
@@ -199,7 +217,8 @@ app.post('/api/session/:id/tasks/:taskId/complete', (req, res) => {
         if (!task) return res.status(404).json({ error: 'Task not found' });
         res.json({ task });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to complete task' });
+        console.error('Failed to complete canonical task:', err);
+        res.status(500).json({ error: 'Failed to complete task', detail: err.message });
     }
 });
 
@@ -213,7 +232,8 @@ app.post('/api/session/:id/tasks/:taskId/block', (req, res) => {
         if (!result) return res.status(404).json({ error: 'Blocked task not found' });
         res.json(result);
     } catch (err) {
-        res.status(500).json({ error: 'Failed to block and requeue tasks' });
+        console.error('Failed to block canonical task:', err);
+        res.status(500).json({ error: 'Failed to block and requeue tasks', detail: err.message });
     }
 });
 
