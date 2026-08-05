@@ -3,6 +3,51 @@ function apiUrl(path) {
     return `${API_BASE_URL}${path}`;
 }
 
+function ensureTaskId(task) {
+    if (task.id) return task.id;
+
+    const createdAt = task.timestamps?.created || Date.now();
+    const randomPart = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2, 10);
+
+    task.id = `task_${sessionId}_${createdAt}_${randomPart}`;
+    return task.id;
+}
+
+function toCanonicalTask(task, sortOrder, status = 'pending') {
+    const timestamps = task.timestamps || {};
+    return {
+        id: ensureTaskId(task),
+        name: task.name,
+        status,
+        estimatedMs: Number(task.estimatedTime || 0) * 60000,
+        elapsedMs: Number(task.actualTimeMs || 0),
+        sortOrder,
+        projectId: task.projectId || null,
+        blockedByTaskId: task.blockedByTaskId || null,
+        createdAt: timestamps.created || Date.now(),
+        startedAt: timestamps.started || null,
+        dueAt: task.dueAt || null,
+        completedAt: timestamps.completed || null
+    };
+}
+
+async function saveCanonicalTask(task, sortOrder, status = 'pending') {
+    const payload = toCanonicalTask(task, sortOrder, status);
+    const response = await fetch(apiUrl(`/api/session/${sessionId}/tasks/${encodeURIComponent(payload.id)}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        throw new Error(`Canonical task save failed (${response.status})`);
+    }
+
+    return response.json();
+}
+
 async function saveSession() {
     const sessionState = {
         sortedTasks,
@@ -62,6 +107,8 @@ async function loadSession() {
         sessionStartTimestamp = state.sessionStartTimestamp || null;
         currentStepStartTimestamp = state.currentStepStartTimestamp || null;
 
+        sortedTasks.forEach(ensureTaskId);
+
         if (state.activeView && state.activeView !== 'mode-select') {
             document.getElementById('modeSelect')?.classList.add('hidden');
             document.getElementById('timeConstraintInput')?.classList.add('hidden');
@@ -87,11 +134,15 @@ async function fetchExistingQueue() {
 }
 
 async function syncPendingQueueToBackend() {
-    const pending = sortedTasks.slice(currentTaskIndex).map(task => ({
+    const pendingTasks = sortedTasks.slice(currentTaskIndex);
+    const pending = pendingTasks.map(task => ({
         name: task.name,
         estimatedTime: task.estimatedTime || 0,
         elapsedMs: task.actualTimeMs || 0
     }));
+
+    // Ensure the parent session exists before writing canonical task rows.
+    await saveSession();
 
     try {
         await fetch(apiUrl(`/api/session/${sessionId}/queue`), {
@@ -100,7 +151,16 @@ async function syncPendingQueueToBackend() {
             body: JSON.stringify({ tasks: pending })
         });
     } catch (e) {
-        console.warn('Failed to sync pending queue to backend:', e);
+        console.warn('Failed to sync legacy pending queue:', e);
+    }
+
+    try {
+        await Promise.all(pendingTasks.map((task, index) =>
+            saveCanonicalTask(task, currentTaskIndex + index + 1, index === 0 ? 'active' : 'pending')
+        ));
+        await saveSession(); // persist any newly generated stable task IDs
+    } catch (e) {
+        console.warn('Failed to sync canonical tasks; legacy queue remains available:', e);
     }
 }
 
@@ -127,6 +187,9 @@ async function clearSession() {
 }
 
 async function logTaskCompletionToBackend(task) {
+    const completedAt = task.timestamps?.completed || Date.now();
+
+    // Continue writing the legacy analytics event during migration.
     try {
         await fetch(apiUrl(`/api/session/${sessionId}/tasks/completed`), {
             method: 'POST',
@@ -135,11 +198,25 @@ async function logTaskCompletionToBackend(task) {
                 taskName: task.name,
                 estimatedMinutes: task.estimatedTime || 0,
                 actualMinutes: Math.round((task.actualTimeMs || 0) / 60000),
-                completedAt: task.timestamps?.completed || Date.now()
+                completedAt
             })
         });
     } catch (e) {
-        console.warn('Failed to push completed task log to backend:', e);
+        console.warn('Failed to push legacy completed task log:', e);
+    }
+
+    // Upsert first so completion works even for tasks created before this migration.
+    try {
+        const sortOrder = Math.max(1, sortedTasks.indexOf(task) + 1);
+        await saveCanonicalTask(task, sortOrder, 'completed');
+        await fetch(apiUrl(`/api/session/${sessionId}/tasks/${encodeURIComponent(task.id)}/complete`), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ completedAt })
+        });
+        await saveSession();
+    } catch (e) {
+        console.warn('Failed to mark canonical task complete; legacy history remains available:', e);
     }
 }
 
