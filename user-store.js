@@ -6,6 +6,22 @@ const dbPath = path.join(dataDir, 'task_sorter.db');
 const db = new Database(dbPath);
 db.pragma('foreign_keys = ON');
 
+function getColumns(tableName) {
+    return db.prepare(`PRAGMA table_info(${tableName})`).all().map(column => column.name);
+}
+
+const existingUserColumns = getColumns('users');
+const canonicalUserColumns = ['id', 'created_at', 'updated_at'];
+const usersTableIsCanonical = canonicalUserColumns.every(column => existingUserColumns.includes(column));
+
+if (existingUserColumns.length > 0 && !usersTableIsCanonical) {
+    const existingUserCount = db.prepare('SELECT COUNT(*) AS count FROM users').get().count;
+    if (existingUserCount > 0) {
+        throw new Error('Cannot replace incompatible users table because it contains data.');
+    }
+    db.exec('DROP TABLE users;');
+}
+
 db.exec(`
     CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -14,7 +30,7 @@ db.exec(`
     );
 `);
 
-const taskColumns = db.prepare('PRAGMA table_info(tasks)').all().map(column => column.name);
+const taskColumns = getColumns('tasks');
 if (!taskColumns.includes('user_id')) {
     db.exec('ALTER TABLE tasks ADD COLUMN user_id TEXT;');
 }
