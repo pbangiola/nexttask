@@ -5,7 +5,7 @@ const db = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BACKEND_VERSION = 'canonical-tasks-v3';
+const BACKEND_VERSION = 'canonical-tasks-v4';
 
 const defaultAllowedOrigins = [
     'https://pbangiola.github.io',
@@ -65,7 +65,9 @@ app.get('/api/health', (req, res) => {
 app.get('/api/session/:id', (req, res) => {
     try {
         const sessionState = db.getSession(req.params.id);
-        if (!sessionState) return res.status(404).json({ error: 'Session not found' });
+        // A new session ID has no persisted row yet. Return a clean empty state
+        // instead of a 404 so starting a new session is not treated as an error.
+        if (!sessionState) return res.json(null);
         res.json(sessionState);
     } catch (err) {
         res.status(500).json({ error: 'Failed to retrieve session' });
