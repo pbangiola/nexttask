@@ -40,12 +40,6 @@ db.exec(`
         FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
         FOREIGN KEY(blocked_by_task_id) REFERENCES tasks(id) ON DELETE SET NULL
     );
-
-    CREATE INDEX IF NOT EXISTS idx_tasks_session_position
-        ON tasks(session_id, position);
-
-    CREATE INDEX IF NOT EXISTS idx_tasks_session_status
-        ON tasks(session_id, status);
 `);
 
 for (const table of ['completed_tasks', 'task_queue']) {
@@ -98,6 +92,16 @@ ensureExpectedSchema(
         FOREIGN KEY(blocked_by_task_id) REFERENCES tasks(id) ON DELETE SET NULL
     );`
 );
+
+// Create indexes only after old schemas have been rebuilt. Creating them earlier
+// crashes startup when an existing tasks table still uses sort_order instead of position.
+db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_session_position
+        ON tasks(session_id, position);
+
+    CREATE INDEX IF NOT EXISTS idx_tasks_session_status
+        ON tasks(session_id, status);
+`);
 
 db.prepare(`
     INSERT OR IGNORE INTO schema_migrations (version, applied_at)
