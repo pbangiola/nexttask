@@ -4,5 +4,5 @@
 // current constants until each feature is migrated to this shared namespace.
 
 window.TaskSorterConfig = Object.freeze({
-    MAX_TASK_MINUTES: 20
+    MAX_TASK_MINUTES: 30
 });
