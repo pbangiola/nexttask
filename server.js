@@ -7,7 +7,7 @@ const userRoutes = require('./user-routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BACKEND_VERSION = 'canonical-task-list-v1';
+const BACKEND_VERSION = 'canonical-task-list-v2';
 
 const defaultAllowedOrigins = [
     'https://pbangiola.github.io',
@@ -31,7 +31,7 @@ app.use(cors({
         if (allowedOrigins.has(normalizedOrigin)) return callback(null, true);
         return callback(new Error(`CORS blocked request from ${origin}`));
     },
-    methods: ['GET', 'PUT', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
     allowedHeaders: ['Content-Type']
 }));
 
@@ -80,17 +80,18 @@ app.put('/api/session/:id/tasks', (req, res) => {
             return res.status(400).json({ error: 'tasks must be an array' });
         }
 
-        if (req.body.userId) {
-            userStore.ensureUser(req.body.userId);
-            tasks.forEach(task => {
-                if (task.id) userStore.attachTask(req.body.userId, task.id);
-            });
-        }
+        if (req.body.userId) userStore.ensureUser(req.body.userId);
 
         const savedTasks = db.saveTaskList(req.params.id, tasks, {
             totalAvailableTimeMs: req.body.totalAvailableTimeMs,
             endConstraint: req.body.endConstraint
         });
+
+        if (req.body.userId) {
+            tasks.forEach(task => {
+                if (task.id) userStore.attachTask(req.body.userId, task.id);
+            });
+        }
 
         return res.json({
             success: true,
