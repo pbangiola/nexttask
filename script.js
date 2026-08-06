@@ -1,364 +1,776 @@
-// --- Workflow Bootstrap: chatgpt-2 timing model ---
-(async function loadWorkflowFromBaseline() {
-    const marker = '// --- App Initialization & Event Handlers ---';
+'use strict';
 
-    function replaceSection(source, startMarker, endMarker, replacement, label) {
-        const start = source.indexOf(startMarker);
-        const end = source.indexOf(endMarker, start);
-        if (start === -1 || end === -1) {
-            throw new Error(`Unable to apply workflow patch: ${label}`);
-        }
-        return source.slice(0, start) + replacement + source.slice(end);
-    }
+const API_BASE_URL = 'https://nexttask-production.up.railway.app';
+const MAX_TASK_MINUTES = 60;
+const TEN_MINUTES_MS = 10 * 60 * 1000;
+const LOCAL_STATE_KEY = 'taskSorterSession_fallback';
 
-    function normalizeTask(task) {
-        if (!task || typeof task !== 'object') return task;
-        ensureTaskId(task);
+let sessionId = localStorage.getItem('taskSorterSessionId') || createId('session');
+let userId = localStorage.getItem('taskSorterUserId') || createId('user');
+localStorage.setItem('taskSorterSessionId', sessionId);
+localStorage.setItem('taskSorterUserId', userId);
 
-        if (typeof task.completed !== 'boolean') {
-            task.completed = task.status === 'completed' || Boolean(task.timestamps?.completed);
-        }
+let sortedTasks = [];
+let activeTaskId = null;
+let timerInterval = null;
+let totalAvailableTimeMs = 0;
+let endConstraint = '';
+let sortStartedAt = null;
 
-        if (!Number.isFinite(task.estimatedTimeMs)) {
-            task.estimatedTimeMs = Math.max(0, Number(task.estimatedTime || 0) * 60000);
-        }
+function createId(prefix) {
+    const random = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2, 11);
+    return `${prefix}_${random}`;
+}
 
-        task.actualTimeMs = Math.max(0, Number(task.actualTimeMs || 0));
+function el(id) {
+    return document.getElementById(id);
+}
 
-        if (!task.timestamps) task.timestamps = {};
-        task.created = Number(task.created || task.timestamps.created || Date.now());
-        task.started = task.started ?? task.timestamps.started ?? null;
-        task.completedTime = task.completedTime ?? task.timestamps.completed ?? null;
-        task.lastChanged = task.lastChanged ?? null;
+function show(element) {
+    element?.classList.remove('hidden');
+}
 
-        task.estimatedTime = Math.round(task.estimatedTimeMs / 60000);
-        task.status = task.completed ? 'completed' : (task.status || 'pending');
-        task.timestamps.created = task.created;
-        task.timestamps.started = task.started;
-        task.timestamps.completed = task.completedTime;
+function hide(element) {
+    element?.classList.add('hidden');
+}
 
-        return task;
-    }
+function clearDynamic() {
+    const container = el('dynamicContainer');
+    if (container) container.innerHTML = '';
+    return container;
+}
 
-    function normalizeAllTasks() {
-        sortedTasks.forEach(normalizeTask);
-    }
+function hideStaticScreens() {
+    ['modeSelect', 'workChoiceStep', 'timeConstraintInput', 'taskInput', 'taskCompare']
+        .forEach(id => hide(el(id)));
+}
 
-    function findFirstIncompleteTaskIndex() {
-        normalizeAllTasks();
-        return sortedTasks.findIndex(task => !task.completed);
-    }
+function ensureTask(task) {
+    const now = Date.now();
+    task.id ||= createId('task');
+    task.name = String(task.name || '').trim();
+    task.estimatedTimeMs = Math.max(0, Number(task.estimatedTimeMs || 0));
+    task.actualTimeMs = Math.max(0, Number(task.actualTimeMs || 0));
+    task.completed = Boolean(task.completed || task.completedTime || task.status === 'completed');
+    task.status = task.completed ? 'completed' : (task.status || 'pending');
+    task.created = Number(task.created || now);
+    task.started = task.started ?? null;
+    task.completedTime = task.completedTime ?? null;
+    task.lastChanged = task.lastChanged ?? null;
+    return task;
+}
 
-    function selectFirstIncompleteTask() {
-        const index = findFirstIncompleteTaskIndex();
-        currentTaskIndex = index === -1 ? sortedTasks.length : index;
-        const task = sortedTasks[currentTaskIndex] || null;
-        activeTaskId = task?.id || null;
-        return task;
-    }
+function createTask(name, values = {}) {
+    return ensureTask({
+        id: values.id,
+        name,
+        estimatedTimeMs: values.estimatedTimeMs,
+        actualTimeMs: values.actualTimeMs,
+        completed: values.completed,
+        status: values.status,
+        created: values.created,
+        started: values.started,
+        completedTime: values.completedTime,
+        lastChanged: values.lastChanged
+    });
+}
 
-    function checkpointTaskTiming(task, now = Date.now()) {
-        normalizeTask(task);
-        if (task.lastChanged !== null) {
-            task.actualTimeMs += Math.max(0, now - task.lastChanged);
-            task.lastChanged = now;
-        }
-        return task.actualTimeMs;
-    }
+function firstIncompleteTask() {
+    sortedTasks.forEach(ensureTask);
+    return sortedTasks.find(task => !task.completed) || null;
+}
 
-    function beginTaskTiming(task, now = Date.now()) {
-        normalizeTask(task);
-        if (task.started === null) task.started = now;
+function currentTask() {
+    return sortedTasks.find(task => task.id === activeTaskId && !task.completed) || firstIncompleteTask();
+}
+
+function checkpointTask(task, now = Date.now()) {
+    ensureTask(task);
+    if (task.lastChanged !== null) {
+        task.actualTimeMs += Math.max(0, now - task.lastChanged);
         task.lastChanged = now;
-        task.status = 'active';
-        task.timestamps.started = task.started;
-        return task;
     }
+}
 
-    function pauseTaskTiming(task, now = Date.now()) {
-        checkpointTaskTiming(task, now);
-        task.lastChanged = null;
-        if (!task.completed) task.status = 'pending';
-        return task;
+function startTaskClock(task, now = Date.now()) {
+    ensureTask(task);
+    if (task.started === null) task.started = now;
+    task.lastChanged = now;
+    task.status = 'active';
+    activeTaskId = task.id;
+}
+
+function pauseTaskClock(task, now = Date.now()) {
+    checkpointTask(task, now);
+    task.lastChanged = null;
+    if (!task.completed) task.status = 'pending';
+}
+
+function completeTask(task, now = Date.now()) {
+    checkpointTask(task, now);
+    task.lastChanged = null;
+    task.completed = true;
+    task.completedTime = now;
+    task.status = 'completed';
+}
+
+function formatDuration(ms, alwaysHours = false) {
+    const totalSeconds = Math.floor(Math.abs(ms) / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const mmss = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    return alwaysHours || hours > 0 ? `${hours}:${mmss}` : mmss;
+}
+
+function allocatedTimeMs() {
+    return sortedTasks
+        .filter(task => !ensureTask(task).completed)
+        .reduce((sum, task) => sum + (task.estimatedTimeMs > 0 ? task.estimatedTimeMs : TEN_MINUTES_MS), 0);
+}
+
+function localSnapshot(view) {
+    return {
+        sortedTasks,
+        activeTaskId,
+        totalAvailableTimeMs,
+        endConstraint,
+        view,
+        updatedAt: Date.now()
+    };
+}
+
+function saveLocal(view = inferView()) {
+    localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(localSnapshot(view)));
+}
+
+function serverPayload() {
+    return {
+        userId,
+        totalAvailableTimeMs,
+        endConstraint,
+        tasks: sortedTasks.map((task, index) => {
+            ensureTask(task);
+            return {
+                id: task.id,
+                name: task.name,
+                status: task.completed ? 'completed' : task.status,
+                estimatedTimeMs: task.estimatedTimeMs,
+                actualTimeMs: task.actualTimeMs,
+                position: index + 1,
+                created: task.created,
+                started: task.started,
+                completedTime: task.completedTime,
+                lastChanged: task.lastChanged
+            };
+        })
+    };
+}
+
+function backupToServer() {
+    fetch(`${API_BASE_URL}/api/session/${encodeURIComponent(sessionId)}/tasks`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(serverPayload())
+    }).then(response => {
+        if (!response.ok) throw new Error(`Backup failed (${response.status})`);
+    }).catch(error => console.warn('Server backup failed; browser state is safe:', error));
+}
+
+function save(view = inferView()) {
+    saveLocal(view);
+    backupToServer();
+}
+
+function inferView() {
+    if (el('focusScreen')) return 'focus';
+    if (el('dashboardScreen')) return 'dashboard';
+    if (el('timingGatewayScreen')) return 'timing-gateway';
+    if (el('timingEntryScreen')) return 'timing-entry';
+    if (el('completionScreen')) return 'completion';
+    if (!el('taskInput')?.classList.contains('hidden')) return 'input';
+    if (!el('timeConstraintInput')?.classList.contains('hidden')) return 'time-constraint';
+    if (!el('workChoiceStep')?.classList.contains('hidden')) return 'work-choice';
+    return 'mode-select';
+}
+
+function restoreLocalState() {
+    const raw = localStorage.getItem(LOCAL_STATE_KEY);
+    if (!raw) return false;
+    try {
+        const state = JSON.parse(raw);
+        sortedTasks = Array.isArray(state.sortedTasks) ? state.sortedTasks.map(ensureTask) : [];
+        activeTaskId = state.activeTaskId || null;
+        totalAvailableTimeMs = Number(state.totalAvailableTimeMs || 0);
+        endConstraint = String(state.endConstraint || '');
+        return state;
+    } catch (error) {
+        console.warn('Local session could not be restored:', error);
+        return false;
     }
+}
 
-    function completeTaskTiming(task, now = Date.now()) {
-        checkpointTaskTiming(task, now);
-        task.lastChanged = null;
-        task.completed = true;
-        task.completedTime = now;
-        task.status = 'completed';
-        task.timestamps.completed = now;
-        return task;
+function showModeSelect() {
+    hideStaticScreens();
+    clearDynamic();
+    show(el('modeSelect'));
+    hide(el('stopWorkingBtn'));
+    hide(el('startOverBtn'));
+}
+
+function showWorkChoice() {
+    hideStaticScreens();
+    clearDynamic();
+    show(el('workChoiceStep'));
+    show(el('startOverBtn'));
+}
+
+function showTimeConstraint() {
+    hideStaticScreens();
+    clearDynamic();
+    show(el('timeConstraintInput'));
+    show(el('startOverBtn'));
+    el('availableTime').value = totalAvailableTimeMs ? Math.round(totalAvailableTimeMs / 60000) : '';
+    el('endConstraint').value = endConstraint;
+}
+
+function showTaskInput() {
+    hideStaticScreens();
+    clearDynamic();
+    show(el('taskInput'));
+    show(el('startOverBtn'));
+    updateCapacityMessage();
+}
+
+function updateCapacityMessage() {
+    const textarea = el('tasks');
+    if (!textarea) return;
+    const tasks = parsePlainTaskText(textarea.value);
+    let message = el('capacityInfoMsg');
+    if (!message) {
+        message = document.createElement('p');
+        message.id = 'capacityInfoMsg';
+        message.style.fontWeight = 'bold';
+        textarea.insertAdjacentElement('afterend', message);
     }
-
-    function formatTimerDuration(durationMs) {
-        const totalSeconds = Math.floor(Math.abs(durationMs) / 1000);
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        const mmss = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-        return hours > 0 ? `${hours}:${mmss}` : mmss;
+    if (!totalAvailableTimeMs) {
+        message.textContent = '';
+        return;
     }
+    const estimated = tasks.length * TEN_MINUTES_MS;
+    message.textContent = `Estimated capacity: ${Math.round(estimated / 60000)} / ${Math.round(totalAvailableTimeMs / 60000)} minutes.`;
+    message.style.color = estimated > totalAvailableTimeMs ? '#d32f2f' : '#2e7d32';
+}
 
-    function patchedStartDeadlineSetting() {
-        document.getElementById('stopWorkingBtn').classList.remove('hidden');
-        hideStartOverBtn();
+function parsePlainTaskText(text) {
+    const trimmed = String(text || '').trim();
+    if (!trimmed) return [];
+    const pieces = trimmed.includes('\n') ? trimmed.split(/\r?\n/) : trimmed.split(',');
+    return pieces.map(value => value.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean);
+}
 
-        const nextTask = selectFirstIncompleteTask();
-        if (!nextTask) {
-            displaySpareTime();
-            return;
+async function interactiveMergeSort(items) {
+    if (items.length <= 1) return items;
+    const middle = Math.floor(items.length / 2);
+    const left = await interactiveMergeSort(items.slice(0, middle));
+    const right = await interactiveMergeSort(items.slice(middle));
+    return mergeWithChoices(left, right);
+}
+
+function mergeWithChoices(left, right) {
+    return new Promise(resolve => {
+        const merged = [];
+        const compare = el('taskCompare');
+        const task1 = el('task1');
+        const task2 = el('task2');
+        show(compare);
+        hide(el('taskInput'));
+
+        function choose(side) {
+            merged.push(side === 'left' ? left.shift() : right.shift());
+            next();
         }
 
-        normalizeTask(nextTask);
-
-        if (nextTask.estimatedTimeMs > 0) {
-            beginTaskTiming(nextTask);
-            startFocusScreen();
-            return;
-        }
-
-        const container = document.getElementById('dynamicContainer');
-        container.innerHTML = '';
-
-        const deadlinePage = document.createElement('div');
-        deadlinePage.id = 'deadlinePage';
-
-        const taskName = document.createElement('h2');
-        taskName.append('Set a deadline for: ');
-        const strong = document.createElement('strong');
-        strong.textContent = nextTask.name;
-        taskName.appendChild(strong);
-        deadlinePage.appendChild(taskName);
-
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.id = 'taskTime';
-        input.placeholder = `Enter minutes (1-${MAX_TASK_MINUTES})`;
-        deadlinePage.appendChild(input);
-
-        const startButton = document.createElement('button');
-        startButton.textContent = 'Start Task';
-        startButton.addEventListener('click', () => {
-            const minutes = Number.parseInt(input.value, 10);
-            if (minutes < 1 || minutes > MAX_TASK_MINUTES) {
-                alert(`Please pick a number between 1 and ${MAX_TASK_MINUTES} minutes.`);
+        function next() {
+            if (!left.length || !right.length) {
+                hide(compare);
+                resolve([...merged, ...left, ...right]);
                 return;
             }
+            task1.textContent = left[0].name;
+            task2.textContent = right[0].name;
+            task1.onclick = () => choose('left');
+            task2.onclick = () => choose('right');
+        }
 
-            nextTask.estimatedTimeMs = minutes * 60000;
-            nextTask.estimatedTime = minutes;
-            beginTaskTiming(nextTask);
-            saveSession();
-            startFocusScreen();
-        });
-        deadlinePage.appendChild(startButton);
+        next();
+    });
+}
 
-        container.appendChild(deadlinePage);
-        saveSession();
+async function startSorting() {
+    const names = parsePlainTaskText(el('tasks').value);
+    if (!names.length) {
+        alert('Please enter at least one task.');
+        return;
     }
 
-    function patchedStartFocusScreen() {
-        document.getElementById('stopWorkingBtn').classList.remove('hidden');
+    sortedTasks = names.map(name => createTask(name));
+    sortStartedAt = Date.now();
+    hide(el('taskInput'));
+    hide(el('startOverBtn'));
 
-        const currentTask = selectFirstIncompleteTask();
-        if (!currentTask) {
-            displaySpareTime();
+    if (!el('skipSortCheckbox').checked) {
+        sortedTasks = await interactiveMergeSort(sortedTasks);
+    }
+
+    const finished = Date.now();
+    sortedTasks.unshift(createTask('Sorting tasks', {
+        estimatedTimeMs: 60_000,
+        actualTimeMs: Math.max(0, finished - sortStartedAt),
+        completed: true,
+        status: 'completed',
+        created: sortStartedAt,
+        started: sortStartedAt,
+        completedTime: finished
+    }));
+
+    activeTaskId = firstIncompleteTask()?.id || null;
+    showTimingGateway();
+}
+
+function showTimingGateway() {
+    hideStaticScreens();
+    hide(el('startOverBtn'));
+    const container = clearDynamic();
+    const screen = document.createElement('div');
+    screen.id = 'timingGatewayScreen';
+    screen.innerHTML = '<h2>Do you want to set timings now?</h2>';
+
+    const yes = document.createElement('button');
+    yes.textContent = 'Yes';
+    yes.onclick = () => showSequentialTiming(0);
+    const no = document.createElement('button');
+    no.textContent = 'No';
+    no.onclick = showDashboard;
+    screen.append(yes, no);
+    container.appendChild(screen);
+    saveLocal('timing-gateway');
+}
+
+function showSequentialTiming(startIndex = 0) {
+    const pending = sortedTasks.filter(task => !task.completed);
+    const index = pending.findIndex((task, i) => i >= startIndex && task.estimatedTimeMs <= 0);
+    if (index === -1) {
+        showDashboard();
+        return;
+    }
+
+    const task = pending[index];
+    hideStaticScreens();
+    const container = clearDynamic();
+    const screen = document.createElement('div');
+    screen.id = 'timingEntryScreen';
+
+    const heading = document.createElement('h2');
+    heading.textContent = `Estimate time for: ${task.name}`;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '1';
+    input.max = String(MAX_TASK_MINUTES);
+    input.placeholder = `1-${MAX_TASK_MINUTES} minutes`;
+    const next = document.createElement('button');
+    next.textContent = 'Save & Next';
+    next.onclick = () => {
+        const minutes = Number.parseInt(input.value, 10);
+        if (!Number.isFinite(minutes) || minutes < 1 || minutes > MAX_TASK_MINUTES) {
+            alert(`Enter a number from 1 to ${MAX_TASK_MINUTES}.`);
+            return;
+        }
+        task.estimatedTimeMs = minutes * 60_000;
+        saveLocal('timing-entry');
+        showSequentialTiming(index + 1);
+    };
+    screen.append(heading, input, next);
+    container.appendChild(screen);
+}
+
+function showDashboard() {
+    hideStaticScreens();
+    hide(el('stopWorkingBtn'));
+    show(el('startOverBtn'));
+    const container = clearDynamic();
+    const screen = document.createElement('div');
+    screen.id = 'dashboardScreen';
+
+    const heading = document.createElement('h2');
+    heading.textContent = 'Your Task List';
+    screen.appendChild(heading);
+
+    const list = document.createElement('ol');
+    sortedTasks.forEach(task => {
+        ensureTask(task);
+        const item = document.createElement('li');
+        const estimate = task.estimatedTimeMs ? ` — ${Math.round(task.estimatedTimeMs / 60000)} min` : '';
+        item.textContent = `${task.name}${estimate}${task.completed ? ' ✓' : ''}`;
+        list.appendChild(item);
+    });
+    screen.appendChild(list);
+
+    const capacity = document.createElement('p');
+    capacity.textContent = `Allocated: ${Math.round(allocatedTimeMs() / 60000)} minutes` +
+        (totalAvailableTimeMs ? ` of ${Math.round(totalAvailableTimeMs / 60000)} available` : '');
+    screen.appendChild(capacity);
+
+    const work = document.createElement('button');
+    work.textContent = 'Get to Work';
+    work.onclick = beginWork;
+    screen.appendChild(work);
+
+    const exportButton = document.createElement('button');
+    exportButton.textContent = 'Download Task List';
+    exportButton.onclick = exportCsv;
+    screen.appendChild(exportButton);
+
+    container.appendChild(screen);
+    save('dashboard');
+}
+
+function beginWork() {
+    const task = firstIncompleteTask();
+    if (!task) {
+        showCompletion();
+        return;
+    }
+    activeTaskId = task.id;
+    if (task.estimatedTimeMs <= 0) {
+        showSingleTaskEstimate(task);
+    } else {
+        showFocus(task);
+    }
+}
+
+function showSingleTaskEstimate(task) {
+    hideStaticScreens();
+    hide(el('startOverBtn'));
+    const container = clearDynamic();
+    const screen = document.createElement('div');
+    screen.id = 'deadlinePage';
+    const heading = document.createElement('h2');
+    heading.textContent = `Set a time for: ${task.name}`;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '1';
+    input.max = String(MAX_TASK_MINUTES);
+    const start = document.createElement('button');
+    start.textContent = 'Start Task';
+    start.onclick = () => {
+        const minutes = Number.parseInt(input.value, 10);
+        if (!Number.isFinite(minutes) || minutes < 1 || minutes > MAX_TASK_MINUTES) {
+            alert(`Enter a number from 1 to ${MAX_TASK_MINUTES}.`);
+            return;
+        }
+        task.estimatedTimeMs = minutes * 60_000;
+        showFocus(task);
+    };
+    screen.append(heading, input, start);
+    container.appendChild(screen);
+}
+
+function showFocus(task) {
+    ensureTask(task);
+    hideStaticScreens();
+    hide(el('startOverBtn'));
+    show(el('stopWorkingBtn'));
+    const container = clearDynamic();
+    const screen = document.createElement('div');
+    screen.id = 'focusScreen';
+
+    if (task.lastChanged === null) startTaskClock(task);
+
+    const heading = document.createElement('h2');
+    heading.textContent = `Current Task: ${task.name}`;
+    const timer = document.createElement('p');
+    timer.id = 'timer';
+    timer.style.fontSize = '24px';
+    timer.style.fontWeight = 'bold';
+
+    function renderTimer() {
+        checkpointTask(task);
+        const remaining = task.estimatedTimeMs - task.actualTimeMs;
+        timer.style.color = remaining >= 0 ? 'green' : 'red';
+        timer.textContent = remaining >= 0
+            ? `${formatDuration(remaining)} remaining`
+            : `${formatDuration(remaining)} overdue`;
+        saveLocal('focus');
+    }
+
+    const done = document.createElement('button');
+    done.textContent = 'Done, Next!';
+    done.onclick = () => {
+        done.disabled = true;
+        clearInterval(timerInterval);
+        completeTask(task);
+        activeTaskId = firstIncompleteTask()?.id || null;
+        save('dashboard');
+        beginWork();
+    };
+
+    const add = document.createElement('button');
+    add.textContent = 'Add New Task';
+    add.onclick = () => {
+        clearInterval(timerInterval);
+        checkpointTask(task);
+        showAddTask(task);
+    };
+
+    screen.append(heading, timer, done, add);
+    container.appendChild(screen);
+    renderTimer();
+    clearInterval(timerInterval);
+    timerInterval = setInterval(renderTimer, 1000);
+    save('focus');
+}
+
+function showAddTask(activeTask) {
+    hideStaticScreens();
+    const container = clearDynamic();
+    const screen = document.createElement('div');
+    screen.id = 'addTaskPage';
+    screen.innerHTML = '<h2>Add a Task</h2>';
+    const input = document.createElement('input');
+    input.placeholder = 'Task name';
+    const saveButton = document.createElement('button');
+    saveButton.textContent = 'Add to End';
+    saveButton.onclick = () => {
+        const name = input.value.trim();
+        if (!name) return;
+        sortedTasks.push(createTask(name));
+        save('focus');
+        showFocus(activeTask);
+    };
+    const cancel = document.createElement('button');
+    cancel.textContent = 'Cancel';
+    cancel.onclick = () => showFocus(activeTask);
+    screen.append(input, saveButton, cancel);
+    container.appendChild(screen);
+}
+
+function stopWorking() {
+    clearInterval(timerInterval);
+    const task = currentTask();
+    if (task) pauseTaskClock(task);
+    hide(el('stopWorkingBtn'));
+    save('dashboard');
+    showDashboard();
+}
+
+function showCompletion() {
+    clearInterval(timerInterval);
+    hideStaticScreens();
+    hide(el('stopWorkingBtn'));
+    show(el('startOverBtn'));
+    const container = clearDynamic();
+    const screen = document.createElement('div');
+    screen.id = 'completionScreen';
+
+    const heading = document.createElement('h2');
+    heading.textContent = 'All Done!';
+    const varianceMs = sortedTasks
+        .filter(task => ensureTask(task).completed)
+        .reduce((sum, task) => sum + task.estimatedTimeMs - task.actualTimeMs, 0);
+    const remaining = document.createElement('p');
+    remaining.textContent = `Time Remaining: ${varianceMs < 0 ? '-' : ''}${formatDuration(varianceMs, true)}`;
+    remaining.style.color = varianceMs >= 0 ? 'green' : 'red';
+
+    const title = document.createElement('h3');
+    title.textContent = 'How Each Task Went:';
+    const list = document.createElement('ul');
+    sortedTasks.filter(task => task.completed).forEach(task => {
+        const item = document.createElement('li');
+        const actualMin = Math.round(task.actualTimeMs / 60000);
+        const estimateMin = Math.round(task.estimatedTimeMs / 60000);
+        const difference = estimateMin - actualMin;
+        const comparison = difference > 0
+            ? `${difference} minute${difference === 1 ? '' : 's'} ahead of schedule`
+            : difference < 0
+                ? `${Math.abs(difference)} minute${Math.abs(difference) === 1 ? '' : 's'} behind schedule`
+                : 'right on schedule';
+        item.textContent = `${task.name} — finished in ${actualMin} minute${actualMin === 1 ? '' : 's'}, ${comparison}`;
+        list.appendChild(item);
+    });
+
+    screen.append(heading, remaining, title, list);
+    container.appendChild(screen);
+    save('completion');
+}
+
+async function resumeExistingList() {
+    hideStaticScreens();
+    const container = clearDynamic();
+    container.textContent = 'Loading saved tasks…';
+    try {
+        await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+        });
+        await fetch(`${API_BASE_URL}/api/session/${encodeURIComponent(sessionId)}/tasks`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, tasks: [], totalAvailableTimeMs: 0, endConstraint: '' })
+        });
+        const response = await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}/tasks/import`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId })
+        });
+        if (!response.ok) throw new Error(`Resume failed (${response.status})`);
+        const data = await response.json();
+        sortedTasks = (data.tasks || []).map(row => createTask(row.name, {
+            id: row.id,
+            estimatedTimeMs: row.estimated_ms,
+            actualTimeMs: row.elapsed_ms,
+            completed: false,
+            status: row.status,
+            created: row.created,
+            started: row.started,
+            lastChanged: null
+        }));
+        activeTaskId = firstIncompleteTask()?.id || null;
+        if (!sortedTasks.length) {
+            alert('No unfinished saved tasks were found.');
+            showWorkChoice();
+            return;
+        }
+        showDashboard();
+    } catch (error) {
+        console.error(error);
+        alert('The saved task list could not be loaded.');
+        showWorkChoice();
+    }
+}
+
+function parseCsv(text) {
+    if (globalThis.Papa?.parse) {
+        try {
+            const result = Papa.parse(text, { skipEmptyLines: true });
+            if (!result.errors.length) return result.data;
+        } catch (error) {
+            console.warn('CSV helper failed; using basic parser:', error);
+        }
+    }
+    return text.split(/\r?\n/).filter(Boolean).map(line => line.split(',').map(cell => cell.trim()));
+}
+
+function importFile(file) {
+    const reader = new FileReader();
+    reader.onload = event => {
+        const text = String(event.target.result || '');
+        const rows = parseCsv(text);
+        const headers = (rows[0] || []).map(value => String(value).trim().toLowerCase());
+        const nameIndex = headers.findIndex(value => ['task name', 'task', 'name', 'title', 'reminder'].includes(value));
+        const idIndex = headers.findIndex(value => ['task id', 'id'].includes(value));
+        const estimateIndex = headers.findIndex(value => value.includes('estimated'));
+        const actualIndex = headers.findIndex(value => value.includes('actual'));
+        const completedIndex = headers.findIndex(value => ['completed', 'done', 'status'].includes(value));
+        const structured = nameIndex >= 0;
+
+        if (structured) {
+            sortedTasks = rows.slice(1).map(row => createTask(row[nameIndex], {
+                id: idIndex >= 0 ? row[idIndex] : undefined,
+                estimatedTimeMs: estimateIndex >= 0 ? Number(row[estimateIndex] || 0) * 60_000 : 0,
+                actualTimeMs: actualIndex >= 0 ? Number(row[actualIndex] || 0) * 60_000 : 0,
+                completed: completedIndex >= 0 && ['true', 'yes', '1', 'done', 'completed'].includes(String(row[completedIndex]).toLowerCase())
+            })).filter(task => task.name);
+        } else {
+            sortedTasks = parsePlainTaskText(text).map(name => createTask(name));
+        }
+
+        if (!sortedTasks.length) {
+            alert('No tasks were found in that file.');
             return;
         }
 
-        normalizeTask(currentTask);
-        if (currentTask.lastChanged === null) beginTaskTiming(currentTask);
+        hide(el('taskInput'));
+        el('csvUpload').value = '';
+        activeTaskId = firstIncompleteTask()?.id || null;
+        if (structured && idIndex >= 0) showDashboard();
+        else showTimingGateway();
+    };
+    reader.onerror = () => alert('That file could not be read.');
+    reader.readAsText(file);
+}
 
-        const container = document.getElementById('dynamicContainer');
-        container.innerHTML = '';
+function csvEscape(value) {
+    const text = String(value ?? '');
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
 
-        const focusScreen = document.createElement('div');
-        focusScreen.id = 'focusScreen';
+function exportCsv() {
+    const rows = [['Task Name', 'Estimated Time (Min)', 'Actual Time (Min)', 'Completed', 'Task ID']];
+    sortedTasks.forEach(task => rows.push([
+        task.name,
+        Math.round(task.estimatedTimeMs / 60000),
+        Math.round(task.actualTimeMs / 60000),
+        task.completed,
+        task.id
+    ]));
+    const blob = new Blob([rows.map(row => row.map(csvEscape).join(',')).join('\n')], { type: 'text/csv' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `tasks_${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+}
 
-        const taskName = document.createElement('h2');
-        taskName.append('Current Task: ');
-        const strong = document.createElement('strong');
-        strong.textContent = currentTask.name;
-        taskName.appendChild(strong);
-        focusScreen.appendChild(taskName);
+function startOver() {
+    clearInterval(timerInterval);
+    localStorage.removeItem(LOCAL_STATE_KEY);
+    localStorage.removeItem('taskSorterSessionId');
+    sessionId = createId('session');
+    localStorage.setItem('taskSorterSessionId', sessionId);
+    sortedTasks = [];
+    activeTaskId = null;
+    totalAvailableTimeMs = 0;
+    endConstraint = '';
+    showModeSelect();
+}
 
-        const timerDisplay = document.createElement('p');
-        timerDisplay.id = 'timer';
-        timerDisplay.style.fontSize = '24px';
-        timerDisplay.style.fontWeight = 'bold';
-        focusScreen.appendChild(timerDisplay);
-
-        function renderTimer() {
-            checkpointTaskTiming(currentTask);
-            const timeRemainingMs = currentTask.estimatedTimeMs - currentTask.actualTimeMs;
-            timerDisplay.style.color = timeRemainingMs >= 0 ? 'green' : 'red';
-            timerDisplay.textContent = timeRemainingMs >= 0
-                ? `${formatTimerDuration(timeRemainingMs)} remaining`
-                : `${formatTimerDuration(timeRemainingMs)} overdue`;
+function bindEvents() {
+    el('workBtn').onclick = showWorkChoice;
+    el('createNewListBtn').onclick = showTimeConstraint;
+    el('resumeExistingListBtn').onclick = resumeExistingList;
+    el('timeConstraintNextBtn').onclick = () => {
+        const minutes = Number.parseInt(el('availableTime').value, 10);
+        if (!Number.isFinite(minutes) || minutes < 1) {
+            alert('Enter the number of minutes you have available.');
+            return;
         }
+        totalAvailableTimeMs = minutes * 60_000;
+        endConstraint = el('endConstraint').value.trim();
+        showTaskInput();
+    };
+    el('tasks').addEventListener('input', updateCapacityMessage);
+    el('startSort').onclick = startSorting;
+    el('csvUpload').onchange = event => {
+        const file = event.target.files?.[0];
+        if (file) importFile(file);
+    };
+    el('stopWorkingBtn').onclick = stopWorking;
+    el('startOverBtn').onclick = startOver;
+}
 
-        function finalizeCurrentTaskAndAdvance(button) {
-            if (button) button.disabled = true;
-            if (timerInterval) clearInterval(timerInterval);
-
-            const now = Date.now();
-            completeTaskTiming(currentTask, now);
-            spareTime += Math.round((currentTask.estimatedTimeMs - currentTask.actualTimeMs) / 1000);
-
-            selectFirstIncompleteTask();
-            saveSession();
-            logTaskCompletionToBackend(currentTask);
-
-            if (currentTaskIndex < sortedTasks.length) {
-                startDeadlineSetting();
-            } else {
-                document.getElementById('stopWorkingBtn').classList.add('hidden');
-                displaySpareTime();
-            }
-        }
-
-        renderTimer();
-        if (timerInterval) clearInterval(timerInterval);
-        timerInterval = setInterval(renderTimer, 1000);
-
-        const doneNext = document.createElement('button');
-        doneNext.textContent = 'Done, Next!';
-        doneNext.addEventListener('click', () => finalizeCurrentTaskAndAdvance(doneNext));
-        focusScreen.appendChild(doneNext);
-
-        const addTask = document.createElement('button');
-        addTask.textContent = 'Add New Task';
-        addTask.addEventListener('click', () => {
-            if (timerInterval) clearInterval(timerInterval);
-            checkpointTaskTiming(currentTask);
-            saveSession();
-            startAddTask();
-        });
-        focusScreen.appendChild(addTask);
-
-        container.appendChild(focusScreen);
-        saveSession();
+function init() {
+    bindEvents();
+    const restored = restoreLocalState();
+    if (!restored || !sortedTasks.length) {
+        showModeSelect();
+        return;
     }
+    const active = currentTask();
+    if (restored.view === 'focus' && active?.lastChanged !== null) showFocus(active);
+    else if (restored.view === 'completion') showCompletion();
+    else showDashboard();
+}
 
-    async function patchedHandleStopWorking() {
-        if (timerInterval) clearInterval(timerInterval);
-
-        const activeTask = sortedTasks.find(task => {
-            normalizeTask(task);
-            return !task.completed && task.lastChanged !== null;
-        });
-
-        if (activeTask) {
-            pauseTaskTiming(activeTask);
-            setActiveTask(activeTask);
-        }
-
-        document.getElementById('stopWorkingBtn').classList.add('hidden');
-
-        saveSession();
-        syncPendingQueueToBackend();
-
-        const uncompleted = sortedTasks.filter(task => {
-            normalizeTask(task);
-            return !task.completed;
-        });
-
-        if (uncompleted.length > 0) {
-            renderUncompletedChecklistScreen(uncompleted);
-        } else {
-            finalizeStopWorkingSession();
-        }
-    }
-
-    const injectedHelpers = [
-        normalizeTask,
-        normalizeAllTasks,
-        findFirstIncompleteTaskIndex,
-        selectFirstIncompleteTask,
-        checkpointTaskTiming,
-        beginTaskTiming,
-        pauseTaskTiming,
-        completeTaskTiming,
-        formatTimerDuration
-    ].map(fn => fn.toString()).join('\n\n');
-
-    try {
-        const response = await fetch('script.original.js', { cache: 'no-store' });
-        if (!response.ok) throw new Error(`Unable to load workflow baseline (${response.status})`);
-
-        const baselineSource = await response.text();
-        const workflowStart = baselineSource.indexOf(marker);
-        if (workflowStart === -1) throw new Error('Workflow boundary marker was not found');
-
-        let workflowSource = `${injectedHelpers}\n\n${baselineSource.slice(workflowStart)}`;
-
-        workflowSource = replaceSection(
-            workflowSource,
-            '// Deadline Setup',
-            '// Live Execution Focus Panel',
-            `// Deadline Setup\n${patchedStartDeadlineSetting.toString().replace('patchedStartDeadlineSetting', 'startDeadlineSetting')}\n\n`,
-            'deadline setup'
-        );
-
-        workflowSource = replaceSection(
-            workflowSource,
-            '// Live Execution Focus Panel',
-            '// Stop Working routine & checklist verification',
-            `// Live Execution Focus Panel\n${patchedStartFocusScreen.toString().replace('patchedStartFocusScreen', 'startFocusScreen')}\n\n`,
-            'focus timer'
-        );
-
-        workflowSource = replaceSection(
-            workflowSource,
-            '// Stop Working routine & checklist verification',
-            'function renderUncompletedChecklistScreen',
-            `// Stop Working routine & checklist verification\n${patchedHandleStopWorking.toString().replace('patchedHandleStopWorking', 'handleStopWorking')}\n\n`,
-            'stop-working pause'
-        );
-
-        workflowSource = workflowSource.replace(
-            '    loadSession();',
-            `    const localSaved = localStorage.getItem('taskSorterSession_fallback');
-    if (localSaved) {
-        try {
-            const localState = JSON.parse(localSaved);
-            sortedTasks = localState.sortedTasks || [];
-            normalizeAllTasks();
-            activeTaskId = localState.activeTaskId || null;
-            totalAvailableTime = localState.totalAvailableTime || 0;
-            endConstraint = localState.endConstraint || '';
-        } catch (error) {
-            console.warn('Local session restore failed:', error);
-        }
-    }`
-        );
-
-        workflowSource = workflowSource.replace(
-            'function displaySortedTasks() {',
-            `function displaySortedTasks() {
-    normalizeAllTasks();
-    selectFirstIncompleteTask();`
-        );
-
-        workflowSource = workflowSource.replace(
-            '                task.timestamps.completed = nowMs;\n                if (!task.timestamps.started) task.timestamps.started = nowMs;',
-            `                completeTaskTiming(task, nowMs);
-                if (!task.started) task.started = nowMs;`
-        );
-
-        (0, eval)(`${workflowSource}\n//# sourceURL=task-sorter-workflow-chatgpt-2.js`);
-    } catch (error) {
-        console.error('Task Sorter workflow failed to initialize:', error);
-        const container = document.getElementById('dynamicContainer');
-        if (container) {
-            container.innerHTML = '';
-            const message = document.createElement('p');
-            message.textContent = 'Task Sorter could not start. Refresh the page and try again.';
-            message.style.color = '#b71c1c';
-            message.style.fontWeight = 'bold';
-            container.appendChild(message);
-        }
-    }
-})();
+document.addEventListener('DOMContentLoaded', init);
