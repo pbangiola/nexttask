@@ -36,8 +36,9 @@ if (!taskColumns.includes('user_id')) {
 }
 
 db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_tasks_user_status_order
-        ON tasks(user_id, status, sort_order, created_at);
+    DROP INDEX IF EXISTS idx_tasks_user_status_order;
+    CREATE INDEX IF NOT EXISTS idx_tasks_user_status_position
+        ON tasks(user_id, status, position, created);
 `);
 
 const ensureUserStmt = db.prepare(`
@@ -63,7 +64,7 @@ const getOpenTasksStmt = db.prepare(`
     FROM tasks
     WHERE user_id = ?
       AND status NOT IN ('completed', 'cancelled')
-    ORDER BY sort_order ASC, created_at ASC;
+    ORDER BY position ASC, created ASC;
 `);
 
 const moveOpenTasksToSessionStmt = db.prepare(`
