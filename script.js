@@ -16,6 +16,8 @@ let timerInterval = null;
 let totalAvailableTimeMs = 0;
 let endConstraint = '';
 let sortStartedAt = null;
+let currentSortNames = [];
+let sortRunId = 0;
 
 function createId(prefix) {
     const random = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2, 11);
@@ -74,7 +76,9 @@ function formatDuration(ms, alwaysHours = false) {
     const mmss = `${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;
     return alwaysHours || hours > 0 ? `${hours}:${mmss}` : mmss;
 }
-function allocatedTimeMs() { return incompleteTasks().reduce((sum, task) => sum + (task.estimatedTimeMs > 0 ? task.estimatedTimeMs : TEN_MINUTES_MS), 0); }
+function allocatedTimeMs() { return incompleteTasks().reduce((sum, task) => sum + Math.max(0, task.estimatedTimeMs || 0), 0); }
+function estimatedComparisonCount(taskCount) { return taskCount <= 1 ? 0 : Math.ceil(taskCount * Math.log2(taskCount)); }
+function estimatedSortingTimeMs(taskCount) { return Math.max(60_000, estimatedComparisonCount(taskCount) * 3_000); }
 
 function localSnapshot(view) { return { sortedTasks, activeTaskId, totalAvailableTimeMs, endConstraint, view, updatedAt: Date.now() }; }
 function saveLocal(view = inferView()) { localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(localSnapshot(view))); }
@@ -126,24 +130,90 @@ function updateCapacityMessage() {
     message.textContent = `Estimated capacity: ${Math.round(estimated/60000)} / ${Math.round(totalAvailableTimeMs/60000)} minutes.`;
     message.style.color = estimated > totalAvailableTimeMs ? '#d32f2f' : '#2e7d32';
 }
-function parsePlainTaskText(text) { const trimmed = String(text || '').trim(); if (!trimmed) return []; const pieces = trimmed.includes('\n') ? trimmed.split(/\r?\n/) : trimmed.split(','); return pieces.map(value => value.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean); }
+function parsePlainTaskText(text) { const trimmed = String(text || '').trim(); if (!trimmed) return []; const pieces = trimmed.includes('\n') ? trimmed.split(/\r?\n/) : trimmed.split(','); const names = pieces.map(value => value.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean); return [...new Set(names)]; }
 
-async function interactiveMergeSort(items) { if (items.length <= 1) return items; const middle = Math.floor(items.length/2); const left = await interactiveMergeSort(items.slice(0,middle)); const right = await interactiveMergeSort(items.slice(middle)); return mergeWithChoices(left,right); }
-function mergeWithChoices(left,right) {
+async function interactiveMergeSort(items, runId, estimatedMs) {
+    if (runId !== sortRunId || items.length <= 1) return items;
+    const middle = Math.floor(items.length / 2);
+    const left = await interactiveMergeSort(items.slice(0, middle), runId, estimatedMs);
+    const right = await interactiveMergeSort(items.slice(middle), runId, estimatedMs);
+    if (runId !== sortRunId) return [];
+    return mergeWithChoices(left, right, runId, estimatedMs);
+}
+
+function mergeWithChoices(left, right, runId, estimatedMs) {
     return new Promise(resolve => {
-        const merged=[]; const compare=el('taskCompare'); const task1=el('task1'); const task2=el('task2'); show(compare); hide(el('taskInput'));
-        function choose(side){ merged.push(side==='left'?left.shift():right.shift()); next(); }
-        function next(){ if(!left.length||!right.length){ hide(compare); resolve([...merged,...left,...right]); return; } task1.textContent=left[0].name; task2.textContent=right[0].name; task1.onclick=()=>choose('left'); task2.onclick=()=>choose('right'); }
+        const merged = [];
+        const compare = el('taskCompare');
+        const task1 = el('task1');
+        const task2 = el('task2');
+        let estimate = el('sortEstimateHeader');
+
+        if (!estimate) {
+            estimate = document.createElement('p');
+            estimate.id = 'sortEstimateHeader';
+            estimate.style.fontWeight = 'bold';
+            estimate.style.color = '#555';
+            compare.insertBefore(estimate, compare.firstChild);
+        }
+        estimate.textContent = `Estimated sorting time: ~${Math.max(1, Math.ceil(estimatedMs / 60_000))} min`;
+
+        show(compare);
+        hide(el('taskInput'));
+        show(el('startOverBtn'));
+
+        function choose(side) {
+            if (runId !== sortRunId) { resolve([]); return; }
+            merged.push(side === 'left' ? left.shift() : right.shift());
+            next();
+        }
+
+        function next() {
+            if (runId !== sortRunId) { hide(compare); resolve([]); return; }
+            if (!left.length || !right.length) {
+                hide(compare);
+                resolve([...merged, ...left, ...right]);
+                return;
+            }
+            task1.textContent = left[0].name;
+            task2.textContent = right[0].name;
+            task1.onclick = () => choose('left');
+            task2.onclick = () => choose('right');
+        }
         next();
     });
 }
+
 async function startSorting() {
-    const names=parsePlainTaskText(el('tasks').value); if(!names.length){ alert('Please enter at least one task.'); return; }
-    sortedTasks=names.map(name=>createTask(name)); sortStartedAt=Date.now(); hide(el('taskInput')); hide(el('startOverBtn'));
-    if(!el('skipSortCheckbox').checked) sortedTasks=await interactiveMergeSort(sortedTasks);
-    const finished=Date.now();
-    sortedTasks.unshift(createTask('Sorting tasks',{estimatedTimeMs:60000,actualTimeMs:Math.max(0,finished-sortStartedAt),completed:true,status:'completed',created:sortStartedAt,started:sortStartedAt,completedTime:finished}));
-    activeTaskId=firstIncompleteTask()?.id||null; showTimingGateway();
+    const names = parsePlainTaskText(el('tasks').value);
+    if (!names.length) { alert('Please enter at least one task.'); return; }
+
+    currentSortNames = [...names];
+    sortedTasks = names.map(name => createTask(name));
+    sortStartedAt = Date.now();
+    const runId = ++sortRunId;
+    const estimatedMs = estimatedSortingTimeMs(names.length);
+
+    hide(el('taskInput'));
+    show(el('startOverBtn'));
+
+    if (!el('skipSortCheckbox').checked) {
+        sortedTasks = await interactiveMergeSort(sortedTasks, runId, estimatedMs);
+        if (runId !== sortRunId) return;
+    }
+
+    const finished = Date.now();
+    sortedTasks.unshift(createTask('Sorting tasks', {
+        estimatedTimeMs: estimatedMs,
+        actualTimeMs: Math.max(0, finished - sortStartedAt),
+        completed: true,
+        status: 'completed',
+        created: sortStartedAt,
+        started: sortStartedAt,
+        completedTime: finished
+    }));
+    activeTaskId = firstIncompleteTask()?.id || null;
+    showTimingGateway();
 }
 
 function showTimingGateway() {
@@ -153,14 +223,69 @@ function showTimingGateway() {
     const no=document.createElement('button'); no.textContent='No'; no.onclick=showDashboard;
     screen.append(heading,yes,no); container.appendChild(screen); saveLocal('timing-gateway');
 }
-function showSequentialTiming(startIndex=0) {
-    const pending=incompleteTasks(); const index=pending.findIndex((task,i)=>i>=startIndex&&task.estimatedTimeMs<=0);
-    if(index===-1){ showDashboard(); return; }
-    const task=pending[index]; hideStaticScreens(); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='timingEntryScreen';
-    const heading=document.createElement('h2'); heading.textContent=`Estimate time for: ${task.name}`;
-    const input=document.createElement('input'); input.type='number'; input.min='1'; input.max=String(MAX_TASK_MINUTES); input.placeholder=`1-${MAX_TASK_MINUTES} minutes`;
-    const next=document.createElement('button'); next.textContent='Save & Next'; next.onclick=()=>{ const minutes=Number.parseInt(input.value,10); if(!Number.isFinite(minutes)||minutes<1||minutes>MAX_TASK_MINUTES){ alert(`Enter a number from 1 to ${MAX_TASK_MINUTES}.`); return; } task.estimatedTimeMs=minutes*60000; saveLocal('timing-entry'); showSequentialTiming(index+1); };
-    screen.append(heading,input,next); container.appendChild(screen);
+function showSequentialTiming(startIndex = 0) {
+    const pending = incompleteTasks();
+    const allocated = allocatedTimeMs();
+    const remainingBudgetMs = totalAvailableTimeMs > 0 ? totalAvailableTimeMs - allocated : null;
+
+    if (remainingBudgetMs !== null && remainingBudgetMs <= 0) {
+        showDashboard();
+        return;
+    }
+
+    const index = pending.findIndex((task, i) => i >= startIndex && task.estimatedTimeMs <= 0);
+    if (index === -1) {
+        showDashboard();
+        return;
+    }
+
+    const task = pending[index];
+    hideStaticScreens();
+    show(el('startOverBtn'));
+    const container = clearDynamic();
+    const screen = document.createElement('div');
+    screen.id = 'timingEntryScreen';
+
+    const heading = document.createElement('h2');
+    heading.textContent = `Current Task: ${task.name}`;
+
+    const allocationTimer = document.createElement('p');
+    allocationTimer.id = 'timer';
+    allocationTimer.style.fontSize = '24px';
+    allocationTimer.style.fontWeight = 'bold';
+    allocationTimer.style.color = 'green';
+    allocationTimer.textContent = remainingBudgetMs === null
+        ? 'No overall time limit'
+        : `${formatDuration(remainingBudgetMs)} remaining to allocate`;
+
+    const prompt = document.createElement('p');
+    prompt.textContent = `Estimate time for task ${index + 1} of ${pending.length}.`;
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '1';
+    const budgetMaxMinutes = remainingBudgetMs === null
+        ? MAX_TASK_MINUTES
+        : Math.max(1, Math.min(MAX_TASK_MINUTES, Math.floor(remainingBudgetMs / 60_000)));
+    input.max = String(budgetMaxMinutes);
+    input.placeholder = `1-${budgetMaxMinutes} minutes`;
+
+    const next = document.createElement('button');
+    next.textContent = index === pending.length - 1 ? 'Finish and View List' : 'Save & Next';
+    next.onclick = () => {
+        const minutes = Number.parseInt(input.value, 10);
+        if (!Number.isFinite(minutes) || minutes < 1 || minutes > budgetMaxMinutes) {
+            alert(`Enter a number from 1 to ${budgetMaxMinutes}.`);
+            return;
+        }
+        task.estimatedTimeMs = minutes * 60_000;
+        saveLocal('timing-entry');
+        showSequentialTiming(index + 1);
+    };
+
+    screen.append(heading, allocationTimer, prompt, input, next);
+    container.appendChild(screen);
+    saveLocal('timing-entry');
 }
 
 function showDashboard() {
@@ -224,7 +349,114 @@ function importFile(file){const reader=new FileReader();reader.onload=event=>{co
 function csvEscape(value){const text=String(value??'');return /[",\n]/.test(text)?`"${text.replace(/"/g,'""')}"`:text;}
 function exportCsv(){const rows=[['Task Name','Estimated Time (Min)','Actual Time (Min)','Completed','Task ID']];sortedTasks.forEach(task=>rows.push([task.name,Math.round(task.estimatedTimeMs/60000),Math.round(task.actualTimeMs/60000),task.completed,task.id]));const blob=new Blob([rows.map(row=>row.map(csvEscape).join(',')).join('\n')],{type:'text/csv'});const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`tasks_${new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')}.csv`;link.click();URL.revokeObjectURL(link.href);}
 
-function startOver(){clearInterval(timerInterval);localStorage.removeItem(LOCAL_STATE_KEY);localStorage.removeItem('taskSorterSessionId');sessionId=createId('session');localStorage.setItem('taskSorterSessionId',sessionId);sortedTasks=[];activeTaskId=null;totalAvailableTimeMs=0;endConstraint='';showModeSelect();}
-function bindEvents(){el('workBtn').onclick=showWorkChoice;el('createNewListBtn').onclick=showTimeConstraint;el('resumeExistingListBtn').onclick=resumeExistingList;el('timeConstraintNextBtn').onclick=()=>{const minutes=Number.parseInt(el('availableTime').value,10);if(!Number.isFinite(minutes)||minutes<1){alert('Enter the number of minutes you have available.');return;}totalAvailableTimeMs=minutes*60000;endConstraint=el('endConstraint').value.trim();showTaskInput();};el('tasks').addEventListener('input',updateCapacityMessage);el('startSort').onclick=startSorting;el('csvUpload').onchange=event=>{const file=event.target.files?.[0];if(file)importFile(file);};el('stopWorkingBtn').onclick=stopWorking;el('startOverBtn').onclick=startOver;}
+function resetAll() {
+    clearInterval(timerInterval);
+    sortRunId++;
+    localStorage.removeItem(LOCAL_STATE_KEY);
+    localStorage.removeItem('taskSorterSessionId');
+    sessionId = createId('session');
+    localStorage.setItem('taskSorterSessionId', sessionId);
+    sortedTasks = [];
+    activeTaskId = null;
+    totalAvailableTimeMs = 0;
+    endConstraint = '';
+    currentSortNames = [];
+    showModeSelect();
+}
+
+function restartCurrentStep() {
+    clearInterval(timerInterval);
+
+    if (!el('timeConstraintInput')?.classList.contains('hidden')) {
+        el('availableTime').value = '';
+        el('endConstraint').value = '';
+        return;
+    }
+
+    if (!el('taskInput')?.classList.contains('hidden')) {
+        el('tasks').value = '';
+        el('skipSortCheckbox').checked = false;
+        updateCapacityMessage();
+        return;
+    }
+
+    if (!el('taskCompare')?.classList.contains('hidden')) {
+        sortRunId++;
+        sortedTasks = [];
+        activeTaskId = null;
+        hide(el('taskCompare'));
+        el('tasks').value = currentSortNames.join('\n');
+        showTaskInput();
+        return;
+    }
+
+    if (el('timingGatewayScreen')) {
+        showTimingGateway();
+        return;
+    }
+
+    if (el('timingEntryScreen')) {
+        incompleteTasks().forEach(task => { task.estimatedTimeMs = 0; });
+        showSequentialTiming(0);
+    }
+}
+
+function showStartOverPrompt() {
+    if (el('startOverModal')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'startOverModal';
+    Object.assign(overlay.style, {
+        position: 'fixed', inset: '0', backgroundColor: 'rgba(0,0,0,0.4)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: '1000'
+    });
+
+    const box = document.createElement('div');
+    Object.assign(box.style, {
+        backgroundColor: '#fff', padding: '20px', borderRadius: '8px',
+        maxWidth: '320px', width: '85%', textAlign: 'center'
+    });
+
+    const message = document.createElement('p');
+    message.textContent = 'What would you like to do?';
+    message.style.fontWeight = 'bold';
+
+    function modalButton(label, action, backgroundColor) {
+        const button = document.createElement('button');
+        button.textContent = label;
+        Object.assign(button.style, { display: 'block', width: '100%', margin: '8px 0' });
+        if (backgroundColor) button.style.backgroundColor = backgroundColor;
+        button.onclick = () => { overlay.remove(); action(); };
+        return button;
+    }
+
+    box.append(
+        message,
+        modalButton('Restart This Step', restartCurrentStep),
+        modalButton('Restart From the Beginning', resetAll),
+        modalButton('Cancel', () => {}, '#eceff1')
+    );
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+}
+
+function bindEvents(){
+    el('workBtn').onclick=showWorkChoice;
+    el('createNewListBtn').onclick=showTimeConstraint;
+    el('resumeExistingListBtn').onclick=resumeExistingList;
+    el('timeConstraintNextBtn').onclick=()=>{
+        const minutes=Number.parseInt(el('availableTime').value,10);
+        if(!Number.isFinite(minutes)||minutes<1){alert('Enter the number of minutes you have available.');return;}
+        totalAvailableTimeMs=minutes*60000;
+        endConstraint=el('endConstraint').value.trim();
+        showTaskInput();
+    };
+    el('tasks').addEventListener('input',updateCapacityMessage);
+    el('startSort').onclick=startSorting;
+    el('csvUpload').onchange=event=>{const file=event.target.files?.[0];if(file)importFile(file);};
+    el('stopWorkingBtn').onclick=stopWorking;
+    el('startOverBtn').onclick=showStartOverPrompt;
+}
+
 function init(){bindEvents();const restored=restoreLocalState();if(!restored||!sortedTasks.length){showModeSelect();return;}const active=currentTask();if(restored.view==='focus'&&active?.lastChanged!==null)showFocus(active);else if(restored.view==='completion')showCompletion();else if(restored.view==='stop-checklist')showStopChecklist();else showDashboard();}
 document.addEventListener('DOMContentLoaded',init);
