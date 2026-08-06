@@ -27,33 +27,22 @@
             border-radius: 4px;
         }
         .upload-container { border: 1px dashed #ccc; background: #fafafa; }
-        .insertion-layout { display: flex; gap: 40px; margin-top: 15px; }
-        .insertion-column {
-            flex: 1;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            background: #fff;
-        }
-        .over-capacity { color: #d32f2f; }
-        #stopWorkingBtn {
+        #stopWorkingBtn, #startOverBtn {
             position: absolute;
             top: 0;
             right: 0;
+            border-radius: 4px;
+        }
+        #stopWorkingBtn {
             background-color: #ffcdd2;
             border: 1px solid #e53935;
             color: #b71c1c;
             font-weight: bold;
-            border-radius: 4px;
         }
         #startOverBtn {
-            position: absolute;
-            top: 0;
-            right: 0;
             background-color: #eceff1;
             border: 1px solid #90a4ae;
             color: #37474f;
-            border-radius: 4px;
         }
     </style>
 </head>
@@ -85,7 +74,7 @@
 
     <div id="taskInput" class="hidden">
         <h2>Enter Your Tasks</h2>
-        <textarea id="tasks" rows="10" cols="40" placeholder="Enter one task per line"></textarea>
+        <textarea id="tasks" rows="10" cols="40" placeholder="Enter one task per line or separate tasks with commas"></textarea>
         <div class="checkbox-container">
             <label style="display: flex; align-items: center; gap: 8px;">
                 <input type="checkbox" id="skipSortCheckbox" style="width: auto;"> Skip sorting (use current order)
@@ -106,15 +95,7 @@
 
     <div id="dynamicContainer"></div>
 
-    <script src="variables.js?v=20260805-chatgpt2-flow2"></script>
-    <script src="functions.js?v=20260805-chatgpt2-flow2"></script>
-    <script src="frontend.js?v=20260805-chatgpt2-flow2"></script>
-    <script src="canonical-only.js?v=20260805-chatgpt2-flow2"></script>
-    <script src="script.js?v=20260805-chatgpt2-flow2"></script>
-    <script src="session-actions.js?v=20260805-chatgpt2-flow2"></script>
-    <script src="user-actions.js?v=20260805-chatgpt2-flow2"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.3/papaparse.min.js" onerror="console.warn('CSV helper unavailable; using built-in parser.')"></script>
-    <script src="final-overrides.js?v=20260805-chatgpt2-flow2"></script>
-    <script src="regression-fixes.js?v=20260805-chatgpt2-flow2"></script>
+    <script src="script.js?v=20260806-single-controller"></script>
 </body>
 </html>
