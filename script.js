@@ -14,6 +14,10 @@ let sortedTasks = [];
 let activeTaskId = null;
 let timerInterval = null;
 let totalAvailableTimeMs = 0;
+let sessionStartedAtMs = 0;
+let hardStopAtMs = 0;
+let hardStopInterval = null;
+let hardStopHandled = false;
 let endConstraint = '';
 let sortStartedAt = null;
 let currentSortNames = [];
@@ -80,16 +84,91 @@ function allocatedTimeMs() { return incompleteTasks().reduce((sum, task) => sum 
 function estimatedComparisonCount(taskCount) { return taskCount <= 1 ? 0 : Math.ceil(taskCount * Math.log2(taskCount)); }
 function estimatedSortingTimeMs(taskCount) { return Math.max(60_000, estimatedComparisonCount(taskCount) * 3_000); }
 
-function localSnapshot(view) { return { sortedTasks, activeTaskId, totalAvailableTimeMs, endConstraint, view, updatedAt: Date.now() }; }
+function hasHardStop() {
+    return Number.isFinite(hardStopAtMs) && hardStopAtMs > 0;
+}
+
+function sessionTimeRemainingMs(now = Date.now()) {
+    return hasHardStop() ? hardStopAtMs - now : null;
+}
+
+function beginTimedSession(durationMs, now = Date.now()) {
+    totalAvailableTimeMs = Math.max(0, Number(durationMs || 0));
+    sessionStartedAtMs = totalAvailableTimeMs > 0 ? now : 0;
+    hardStopAtMs = totalAvailableTimeMs > 0 ? now + totalAvailableTimeMs : 0;
+    hardStopHandled = false;
+    startHardStopWatch();
+}
+
+function clearSessionTiming() {
+    clearInterval(hardStopInterval);
+    hardStopInterval = null;
+    totalAvailableTimeMs = 0;
+    sessionStartedAtMs = 0;
+    hardStopAtMs = 0;
+    hardStopHandled = false;
+}
+
+function startHardStopWatch() {
+    clearInterval(hardStopInterval);
+    hardStopInterval = null;
+
+    if (!hasHardStop() || hardStopHandled) return;
+
+    const checkHardStop = () => {
+        if (Date.now() >= hardStopAtMs) handleHardStop();
+    };
+
+    checkHardStop();
+    if (!hardStopHandled) hardStopInterval = setInterval(checkHardStop, 250);
+}
+
+function handleHardStop() {
+    if (hardStopHandled || !hasHardStop()) return;
+
+    hardStopHandled = true;
+    clearInterval(hardStopInterval);
+    hardStopInterval = null;
+    clearInterval(timerInterval);
+
+    const task = currentTask();
+    if (task && task.lastChanged !== null) {
+        pauseTaskClock(task, hardStopAtMs);
+    }
+
+    activeTaskId = firstIncompleteTask()?.id || null;
+    save('session-ended');
+    showSessionEnded();
+}
+
+function localSnapshot(view) {
+    return {
+        sortedTasks,
+        activeTaskId,
+        totalAvailableTimeMs,
+        sessionStartedAtMs,
+        hardStopAtMs,
+        endConstraint,
+        view,
+        updatedAt: Date.now()
+    };
+}
 function saveLocal(view = inferView()) { localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(localSnapshot(view))); }
 function serverPayload() {
-    return { userId, totalAvailableTimeMs, endConstraint, tasks: sortedTasks.map((task,index) => {
+    return {
+        userId,
+        totalAvailableTimeMs,
+        sessionStartedAtMs,
+        hardStopAtMs,
+        endConstraint,
+        tasks: sortedTasks.map((task,index) => {
         ensureTask(task);
         return { id: task.id, name: task.name, status: task.completed ? 'completed' : task.status,
             estimatedTimeMs: task.estimatedTimeMs, actualTimeMs: task.actualTimeMs, position: index + 1,
             created: task.created, started: task.started, completedTime: task.completedTime,
             lastChanged: task.lastChanged, blockedByTaskId: task.blockedByTaskId };
-    })};
+        })
+    };
 }
 function backupToServer() {
     fetch(`${API_BASE_URL}/api/session/${encodeURIComponent(sessionId)}/tasks`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(serverPayload()) })
@@ -103,6 +182,7 @@ function inferView() {
     if (el('timingGatewayScreen')) return 'timing-gateway';
     if (el('timingEntryScreen')) return 'timing-entry';
     if (el('completionScreen')) return 'completion';
+    if (el('sessionEndedScreen')) return 'session-ended';
     if (el('stopChecklistScreen')) return 'stop-checklist';
     if (!el('taskInput')?.classList.contains('hidden')) return 'input';
     if (!el('timeConstraintInput')?.classList.contains('hidden')) return 'time-constraint';
@@ -111,7 +191,17 @@ function inferView() {
 }
 function restoreLocalState() {
     const raw = localStorage.getItem(LOCAL_STATE_KEY); if (!raw) return false;
-    try { const state = JSON.parse(raw); sortedTasks = Array.isArray(state.sortedTasks) ? state.sortedTasks.map(ensureTask) : []; activeTaskId = state.activeTaskId || null; totalAvailableTimeMs = Number(state.totalAvailableTimeMs || 0); endConstraint = String(state.endConstraint || ''); return state; }
+    try {
+        const state = JSON.parse(raw);
+        sortedTasks = Array.isArray(state.sortedTasks) ? state.sortedTasks.map(ensureTask) : [];
+        activeTaskId = state.activeTaskId || null;
+        totalAvailableTimeMs = Math.max(0, Number(state.totalAvailableTimeMs || 0));
+        sessionStartedAtMs = Math.max(0, Number(state.sessionStartedAtMs || 0));
+        hardStopAtMs = Math.max(0, Number(state.hardStopAtMs || 0));
+        endConstraint = String(state.endConstraint || '');
+        hardStopHandled = state.view === 'session-ended';
+        return state;
+    }
     catch (error) { console.warn('Local session could not be restored:', error); return false; }
 }
 
@@ -226,7 +316,8 @@ function showTimingGateway() {
 function showSequentialTiming(startIndex = 0) {
     const pending = incompleteTasks();
     const allocated = allocatedTimeMs();
-    const remainingBudgetMs = totalAvailableTimeMs > 0 ? totalAvailableTimeMs - allocated : null;
+    const sessionRemainingMs = sessionTimeRemainingMs();
+    const remainingBudgetMs = sessionRemainingMs === null ? null : sessionRemainingMs - allocated;
 
     if (remainingBudgetMs !== null && remainingBudgetMs <= 0) {
         showDashboard();
@@ -301,6 +392,8 @@ function beginWork(){ const task=firstIncompleteTask(); if(!task){showCompletion
 function showSingleTaskEstimate(task){ hideStaticScreens(); hide(el('startOverBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='deadlinePage'; const heading=document.createElement('h2'); heading.textContent=`Set a time for: ${task.name}`; const input=document.createElement('input'); input.type='number'; input.min='1'; input.max=String(MAX_TASK_MINUTES); const start=document.createElement('button'); start.textContent='Start Task'; start.onclick=()=>{const minutes=Number.parseInt(input.value,10);if(!Number.isFinite(minutes)||minutes<1||minutes>MAX_TASK_MINUTES){alert(`Enter a number from 1 to ${MAX_TASK_MINUTES}.`);return;}task.estimatedTimeMs=minutes*60000;showFocus(task);}; screen.append(heading,input,start); container.appendChild(screen); }
 
 function showFocus(task){
+    if (hasHardStop() && Date.now() >= hardStopAtMs) { handleHardStop(); return; }
+    startHardStopWatch();
     ensureTask(task); hideStaticScreens(); hide(el('startOverBtn')); show(el('stopWorkingBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='focusScreen'; if(task.lastChanged===null) startTaskClock(task);
     const heading=document.createElement('h2'); heading.textContent=`Current Task: ${task.name}`; const timer=document.createElement('p'); timer.id='timer'; timer.style.fontSize='24px'; timer.style.fontWeight='bold';
     function renderTimer(){checkpointTask(task);const remaining=task.estimatedTimeMs-task.actualTimeMs;timer.style.color=remaining>=0?'green':'red';timer.textContent=remaining>=0?`${formatDuration(remaining)} remaining`:`${formatDuration(remaining)} overdue`;saveLocal('focus');}
@@ -308,6 +401,44 @@ function showFocus(task){
     const blocked=document.createElement('button'); blocked.textContent='Blocked'; blocked.onclick=()=>{clearInterval(timerInterval);pauseTaskClock(task);showBlockedFlow(task);};
     const add=document.createElement('button'); add.textContent='Add New Task'; add.onclick=()=>{clearInterval(timerInterval);checkpointTask(task);showAddTask(task);};
     screen.append(heading,timer,done,blocked,add); container.appendChild(screen); renderTimer(); clearInterval(timerInterval); timerInterval=setInterval(renderTimer,1000); save('focus');
+}
+
+function showSessionEnded() {
+    clearInterval(timerInterval);
+    clearInterval(hardStopInterval);
+    hardStopInterval = null;
+    hideStaticScreens();
+    hide(el('stopWorkingBtn'));
+    show(el('startOverBtn'));
+
+    const container = clearDynamic();
+    const screen = document.createElement('div');
+    screen.id = 'sessionEndedScreen';
+
+    const heading = document.createElement('h2');
+    heading.textContent = 'Session Ended';
+
+    const message = document.createElement('p');
+    message.textContent = 'Your available time is up. The current task was saved without being marked complete.';
+
+    const listButton = document.createElement('button');
+    listButton.textContent = 'View Saved Task List';
+    listButton.onclick = showDashboard;
+
+    const resumeButton = document.createElement('button');
+    resumeButton.textContent = 'Start Another Session';
+    resumeButton.onclick = () => {
+        hardStopHandled = false;
+        sessionStartedAtMs = 0;
+        hardStopAtMs = 0;
+        totalAvailableTimeMs = 0;
+        saveLocal('time-constraint');
+        showTimeConstraint();
+    };
+
+    screen.append(heading, message, listButton, resumeButton);
+    container.appendChild(screen);
+    saveLocal('session-ended');
 }
 
 function showBlockedFlow(blockedTask){
@@ -358,7 +489,7 @@ function resetAll() {
     localStorage.setItem('taskSorterSessionId', sessionId);
     sortedTasks = [];
     activeTaskId = null;
-    totalAvailableTimeMs = 0;
+    clearSessionTiming();
     endConstraint = '';
     currentSortNames = [];
     showModeSelect();
@@ -447,8 +578,9 @@ function bindEvents(){
     el('timeConstraintNextBtn').onclick=()=>{
         const minutes=Number.parseInt(el('availableTime').value,10);
         if(!Number.isFinite(minutes)||minutes<1){alert('Enter the number of minutes you have available.');return;}
-        totalAvailableTimeMs=minutes*60000;
+        beginTimedSession(minutes * 60000);
         endConstraint=el('endConstraint').value.trim();
+        saveLocal('input');
         showTaskInput();
     };
     el('tasks').addEventListener('input',updateCapacityMessage);
@@ -458,5 +590,27 @@ function bindEvents(){
     el('startOverBtn').onclick=showStartOverPrompt;
 }
 
-function init(){bindEvents();const restored=restoreLocalState();if(!restored||!sortedTasks.length){showModeSelect();return;}const active=currentTask();if(restored.view==='focus'&&active?.lastChanged!==null)showFocus(active);else if(restored.view==='completion')showCompletion();else if(restored.view==='stop-checklist')showStopChecklist();else showDashboard();}
+function init(){
+    bindEvents();
+    const restored=restoreLocalState();
+
+    if (!restored || !sortedTasks.length) {
+        showModeSelect();
+        return;
+    }
+
+    if (hasHardStop() && Date.now() >= hardStopAtMs && restored.view !== 'session-ended') {
+        handleHardStop();
+        return;
+    }
+
+    startHardStopWatch();
+    const active=currentTask();
+
+    if (restored.view==='focus'&&active?.lastChanged!==null) showFocus(active);
+    else if (restored.view==='completion') showCompletion();
+    else if (restored.view==='session-ended') showSessionEnded();
+    else if (restored.view==='stop-checklist') showStopChecklist();
+    else showDashboard();
+}
 document.addEventListener('DOMContentLoaded',init);
