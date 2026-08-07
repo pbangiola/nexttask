@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Task Planner</title>
+    <title>Project Planner</title>
     <style>
         :root { --primary-color:#2e7d32; --bg-color:#f4f6f8; --card-bg:#fff; --text-color:#333; --border-radius:8px; }
         body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg-color); color:var(--text-color); margin:0; padding:20px; display:flex; justify-content:center; }
@@ -27,19 +27,34 @@
 </head>
 <body>
 <div class="app-container">
-    <header><h1>Task Planner</h1></header>
+    <header><h1>Project Planner</h1></header>
+
     <div id="taskInputContainer">
-        <h2>What are you planning?</h2>
-        <p style="color:#666;font-size:14px;">Enter your tasks below (one per line):</p>
-        <textarea id="tasksTextarea" rows="6" placeholder="e.g.,&#10;Read chapter 3&#10;Clean desk&#10;Organize notes"></textarea>
-        <label class="checkbox-label"><input type="checkbox" id="skipSortCheckbox"> Keep this order (skip comparison sorting)</label>
-        <button id="btnSubmitText" class="btn-action">Get Started</button>
-        <div class="file-upload-section"><p style="font-size:14px;color:#666;margin-bottom:8px;">Or load tasks from a CSV file:</p><input type="file" id="csvFileInput" accept=".csv"></div>
+        <h2>Project Planner: Start a Plan</h2>
+        <p style="color:#666;font-size:14px;">Enter the tasks or steps you want to plan, one per line:</p>
+        <textarea id="tasksTextarea" rows="6" placeholder="e.g.,&#10;Research options&#10;Draft outline&#10;Review with team"></textarea>
+
+        <label class="checkbox-label">
+            <input type="checkbox" id="skipSortCheckbox">
+            Keep this order (skip comparison sorting)
+        </label>
+
+        <button id="btnSubmitText" class="btn-action">Build Project Plan</button>
+
+        <div class="file-upload-section">
+            <p style="font-size:14px;color:#666;margin-bottom:8px;">Or load an existing project-plan CSV:</p>
+            <input type="file" id="csvFileInput" accept=".csv">
+        </div>
     </div>
+
     <div id="taskCompare" class="hidden">
-        <h2>Which task should come first?</h2>
-        <div class="compare-box"><div id="task1" class="compare-card">Task A</div><div id="task2" class="compare-card">Task B</div></div>
+        <h2>Project Planner: Which Comes First?</h2>
+        <div class="compare-box">
+            <div id="task1" class="compare-card">Task A</div>
+            <div id="task2" class="compare-card">Task B</div>
+        </div>
     </div>
+
     <div id="dynamicContainer"></div>
 </div>
 <script src="script.js"></script>
