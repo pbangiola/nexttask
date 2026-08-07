@@ -213,7 +213,7 @@ function showTaskInput() { hideStaticScreens(); clearDynamic(); show(el('taskInp
 
 function updateCapacityMessage() {
     const textarea = el('tasks'); if (!textarea) return;
-    const tasks = parsePlainTaskText(textarea.value);
+    const tasks = parseTaskEntryText(textarea.value);
     let message = el('capacityInfoMsg');
     if (!message) { message = document.createElement('p'); message.id='capacityInfoMsg'; message.style.fontWeight='bold'; textarea.insertAdjacentElement('afterend', message); }
     if (!totalAvailableTimeMs) { message.textContent=''; return; }
@@ -221,7 +221,65 @@ function updateCapacityMessage() {
     message.textContent = `Estimated capacity: ${Math.round(estimated/60000)} / ${Math.round(totalAvailableTimeMs/60000)} minutes.`;
     message.style.color = estimated > totalAvailableTimeMs ? '#d32f2f' : '#2e7d32';
 }
-function parsePlainTaskText(text) { const trimmed = String(text || '').trim(); if (!trimmed) return []; const pieces = trimmed.includes('\n') ? trimmed.split(/\r?\n/) : trimmed.split(','); const names = pieces.map(value => value.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean); return [...new Set(names)]; }
+function parseTaskEntryText(text) {
+    const trimmed = String(text || '').trim();
+    if (!trimmed) return [];
+    const pieces = trimmed.includes('\n') ? trimmed.split(/\r?\n/) : trimmed.split(',');
+    return pieces
+        .map(value => value.replace(/^\s*\d+[.)]\s*/, '').trim())
+        .filter(Boolean);
+}
+
+function parsePlainTaskText(text) {
+    return [...new Set(parseTaskEntryText(text))];
+}
+
+function duplicateKey(name) {
+    return String(name || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+
+function nextAvailableAgainName(baseName, usedKeys) {
+    const cleanBase = String(baseName || '').trim().replace(/\s+/g, ' ');
+    let candidate = `${cleanBase} again`;
+    let suffix = 2;
+
+    while (usedKeys.has(duplicateKey(candidate))) {
+        candidate = `${cleanBase} again ${suffix}`;
+        suffix += 1;
+    }
+
+    return candidate;
+}
+
+function resolveDuplicateTaskNames(names) {
+    const resolved = [];
+    const usedKeys = new Set();
+
+    names.forEach(rawName => {
+        const name = String(rawName || '').trim().replace(/\s+/g, ' ');
+        const key = duplicateKey(name);
+
+        if (!usedKeys.has(key)) {
+            resolved.push(name);
+            usedKeys.add(key);
+            return;
+        }
+
+        const renamed = nextAvailableAgainName(name, usedKeys);
+        const keepDuplicate = confirm(
+            `“${name}” appears more than once.\n\n` +
+            `Keep this copy as “${renamed}”?\n\n` +
+            'Choose Cancel to remove the duplicate.'
+        );
+
+        if (keepDuplicate) {
+            resolved.push(renamed);
+            usedKeys.add(duplicateKey(renamed));
+        }
+    });
+
+    return resolved;
+}
 
 function prepareSortingDisplay(sortTask) {
     const compare = el('taskCompare');
@@ -302,7 +360,8 @@ function mergeWithChoices(left, right, runId) {
 }
 
 async function startSorting() {
-    const names = parsePlainTaskText(el('tasks').value);
+    const enteredNames = parseTaskEntryText(el('tasks').value);
+    const names = resolveDuplicateTaskNames(enteredNames);
     if (!names.length) { alert('Please enter at least one task.'); return; }
 
     currentSortNames = [...names];
@@ -353,16 +412,9 @@ function showTimingGateway() {
     screen.append(heading,yes,no); container.appendChild(screen); saveLocal('timing-gateway');
 }
 function showSequentialTiming(startIndex = 0) {
+    clearInterval(timerInterval);
+
     const pending = incompleteTasks();
-    const allocated = allocatedTimeMs();
-    const sessionRemainingMs = sessionTimeRemainingMs();
-    const remainingBudgetMs = sessionRemainingMs === null ? null : sessionRemainingMs - allocated;
-
-    if (remainingBudgetMs !== null && remainingBudgetMs <= 0) {
-        showDashboard();
-        return;
-    }
-
     const index = pending.findIndex((task, i) => i >= startIndex && task.estimatedTimeMs <= 0);
     if (index === -1) {
         showDashboard();
@@ -372,6 +424,7 @@ function showSequentialTiming(startIndex = 0) {
     const task = pending[index];
     hideStaticScreens();
     show(el('startOverBtn'));
+
     const container = clearDynamic();
     const screen = document.createElement('div');
     screen.id = 'timingEntryScreen';
@@ -379,14 +432,16 @@ function showSequentialTiming(startIndex = 0) {
     const heading = document.createElement('h2');
     heading.textContent = `Current Task: ${task.name}`;
 
+    const timerLabel = document.createElement('p');
+    timerLabel.textContent = 'Time to work with:';
+    timerLabel.style.marginBottom = '4px';
+
     const allocationTimer = document.createElement('p');
     allocationTimer.id = 'timer';
     allocationTimer.style.fontSize = '24px';
     allocationTimer.style.fontWeight = 'bold';
     allocationTimer.style.color = 'green';
-    allocationTimer.textContent = remainingBudgetMs === null
-        ? 'No overall time limit'
-        : `${formatDuration(remainingBudgetMs)} remaining to allocate`;
+    allocationTimer.style.marginTop = '0';
 
     const prompt = document.createElement('p');
     prompt.textContent = `Estimate time for task ${index + 1} of ${pending.length}.`;
@@ -394,27 +449,74 @@ function showSequentialTiming(startIndex = 0) {
     const input = document.createElement('input');
     input.type = 'number';
     input.min = '1';
-    const budgetMaxMinutes = remainingBudgetMs === null
-        ? MAX_TASK_MINUTES
-        : Math.max(1, Math.min(MAX_TASK_MINUTES, Math.floor(remainingBudgetMs / 60_000)));
-    input.max = String(budgetMaxMinutes);
-    input.placeholder = `1-${budgetMaxMinutes} minutes`;
 
     const next = document.createElement('button');
     next.textContent = index === pending.length - 1 ? 'Finish and View List' : 'Save & Next';
-    next.onclick = () => {
-        const minutes = Number.parseInt(input.value, 10);
-        if (!Number.isFinite(minutes) || minutes < 1 || minutes > budgetMaxMinutes) {
-            alert(`Enter a number from 1 to ${budgetMaxMinutes}.`);
+
+    function remainingPlanningTimeMs(now = Date.now()) {
+        const sessionRemaining = sessionTimeRemainingMs(now);
+        return sessionRemaining === null ? null : sessionRemaining - allocatedTimeMs();
+    }
+
+    function updatePlanningTimer() {
+        const remainingMs = remainingPlanningTimeMs();
+
+        if (remainingMs === null) {
+            allocationTimer.textContent = 'No overall time limit';
+            input.max = String(MAX_TASK_MINUTES);
+            input.placeholder = `1-${MAX_TASK_MINUTES} minutes`;
+            next.disabled = false;
             return;
         }
+
+        if (remainingMs <= 0) {
+            clearInterval(timerInterval);
+            saveLocal('dashboard');
+            showDashboard();
+            return;
+        }
+
+        allocationTimer.textContent = formatDuration(remainingMs);
+
+        const maxWholeMinutes = Math.min(MAX_TASK_MINUTES, Math.floor(remainingMs / 60_000));
+        if (maxWholeMinutes < 1) {
+            input.max = '0';
+            input.placeholder = 'Less than 1 minute remains';
+            input.disabled = true;
+            next.disabled = true;
+            return;
+        }
+
+        input.disabled = false;
+        next.disabled = false;
+        input.max = String(maxWholeMinutes);
+        input.placeholder = `1-${maxWholeMinutes} minutes`;
+    }
+
+    next.onclick = () => {
+        const minutes = Number.parseInt(input.value, 10);
+        const remainingMs = remainingPlanningTimeMs();
+        const maxWholeMinutes = remainingMs === null
+            ? MAX_TASK_MINUTES
+            : Math.min(MAX_TASK_MINUTES, Math.floor(remainingMs / 60_000));
+
+        if (!Number.isFinite(minutes) || minutes < 1 || minutes > maxWholeMinutes) {
+            alert(`Enter a number from 1 to ${Math.max(1, maxWholeMinutes)}.`);
+            updatePlanningTimer();
+            return;
+        }
+
         task.estimatedTimeMs = minutes * 60_000;
+        clearInterval(timerInterval);
         saveLocal('timing-entry');
         showSequentialTiming(index + 1);
     };
 
-    screen.append(heading, allocationTimer, prompt, input, next);
+    screen.append(heading, timerLabel, allocationTimer, prompt, input, next);
     container.appendChild(screen);
+
+    updatePlanningTimer();
+    timerInterval = setInterval(updatePlanningTimer, 1_000);
     saveLocal('timing-entry');
 }
 
@@ -514,8 +616,164 @@ function showCompletion(){clearInterval(timerInterval);hideStaticScreens();hide(
 
 async function resumeExistingList(){hideStaticScreens();const container=clearDynamic();container.textContent='Loading saved tasks…';try{await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:'{}'});await fetch(`${API_BASE_URL}/api/session/${encodeURIComponent(sessionId)}/tasks`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId,tasks:[],totalAvailableTimeMs:0,endConstraint:''})});const response=await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}/tasks/import`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId})});if(!response.ok)throw new Error(`Resume failed (${response.status})`);const data=await response.json();sortedTasks=(data.tasks||[]).map(row=>createTask(row.name,{id:row.id,estimatedTimeMs:row.estimated_ms,actualTimeMs:row.elapsed_ms,completed:false,status:row.status,created:row.created,started:row.started,lastChanged:null,blockedByTaskId:row.blocked_by_task_id}));activeTaskId=firstIncompleteTask()?.id||null;if(!sortedTasks.length){alert('No unfinished saved tasks were found.');showWorkChoice();return;}showDashboard();}catch(error){console.error(error);alert('The saved task list could not be loaded.');showWorkChoice();}}
 
-function parseCsv(text){if(globalThis.Papa?.parse){try{const result=Papa.parse(text,{skipEmptyLines:true});if(!result.errors.length)return result.data;}catch(error){console.warn('CSV helper failed; using basic parser:',error);}}return text.split(/\r?\n/).filter(Boolean).map(line=>line.split(',').map(cell=>cell.trim()));}
-function importFile(file){const reader=new FileReader();reader.onload=event=>{const text=String(event.target.result||'');const rows=parseCsv(text);const headers=(rows[0]||[]).map(value=>String(value).trim().toLowerCase());const nameIndex=headers.findIndex(value=>['task name','task','name','title','reminder'].includes(value));const idIndex=headers.findIndex(value=>['task id','id'].includes(value));const estimateIndex=headers.findIndex(value=>value.includes('estimated'));const actualIndex=headers.findIndex(value=>value.includes('actual'));const completedIndex=headers.findIndex(value=>['completed','done','status'].includes(value));const structured=nameIndex>=0;if(structured){sortedTasks=rows.slice(1).map(row=>createTask(row[nameIndex],{id:idIndex>=0?row[idIndex]:undefined,estimatedTimeMs:estimateIndex>=0?Number(row[estimateIndex]||0)*60000:0,actualTimeMs:actualIndex>=0?Number(row[actualIndex]||0)*60000:0,completed:completedIndex>=0&&['true','yes','1','done','completed'].includes(String(row[completedIndex]).toLowerCase())})).filter(task=>task.name);}else{sortedTasks=parsePlainTaskText(text).map(name=>createTask(name));}if(!sortedTasks.length){alert('No tasks were found in that file.');return;}hide(el('taskInput'));el('csvUpload').value='';activeTaskId=firstIncompleteTask()?.id||null;if(structured&&idIndex>=0)showDashboard();else showTimingGateway();};reader.onerror=()=>alert('That file could not be read.');reader.readAsText(file);}
+function parseCsv(text) {
+    if (globalThis.Papa?.parse) {
+        try {
+            const result = Papa.parse(text, { skipEmptyLines: true });
+            if (!result.errors.length) return result.data;
+        } catch (error) {
+            console.warn('CSV helper failed; using basic parser:', error);
+        }
+    }
+
+    return text
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map(line => line.split(',').map(cell => cell.trim()));
+}
+
+function normalizedExportHeading(line) {
+    return String(line || '')
+        .trim()
+        .toLocaleLowerCase()
+        .replace(/[：:]+$/, '')
+        .replace(/\s+/g, ' ');
+}
+
+function isExportSeparator(line) {
+    const compact = String(line || '').replace(/\s/g, '');
+    return compact.length >= 3 && /^[\-—–_=*]+$/.test(compact);
+}
+
+function cleanExportTaskLine(line) {
+    let cleaned = String(line || '').trim();
+
+    cleaned = cleaned
+        .replace(/^\s*(?:[-*•]\s+|\d+[.)]\s+|(?:\[[ xX✓✔]\]|☐|☑)\s*)/, '')
+        .replace(/\s*[✓✔]\s*$/, '')
+        .replace(/\s+[—–-]\s+(?:blocked|completed|complete|done)\s*$/i, '')
+        .replace(/\s+[—–-]\s+\d+(?:\.\d+)?\s*(?:min|mins|minute|minutes)\s*$/i, '')
+        .trim();
+
+    return cleaned;
+}
+
+function parseNextTaskTextExport(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const openHeadings = new Set([
+        'uncompleted tasks',
+        'incomplete tasks',
+        'unfinished tasks',
+        'remaining tasks',
+        'tasks remaining'
+    ]);
+    const completedHeadings = new Set([
+        'completed tasks',
+        'finished tasks',
+        'done tasks'
+    ]);
+    const neutralHeadings = new Set([
+        'task sorter',
+        'task list',
+        'your task list',
+        'sorted task list',
+        'nexttask'
+    ]);
+
+    let recognizedFormat = false;
+    let section = 'open';
+    const names = [];
+
+    for (const rawLine of lines) {
+        const line = String(rawLine || '').trim();
+        if (!line) continue;
+
+        const heading = normalizedExportHeading(line);
+
+        if (openHeadings.has(heading)) {
+            recognizedFormat = true;
+            section = 'open';
+            continue;
+        }
+
+        if (completedHeadings.has(heading)) {
+            recognizedFormat = true;
+            section = 'completed';
+            continue;
+        }
+
+        if (neutralHeadings.has(heading) || isExportSeparator(line)) {
+            recognizedFormat = true;
+            continue;
+        }
+
+        // A restored list should contain unfinished work only. Completed-section
+        // entries remain historical and should not be re-added to the queue.
+        if (section === 'completed') continue;
+
+        const cleaned = cleanExportTaskLine(line);
+        if (cleaned) names.push(cleaned);
+    }
+
+    if (!recognizedFormat) return null;
+    return [...new Set(names)];
+}
+
+function importFile(file) {
+    const reader = new FileReader();
+
+    reader.onload = event => {
+        const text = String(event.target.result || '');
+        const rows = parseCsv(text);
+        const headers = (rows[0] || []).map(value => String(value).trim().toLowerCase());
+        const nameIndex = headers.findIndex(value =>
+            ['task name', 'task', 'name', 'title', 'reminder'].includes(value)
+        );
+        const idIndex = headers.findIndex(value => ['task id', 'id'].includes(value));
+        const estimateIndex = headers.findIndex(value => value.includes('estimated'));
+        const actualIndex = headers.findIndex(value => value.includes('actual'));
+        const completedIndex = headers.findIndex(value =>
+            ['completed', 'done', 'status'].includes(value)
+        );
+        const structured = nameIndex >= 0;
+
+        if (structured) {
+            sortedTasks = rows.slice(1)
+                .map(row => createTask(row[nameIndex], {
+                    id: idIndex >= 0 ? row[idIndex] : undefined,
+                    estimatedTimeMs: estimateIndex >= 0
+                        ? Number(row[estimateIndex] || 0) * 60_000
+                        : 0,
+                    actualTimeMs: actualIndex >= 0
+                        ? Number(row[actualIndex] || 0) * 60_000
+                        : 0,
+                    completed: completedIndex >= 0
+                        && ['true', 'yes', '1', 'done', 'completed']
+                            .includes(String(row[completedIndex]).toLowerCase())
+                }))
+                .filter(task => task.name);
+        } else {
+            const exportedNames = parseNextTaskTextExport(text);
+            const names = exportedNames ?? parsePlainTaskText(text);
+            sortedTasks = names.map(name => createTask(name));
+        }
+
+        if (!sortedTasks.length) {
+            alert('No unfinished tasks were found in that file.');
+            return;
+        }
+
+        hide(el('taskInput'));
+        el('csvUpload').value = '';
+        activeTaskId = firstIncompleteTask()?.id || null;
+
+        if (structured && idIndex >= 0) showDashboard();
+        else showTimingGateway();
+    };
+
+    reader.onerror = () => alert('That file could not be read.');
+    reader.readAsText(file);
+}
 function csvEscape(value){const text=String(value??'');return /[",\n]/.test(text)?`"${text.replace(/"/g,'""')}"`:text;}
 function exportCsv(){const rows=[['Task Name','Estimated Time (Min)','Actual Time (Min)','Completed','Task ID']];sortedTasks.forEach(task=>rows.push([task.name,Math.round(task.estimatedTimeMs/60000),Math.round(task.actualTimeMs/60000),task.completed,task.id]));const blob=new Blob([rows.map(row=>row.map(csvEscape).join(',')).join('\n')],{type:'text/csv'});const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`tasks_${new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')}.csv`;link.click();URL.revokeObjectURL(link.href);}
 
@@ -647,6 +905,8 @@ function init(){
     const active=currentTask();
 
     if (restored.view==='focus'&&active?.lastChanged!==null) showFocus(active);
+    else if (restored.view==='timing-entry') showSequentialTiming(0);
+    else if (restored.view==='timing-gateway') showTimingGateway();
     else if (restored.view==='completion') showCompletion();
     else if (restored.view==='session-ended') showSessionEnded();
     else if (restored.view==='stop-checklist') showStopChecklist();

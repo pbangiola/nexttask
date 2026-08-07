@@ -1,245 +1,233 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 
-// Read from Railway persistent volume mount if available, fallback to local directory
 const dataDir = process.env.RAILWAY_VOLUME_MOUNT_PATH || __dirname;
 const dbPath = path.join(dataDir, 'task_sorter.db');
-
 const db = new Database(dbPath);
+db.pragma('foreign_keys = ON');
 
-// Initialize relational schema for sessions, completed tasks, and persistent uncompleted task queue
+const TASK_SCHEMA_VERSION = 1;
+
 db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
         updated_at INTEGER NOT NULL,
-        state_json TEXT NOT NULL
+        total_available_time_ms INTEGER NOT NULL DEFAULT 0,
+        end_constraint TEXT NOT NULL DEFAULT ''
     );
 
-    CREATE TABLE IF NOT EXISTS completed_tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,
-        task_name TEXT NOT NULL,
-        estimated_minutes INTEGER NOT NULL,
-        actual_minutes INTEGER NOT NULL,
-        variance_minutes INTEGER NOT NULL,
-        completed_at INTEGER NOT NULL,
-        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS task_queue (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        task_name TEXT NOT NULL,
-        estimated_minutes INTEGER DEFAULT 0,
-        elapsed_ms INTEGER DEFAULT 0,
-        sort_order INTEGER NOT NULL,
-        created_at INTEGER NOT NULL,
-        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        project_id TEXT,
+        name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+            CHECK(status IN ('pending', 'active', 'blocked', 'completed', 'cancelled')),
+        estimated_ms INTEGER NOT NULL DEFAULT 0,
+        elapsed_ms INTEGER NOT NULL DEFAULT 0,
+        position INTEGER NOT NULL DEFAULT 0,
+        blocked_by_task_id TEXT,
+        created INTEGER NOT NULL,
+        started INTEGER,
+        completed INTEGER,
+        last_changed INTEGER,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY(blocked_by_task_id) REFERENCES tasks(id) ON DELETE SET NULL
     );
 `);
 
-// --- Defensive schema migrations -------------------------------------------
-// Older deployments' database files may predate columns added since. Rather
-// than patching one missing-column crash at a time, each table below is
-// checked against its expected column set on every boot. If anything is
-// missing, the table is rebuilt from scratch. These checks are cheap and are
-// no-ops once a table's schema is already correct, so they're safe to leave
-// in permanently.
-//
-// NOTE: rebuilding drops any existing rows in the affected table. If you
-// need to preserve old data, capture it (e.g. via PRAGMA table_info + a
-// manual SELECT/INSERT copy) before the DROP TABLE calls below run.
+for (const table of ['completed_tasks', 'task_queue']) {
+    db.exec(`DROP TABLE IF EXISTS ${table};`);
+}
 
-function rebuildIfSchemaMismatch(tableName, expectedColumns, createTableSql) {
-    let existingColumns;
-    try {
-        existingColumns = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
-    } catch (e) {
-        existingColumns = [];
-    }
-
-    const tableExists = existingColumns.length > 0;
-    const hasAllColumns = expectedColumns.every(col => existingColumns.includes(col));
-
-    if (tableExists && !hasAllColumns) {
-        console.log(`[migration] Rebuilding "${tableName}" - missing columns: ${expectedColumns.filter(c => !existingColumns.includes(c)).join(', ')}`);
+function ensureExpectedSchema(tableName, expectedColumns, createSql) {
+    const columns = db.prepare(`PRAGMA table_info(${tableName})`).all().map(column => column.name);
+    const matches = expectedColumns.every(column => columns.includes(column));
+    if (!matches) {
+        db.exec('PRAGMA foreign_keys = OFF;');
         db.exec(`DROP TABLE IF EXISTS ${tableName};`);
-        db.exec(createTableSql);
+        db.exec(createSql);
+        db.exec('PRAGMA foreign_keys = ON;');
     }
 }
 
-// `sessions` predates the `id` column in some deployments. SQLite can't
-// ALTER a column into becoming a PRIMARY KEY, so this always rebuilds via
-// DROP + CREATE rather than ALTER TABLE.
-rebuildIfSchemaMismatch(
+ensureExpectedSchema(
     'sessions',
-    ['id', 'updated_at', 'state_json'],
+    ['id', 'updated_at', 'total_available_time_ms', 'end_constraint'],
     `CREATE TABLE sessions (
         id TEXT PRIMARY KEY,
         updated_at INTEGER NOT NULL,
-        state_json TEXT NOT NULL
+        total_available_time_ms INTEGER NOT NULL DEFAULT 0,
+        end_constraint TEXT NOT NULL DEFAULT ''
     );`
 );
 
-// `completed_tasks` predates several columns (e.g. actual_minutes) in some
-// deployments.
-rebuildIfSchemaMismatch(
-    'completed_tasks',
-    ['id', 'session_id', 'task_name', 'estimated_minutes', 'actual_minutes', 'variance_minutes', 'completed_at'],
-    `CREATE TABLE completed_tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+ensureExpectedSchema(
+    'tasks',
+    ['id', 'session_id', 'project_id', 'name', 'status', 'estimated_ms', 'elapsed_ms',
+     'position', 'blocked_by_task_id', 'created', 'started', 'completed', 'last_changed', 'updated_at'],
+    `CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,
-        task_name TEXT NOT NULL,
-        estimated_minutes INTEGER NOT NULL,
-        actual_minutes INTEGER NOT NULL,
-        variance_minutes INTEGER NOT NULL,
-        completed_at INTEGER NOT NULL,
-        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        project_id TEXT,
+        name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+            CHECK(status IN ('pending', 'active', 'blocked', 'completed', 'cancelled')),
+        estimated_ms INTEGER NOT NULL DEFAULT 0,
+        elapsed_ms INTEGER NOT NULL DEFAULT 0,
+        position INTEGER NOT NULL DEFAULT 0,
+        blocked_by_task_id TEXT,
+        created INTEGER NOT NULL,
+        started INTEGER,
+        completed INTEGER,
+        last_changed INTEGER,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY(blocked_by_task_id) REFERENCES tasks(id) ON DELETE SET NULL
     );`
 );
 
-// `task_queue` - covered by the elapsed_ms ALTER TABLE below for the common
-// case, but checked here too in case older deployments are missing other
-// columns beyond elapsed_ms.
-rebuildIfSchemaMismatch(
-    'task_queue',
-    ['id', 'session_id', 'task_name', 'estimated_minutes', 'elapsed_ms', 'sort_order', 'created_at'],
-    `CREATE TABLE task_queue (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        task_name TEXT NOT NULL,
-        estimated_minutes INTEGER DEFAULT 0,
-        elapsed_ms INTEGER DEFAULT 0,
-        sort_order INTEGER NOT NULL,
-        created_at INTEGER NOT NULL,
-        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-    );`
-);
+// Create indexes only after old schemas have been rebuilt. Creating them earlier
+// crashes startup when an existing tasks table still uses sort_order instead of position.
+db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_session_position
+        ON tasks(session_id, position);
 
-// Migration for deployments where task_queue already existed without elapsed_ms
-// (kept as a fast-path; rebuildIfSchemaMismatch above already covers this case,
-// but ALTER TABLE ADD COLUMN preserves existing rows, which DROP+CREATE does not).
-try {
-    db.exec(`ALTER TABLE task_queue ADD COLUMN elapsed_ms INTEGER DEFAULT 0;`);
-} catch (e) {
-    // Column already exists - safe to ignore
-}
+    CREATE INDEX IF NOT EXISTS idx_tasks_session_status
+        ON tasks(session_id, status);
+`);
 
-// Prepared statements for active sessions
-const saveSessionStmt = db.prepare(`
-    INSERT INTO sessions (id, updated_at, state_json)
-    VALUES (?, ?, ?)
+db.prepare(`
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (?, ?)
+`).run(TASK_SCHEMA_VERSION, Date.now());
+
+const ensureSessionStmt = db.prepare(`
+    INSERT INTO sessions (id, updated_at, total_available_time_ms, end_constraint)
+    VALUES (@id, @updated_at, @total_available_time_ms, @end_constraint)
     ON CONFLICT(id) DO UPDATE SET
         updated_at = excluded.updated_at,
-        state_json = excluded.state_json;
+        total_available_time_ms = excluded.total_available_time_ms,
+        end_constraint = excluded.end_constraint
 `);
 
-const getSessionStmt = db.prepare(`
-    SELECT state_json FROM sessions WHERE id = ?;
-`);
-
-const deleteSessionStmt = db.prepare(`
-    DELETE FROM sessions WHERE id = ?;
-`);
-
-// Prepared statements for user task stats & history
-const logCompletedTaskStmt = db.prepare(`
-    INSERT INTO completed_tasks (session_id, task_name, estimated_minutes, actual_minutes, variance_minutes, completed_at)
-    VALUES (?, ?, ?, ?, ?, ?);
-`);
-
-const getUserStatsStmt = db.prepare(`
-    SELECT 
-        task_name, 
-        estimated_minutes, 
-        actual_minutes, 
-        variance_minutes, 
-        completed_at 
-    FROM completed_tasks 
-    WHERE session_id = ? 
-    ORDER BY completed_at DESC;
-`);
-
-const getUserAggregateStatsStmt = db.prepare(`
-    SELECT 
-        COUNT(*) as total_tasks_completed,
-        SUM(estimated_minutes) as total_estimated_minutes,
-        SUM(actual_minutes) as total_actual_minutes,
-        SUM(variance_minutes) as total_variance_minutes,
-        AVG(variance_minutes) as avg_variance_per_task
-    FROM completed_tasks 
-    WHERE session_id = ?;
-`);
-
-// Prepared statements for persistent uncompleted task queue
-const clearTaskQueueStmt = db.prepare(`
-    DELETE FROM task_queue WHERE session_id = ?;
-`);
-
-const deleteQueuedTaskByNameStmt = db.prepare(`
-    DELETE FROM task_queue WHERE session_id = ? AND task_name = ?;
-`);
-
-const insertQueuedTaskStmt = db.prepare(`
-    INSERT INTO task_queue (session_id, task_name, estimated_minutes, elapsed_ms, sort_order, created_at)
-    VALUES (?, ?, ?, ?, ?, ?);
-`);
-
-const getQueuedTasksStmt = db.prepare(`
-    SELECT task_name, estimated_minutes, elapsed_ms, sort_order, created_at
-    FROM task_queue
+const getSessionStmt = db.prepare(`SELECT * FROM sessions WHERE id = ?`);
+const getTasksStmt = db.prepare(`
+    SELECT * FROM tasks
     WHERE session_id = ?
-    ORDER BY sort_order ASC;
+      AND (? = 0 OR status NOT IN ('completed', 'cancelled'))
+    ORDER BY position ASC, created ASC
 `);
+const getTaskStmt = db.prepare(`SELECT * FROM tasks WHERE session_id = ? AND id = ?`);
+
+const upsertTaskStmt = db.prepare(`
+    INSERT INTO tasks (
+        id, session_id, project_id, name, status, estimated_ms, elapsed_ms, position,
+        blocked_by_task_id, created, started, completed, last_changed, updated_at
+    ) VALUES (
+        @id, @session_id, @project_id, @name, @status, @estimated_ms, @elapsed_ms, @position,
+        @blocked_by_task_id, @created, @started, @completed, @last_changed, @updated_at
+    )
+    ON CONFLICT(id) DO UPDATE SET
+        session_id = excluded.session_id,
+        project_id = excluded.project_id,
+        name = excluded.name,
+        status = excluded.status,
+        estimated_ms = excluded.estimated_ms,
+        elapsed_ms = excluded.elapsed_ms,
+        position = excluded.position,
+        blocked_by_task_id = excluded.blocked_by_task_id,
+        started = excluded.started,
+        completed = excluded.completed,
+        last_changed = excluded.last_changed,
+        updated_at = excluded.updated_at
+`);
+
+function normalizeTask(sessionId, task, position) {
+    const now = Date.now();
+    const completedTime = task.completedTime ?? task.completedAt
+        ?? (typeof task.completed === 'number' ? task.completed : null);
+    const status = task.completed === true || completedTime
+        ? 'completed'
+        : (task.status || 'pending');
+
+    return {
+        id: String(task.id),
+        session_id: sessionId,
+        project_id: task.projectId ?? null,
+        name: String(task.name || '').trim(),
+        status,
+        estimated_ms: Math.max(0, Number(task.estimatedTimeMs ?? task.estimatedMs ?? 0)),
+        elapsed_ms: Math.max(0, Number(task.actualTimeMs ?? task.elapsedMs ?? 0)),
+        position: Number(position),
+        blocked_by_task_id: task.blockedByTaskId ?? null,
+        created: Number(task.created ?? task.createdAt ?? now),
+        started: task.started ?? task.startedAt ?? null,
+        completed: completedTime || null,
+        last_changed: task.lastChanged ?? null,
+        updated_at: now
+    };
+}
+
+const replaceTaskList = db.transaction((sessionId, tasks, session) => {
+    ensureSessionStmt.run({
+        id: sessionId,
+        updated_at: Date.now(),
+        total_available_time_ms: Number(session.totalAvailableTimeMs || 0),
+        end_constraint: String(session.endConstraint || '')
+    });
+
+    tasks.forEach((task, index) => {
+        const row = normalizeTask(sessionId, task, index + 1);
+        if (!row.id || !row.name) throw new Error('Every task requires an id and name');
+        upsertTaskStmt.run(row);
+    });
+});
 
 module.exports = {
-    saveSession: (id, state) => {
-        saveSessionStmt.run(id, Date.now(), JSON.stringify(state));
-    },
-    getSession: (id) => {
-        const row = getSessionStmt.get(id);
-        return row ? JSON.parse(row.state_json) : null;
-    },
-    deleteSession: (id) => {
-        deleteSessionStmt.run(id);
-    },
-    logCompletedTask: (sessionId, taskName, estimatedMin, actualMin, completedAt) => {
-        const variance = estimatedMin - actualMin;
-        logCompletedTaskStmt.run(
-            sessionId, 
-            taskName, 
-            estimatedMin, 
-            actualMin, 
-            variance, 
-            completedAt || Date.now()
-        );
-    },
-    getUserTaskHistory: (sessionId) => {
-        return getUserStatsStmt.all(sessionId);
-    },
-    getUserAggregateStats: (sessionId) => {
-        return getUserAggregateStatsStmt.get(sessionId);
-    },
-    // Full replace: the queue always mirrors the current pending task set,
-    // kept in sync continuously rather than merged/pushed at stop-time.
-    saveUncompletedQueue: (sessionId, tasks) => {
-        const transaction = db.transaction((id, taskList) => {
-            clearTaskQueueStmt.run(id);
-            const now = Date.now();
-            taskList.forEach((task, index) => {
-                const name = typeof task === 'string' ? task : task.name;
-                const est = (typeof task === 'object' && task.estimatedTime) ? task.estimatedTime : 0;
-                const elapsed = (typeof task === 'object' && task.elapsedMs) ? task.elapsedMs : 0;
-                insertQueuedTaskStmt.run(id, name, est, elapsed, index + 1, now);
-            });
+    ensureSession(sessionId, session = {}) {
+        ensureSessionStmt.run({
+            id: sessionId,
+            updated_at: Date.now(),
+            total_available_time_ms: Number(session.totalAvailableTimeMs || 0),
+            end_constraint: String(session.endConstraint || '')
         });
-        transaction(sessionId, tasks);
+        return getSessionStmt.get(sessionId);
     },
-    // Remove a single task from the pending queue by name (called on completion)
-    removeFromQueue: (sessionId, taskName) => {
-        deleteQueuedTaskByNameStmt.run(sessionId, taskName);
+
+    getSession(sessionId) {
+        return getSessionStmt.get(sessionId) || null;
     },
-    getUncompletedQueue: (sessionId) => {
-        return getQueuedTasksStmt.all(sessionId);
+
+    saveTaskList(sessionId, tasks, session = {}) {
+        replaceTaskList(sessionId, tasks, session);
+        return getTasksStmt.all(sessionId, 0);
+    },
+
+    getTasks(sessionId, incompleteOnly = false) {
+        return getTasksStmt.all(sessionId, incompleteOnly ? 1 : 0);
+    },
+
+    getTask(sessionId, taskId) {
+        return getTaskStmt.get(sessionId, taskId) || null;
+    },
+
+    getStats(sessionId) {
+        return db.prepare(`
+            SELECT
+                COUNT(*) AS total_tasks_completed,
+                COALESCE(SUM(estimated_ms), 0) AS total_estimated_ms,
+                COALESCE(SUM(elapsed_ms), 0) AS total_actual_ms,
+                COALESCE(SUM(estimated_ms - elapsed_ms), 0) AS total_variance_ms,
+                COALESCE(AVG(estimated_ms - elapsed_ms), 0) AS avg_variance_ms
+            FROM tasks
+            WHERE session_id = ? AND status = 'completed'
+        `).get(sessionId);
     }
 };

@@ -2,144 +2,139 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const db = require('./database');
+const userStore = require('./user-store');
+const userRoutes = require('./user-routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const BACKEND_VERSION = 'canonical-task-list-v3';
 
-app.use(cors());
-app.use(express.json());
+const defaultAllowedOrigins = [
+    'https://pbangiola.github.io',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5500',
+    'http://127.0.0.1:5500'
+];
 
-// Fallback static file serving for root deployment assets
+const configuredOrigins = (process.env.FRONTEND_ORIGINS || '')
+    .split(',')
+    .map(origin => origin.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+
+const allowedOrigins = new Set([...defaultAllowedOrigins, ...configuredOrigins]);
+
+app.use(cors({
+    origin(origin, callback) {
+        if (!origin) return callback(null, true);
+        const normalizedOrigin = origin.replace(/\/$/, '');
+        if (allowedOrigins.has(normalizedOrigin)) return callback(null, true);
+        return callback(new Error(`CORS blocked request from ${origin}`));
+    },
+    methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
+    allowedHeaders: ['Content-Type']
+}));
+
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, './')));
+app.use('/api', userRoutes);
 
-// --- Active Session Management Endpoints ---
+app.get('/api/health', (req, res) => {
+    try {
+        db.ensureSession('__healthcheck__');
+        userStore.ensureUser('__healthcheck__');
+        res.json({
+            ok: true,
+            service: 'task-sorter-backend',
+            version: BACKEND_VERSION,
+            capabilities: [
+                'users',
+                'sessions',
+                'full-task-list-sync',
+                'incomplete-task-resume',
+                'unfinished-task-prepend'
+            ],
+            timestamp: Date.now()
+        });
+    } catch (error) {
+        console.error('Backend health check failed:', error);
+        res.status(500).json({ ok: false, error: error.message, timestamp: Date.now() });
+    }
+});
 
 app.get('/api/session/:id', (req, res) => {
     try {
-        const sessionState = db.getSession(req.params.id);
-        if (!sessionState) {
-            return res.status(404).json({ error: 'Session not found' });
-        }
-        res.json(sessionState);
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to retrieve session' });
+        res.json(db.getSession(req.params.id));
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to retrieve session', detail: error.message });
     }
 });
 
-app.put('/api/session/:id', (req, res) => {
+app.get('/api/session/:id/tasks', (req, res) => {
     try {
-        const { id } = req.params;
-        const state = req.body;
-        db.saveSession(id, state);
-        res.json({ success: true, timestamp: Date.now() });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to save session' });
+        const incompleteOnly = req.query.incomplete === '1' || req.query.incomplete === 'true';
+        res.json({ tasks: db.getTasks(req.params.id, incompleteOnly) });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch tasks', detail: error.message });
     }
 });
 
-app.delete('/api/session/:id', (req, res) => {
+app.put('/api/session/:id/tasks', (req, res) => {
     try {
-        db.deleteSession(req.params.id);
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to clear session' });
-    }
-});
-
-// --- Uncompleted Tasks Queue Endpoints ---
-
-// Get persistent uncompleted master task queue
-app.get('/api/session/:id/queue', (req, res) => {
-    try {
-        const queue = db.getUncompletedQueue(req.params.id);
-        res.json({ queue });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch task queue' });
-    }
-});
-
-// Save or replace task queue directly
-app.put('/api/session/:id/queue', (req, res) => {
-    try {
-        const sessionId = req.params.id;
-        const { tasks } = req.body;
-
+        const tasks = req.body.tasks;
         if (!Array.isArray(tasks)) {
-            return res.status(400).json({ error: 'Tasks must be an array' });
+            return res.status(400).json({ error: 'tasks must be an array' });
         }
 
-        db.saveUncompletedQueue(sessionId, tasks);
-        res.json({ success: true, count: tasks.length });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to update task queue' });
+        if (req.body.userId) userStore.ensureUser(req.body.userId);
+
+        const savedTasks = db.saveTaskList(req.params.id, tasks, {
+            totalAvailableTimeMs: req.body.totalAvailableTimeMs,
+            endConstraint: req.body.endConstraint
+        });
+
+        if (req.body.userId) {
+            const unfinishedTaskIds = tasks
+                .filter(task => {
+                    const status = String(task.status || '').toLowerCase();
+                    return task.id
+                        && task.completed !== true
+                        && !task.completedTime
+                        && status !== 'completed'
+                        && status !== 'cancelled';
+                })
+                .map(task => task.id);
+
+            userStore.prependOpenTasks(req.body.userId, unfinishedTaskIds);
+        }
+
+        return res.json({
+            success: true,
+            count: savedTasks.length,
+            timestamp: Date.now()
+        });
+    } catch (error) {
+        console.error('Failed to save task list:', error);
+        return res.status(500).json({ error: 'Failed to save task list', detail: error.message });
     }
 });
 
-// Remove a single task from the pending queue (called whenever a task is completed)
-app.post('/api/session/:id/queue/remove', (req, res) => {
-    try {
-        const sessionId = req.params.id;
-        const { taskName } = req.body;
-
-        if (!taskName) {
-            return res.status(400).json({ error: 'taskName is required' });
-        }
-
-        db.removeFromQueue(sessionId, taskName);
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to remove task from queue' });
-    }
-});
-
-// --- User Performance Tracking & Analytics Endpoints ---
-
-// Log a completed task event to the permanent record
-app.post('/api/session/:id/tasks/completed', (req, res) => {
-    try {
-        const sessionId = req.params.id;
-        const { taskName, estimatedMinutes, actualMinutes, completedAt } = req.body;
-
-        if (!taskName || estimatedMinutes === undefined || actualMinutes === undefined) {
-            return res.status(400).json({ error: 'Missing required task log data.' });
-        }
-
-        db.logCompletedTask(
-            sessionId,
-            taskName,
-            parseInt(estimatedMinutes, 10),
-            parseInt(actualMinutes, 10),
-            completedAt
-        );
-
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to log completed task' });
-    }
-});
-
-// Fetch historical task log and aggregate metrics for a session ID
 app.get('/api/session/:id/stats', (req, res) => {
     try {
-        const sessionId = req.params.id;
-        const history = db.getUserTaskHistory(sessionId);
-        const summary = db.getUserAggregateStats(sessionId);
-
-        res.json({
-            summary: summary || {
-                total_tasks_completed: 0,
-                total_estimated_minutes: 0,
-                total_actual_minutes: 0,
-                total_variance_minutes: 0,
-                avg_variance_per_task: 0
-            },
-            history
-        });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch user statistics' });
+        res.json({ summary: db.getStats(req.params.id) });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch statistics', detail: error.message });
     }
+});
+
+app.use((error, req, res, next) => {
+    if (error.message?.startsWith('CORS blocked')) {
+        return res.status(403).json({ error: error.message });
+    }
+    console.error(error);
+    return res.status(500).json({ error: 'Unexpected server error' });
 });
 
 app.listen(PORT, () => {
-    console.log(`Task Sorter Server running on port ${PORT}`);
+    console.log(`Task Sorter Server ${BACKEND_VERSION} running on port ${PORT}`);
 });
