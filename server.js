@@ -7,7 +7,7 @@ const userRoutes = require('./user-routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BACKEND_VERSION = 'canonical-task-list-v2';
+const BACKEND_VERSION = 'canonical-task-list-v3';
 
 const defaultAllowedOrigins = [
     'https://pbangiola.github.io',
@@ -47,7 +47,13 @@ app.get('/api/health', (req, res) => {
             ok: true,
             service: 'task-sorter-backend',
             version: BACKEND_VERSION,
-            capabilities: ['users', 'sessions', 'full-task-list-sync', 'incomplete-task-resume'],
+            capabilities: [
+                'users',
+                'sessions',
+                'full-task-list-sync',
+                'incomplete-task-resume',
+                'unfinished-task-prepend'
+            ],
             timestamp: Date.now()
         });
     } catch (error) {
@@ -88,9 +94,18 @@ app.put('/api/session/:id/tasks', (req, res) => {
         });
 
         if (req.body.userId) {
-            tasks.forEach(task => {
-                if (task.id) userStore.attachTask(req.body.userId, task.id);
-            });
+            const unfinishedTaskIds = tasks
+                .filter(task => {
+                    const status = String(task.status || '').toLowerCase();
+                    return task.id
+                        && task.completed !== true
+                        && !task.completedTime
+                        && status !== 'completed'
+                        && status !== 'cancelled';
+                })
+                .map(task => task.id);
+
+            userStore.prependOpenTasks(req.body.userId, unfinishedTaskIds);
         }
 
         return res.json({

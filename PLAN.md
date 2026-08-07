@@ -1,24 +1,21 @@
-# Commit 3 plan
+# Commit 4 plan: Prepend unfinished backend tasks
 
-## Scope
+## Problem
 
-Restore the sequential estimate-entry screen as a live task-like planning timer.
+When a session saves its unfinished tasks, those tasks can appear behind older tasks in the user's backend task list because `position` values are session-relative and collide across sessions.
 
-## Implementation
+## Fix
 
-- Replace the static remaining-budget text with a green, one-second countdown.
-- Label it `Time to work with:`.
-- Derive it from the canonical hard-stop timestamp, current time, and estimates already assigned.
-- Recalculate the permitted maximum estimate continuously and again at submission time.
-- Prevent an estimate from exceeding the live remaining budget.
-- Exit planning when the allocation budget reaches zero.
-- Restore the timing-entry and timing-gateway views correctly after reload.
+- Treat the unfinished task IDs sent by the current session as the front of the user's open-task queue.
+- Preserve their exact current order.
+- Append all older open tasks after them, preserving their previous order.
+- Deduplicate by stable task ID.
+- Compact positions to `1..n` on each sync so repeated saves do not cause position inflation.
+- Leave completed and cancelled tasks out of the open queue.
 
-## Deliberately deferred
+## Files changed
 
-- The separate `Do you have a deadline?` step.
-- Minimum 10-minute deadline validation.
-- Backend queue ordering.
-- Duplicate prompting.
-- Import/export cleanup.
-- Add-task and blocker UX changes.
+- `server.js`
+- `user-store.js`
+
+No frontend files change in this commit.
