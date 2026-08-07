@@ -3,192 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Task Sorter & Focus Companion</title>
+    <title>Task Planner</title>
     <style>
-        :root {
-            --primary-color: #2e7d32;
-            --accent-color: #4caf50;
-            --bg-color: #f4f6f8;
-            --card-bg: #ffffff;
-            --text-color: #333333;
-            --border-radius: 8px;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-        }
-
-        .app-container {
-            width: 100%;
-            max-width: 600px;
-            background: var(--card-bg);
-            border-radius: var(--border-radius);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            padding: 24px;
-            box-sizing: border-box;
-        }
-
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 2px solid #f0f0f0;
-            padding-bottom: 12px;
-            margin-bottom: 20px;
-        }
-
-        h1, h2, h3 {
-            margin-top: 0;
-            color: #1b5e20;
-        }
-
-        textarea, input[type="number"] {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #ccc;
-            border-radius: var(--border-radius);
-            font-size: 16px;
-            box-sizing: border-box;
-            margin-bottom: 12px;
-        }
-
-        .checkbox-label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 16px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        .choice-box-container {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            margin-top: 16px;
-        }
-
-        .forced-choice-box {
-            padding: 14px;
-            background-color: #f0f7f4;
-            border: 1px solid #c8e6c9;
-            border-radius: var(--border-radius);
-            text-align: center;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background-color 0.2s ease;
-        }
-
-        .forced-choice-box:hover {
-            background-color: #dcedc8;
-        }
-
-        .btn-action {
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            font-size: 16px;
-            border-radius: var(--border-radius);
-            cursor: pointer;
-            font-weight: bold;
-            width: 100%;
-        }
-
-        .btn-action:hover {
-            background-color: #1b5e20;
-        }
-
-        .btn-secondary {
-            background-color: #757575;
-            color: white;
-            border: none;
-            padding: 8px 14px;
-            font-size: 14px;
-            border-radius: var(--border-radius);
-            cursor: pointer;
-        }
-
-        .hidden {
-            display: none !important;
-        }
-
-        .file-upload-section {
-            margin-top: 20px;
-            padding-top: 16px;
-            border-top: 1px dashed #ccc;
-        }
-
-        /* Task comparison module */
-        .compare-box {
-            display: flex;
-            gap: 12px;
-            margin-top: 16px;
-        }
-
-        .compare-card {
-            flex: 1;
-            padding: 20px;
-            background: #e8f5e9;
-            border: 2px solid #a5d6a7;
-            border-radius: var(--border-radius);
-            text-align: center;
-            font-size: 18px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-
-        .compare-card:hover {
-            background: #c8e6c9;
-        }
+        :root { --primary-color:#2e7d32; --bg-color:#f4f6f8; --card-bg:#fff; --text-color:#333; --border-radius:8px; }
+        body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg-color); color:var(--text-color); margin:0; padding:20px; display:flex; justify-content:center; }
+        .app-container { width:100%; max-width:600px; background:var(--card-bg); border-radius:var(--border-radius); box-shadow:0 4px 12px rgba(0,0,0,.08); padding:24px; box-sizing:border-box; }
+        header { border-bottom:2px solid #f0f0f0; padding-bottom:12px; margin-bottom:20px; }
+        h1,h2,h3 { margin-top:0; color:#1b5e20; }
+        textarea,input[type="number"] { width:100%; padding:12px; border:1px solid #ccc; border-radius:var(--border-radius); font-size:16px; box-sizing:border-box; margin-bottom:12px; }
+        .checkbox-label { display:flex; align-items:center; gap:8px; margin-bottom:16px; cursor:pointer; font-size:14px; }
+        .choice-box-container { display:flex; flex-direction:column; gap:12px; margin-top:16px; }
+        .forced-choice-box { padding:14px; background:#f0f7f4; border:1px solid #c8e6c9; border-radius:var(--border-radius); text-align:center; font-weight:600; cursor:pointer; }
+        .forced-choice-box:hover { background:#dcedc8; }
+        .btn-action { background:var(--primary-color); color:#fff; border:0; padding:12px 20px; font-size:16px; border-radius:var(--border-radius); cursor:pointer; font-weight:bold; width:100%; }
+        .hidden { display:none !important; }
+        .file-upload-section { margin-top:20px; padding-top:16px; border-top:1px dashed #ccc; }
+        .compare-box { display:flex; gap:12px; margin-top:16px; }
+        .compare-card { flex:1; padding:20px; background:#e8f5e9; border:2px solid #a5d6a7; border-radius:var(--border-radius); text-align:center; font-size:18px; font-weight:bold; cursor:pointer; }
+        .compare-card:hover { background:#c8e6c9; }
+        ol { padding-left:24px; }
+        li { margin-bottom:8px; }
     </style>
 </head>
 <body>
-
 <div class="app-container">
-    <header>
-        <h1>Focus Companion</h1>
-        <button id="stopWorkingBtn" class="btn-secondary hidden">Wrap Up Session</button>
-    </header>
-
-    <!-- Initial Task Input View -->
+    <header><h1>Task Planner</h1></header>
     <div id="taskInputContainer">
-        <h2>What are you working on today?</h2>
-        <p style="color: #666; font-size: 14px;">Enter your tasks below (one per line):</p>
+        <h2>What are you planning?</h2>
+        <p style="color:#666;font-size:14px;">Enter your tasks below (one per line):</p>
         <textarea id="tasksTextarea" rows="6" placeholder="e.g.,&#10;Read chapter 3&#10;Clean desk&#10;Organize notes"></textarea>
-        
-        <label class="checkbox-label">
-            <input type="checkbox" id="skipSortCheckbox">
-            Keep this order (skip comparison sorting)
-        </label>
-
+        <label class="checkbox-label"><input type="checkbox" id="skipSortCheckbox"> Keep this order (skip comparison sorting)</label>
         <button id="btnSubmitText" class="btn-action">Get Started</button>
-
-        <div class="file-upload-section">
-            <p style="font-size: 14px; color: #666; margin-bottom: 8px;">Or load tasks from a CSV file:</p>
-            <input type="file" id="csvFileInput" accept=".csv">
-        </div>
+        <div class="file-upload-section"><p style="font-size:14px;color:#666;margin-bottom:8px;">Or load tasks from a CSV file:</p><input type="file" id="csvFileInput" accept=".csv"></div>
     </div>
-
-    <!-- Pairwise Comparison Module -->
     <div id="taskCompare" class="hidden">
-        <h2>Which task should you do first?</h2>
-        <div class="compare-box">
-            <div id="task1" class="compare-card">Task A</div>
-            <div id="task2" class="compare-card">Task B</div>
-        </div>
+        <h2>Which task should come first?</h2>
+        <div class="compare-box"><div id="task1" class="compare-card">Task A</div><div id="task2" class="compare-card">Task B</div></div>
     </div>
-
-    <!-- Dynamic Container for Active Focus, Choices, and Summaries -->
     <div id="dynamicContainer"></div>
 </div>
-
 <script src="script.js"></script>
 </body>
 </html>
