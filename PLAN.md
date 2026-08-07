@@ -1,21 +1,18 @@
-# Commit 4 plan: Prepend unfinished backend tasks
+# Commit 5 plan: Restore duplicate task handling
 
-## Problem
+This commit changes only `script.js`.
 
-When a session saves its unfinished tasks, those tasks can appear behind older tasks in the user's backend task list because `position` values are session-relative and collide across sessions.
+## Behavior
 
-## Fix
-
-- Treat the unfinished task IDs sent by the current session as the front of the user's open-task queue.
-- Preserve their exact current order.
-- Append all older open tasks after them, preserving their previous order.
-- Deduplicate by stable task ID.
-- Compact positions to `1..n` on each sync so repeated saves do not cause position inflation.
-- Leave completed and cancelled tasks out of the open queue.
-
-## Files changed
-
-- `server.js`
-- `user-store.js`
-
-No frontend files change in this commit.
+- Preserve duplicate lines while reading the task-entry box.
+- Normalize task names for comparison by:
+  - trimming leading and trailing whitespace;
+  - collapsing repeated internal spaces;
+  - comparing case-insensitively.
+- Keep the first occurrence unchanged.
+- For each later duplicate, prompt the user to keep it under a distinct name such as:
+  - `Wash dishes again`
+  - `Wash dishes again 2`
+- Choosing Cancel removes that duplicate.
+- If the user submits duplicates without keeping them, only the first copy enters sorting.
+- Generic text-file parsing remains conservatively deduplicated and is not otherwise redesigned in this commit.

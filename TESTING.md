@@ -1,36 +1,66 @@
-# Testing commit 4
+# Commit 5 testing
 
-## Syntax checks
+## Syntax
 
 ```bash
-node --check server.js
-node --check user-store.js
+node --check script.js
 ```
 
-## Functional test
+## Exact duplicate
 
-1. Ensure the backend already has an older open list:
-   - Old A
-   - Old B
-2. Start a new session with:
-   - New 1
-   - New 2
-3. End the session without completing either new task.
-4. Resume the saved list.
-5. Expected order:
-   - New 1
-   - New 2
-   - Old A
-   - Old B
+Enter:
 
-## Repeat-save test
+```text
+Wash dishes
+Wash dishes
+Read
+```
 
-1. Save the same current session several times.
-2. Resume the task list.
-3. Confirm tasks are not duplicated and positions remain compact and ordered.
+Submit the list.
 
-## Completion test
+- A prompt should identify the duplicate.
+- Choose OK.
+- Sorting should contain `Wash dishes`, `Wash dishes again`, and `Read`.
 
-1. Complete `New 1` and save again.
-2. Resume.
-3. Confirm `New 1` is absent from the open queue and the order begins with `New 2`.
+Repeat and choose Cancel.
+
+- Sorting should contain only one `Wash dishes` task.
+
+## Case and whitespace normalization
+
+Enter:
+
+```text
+Email Bob
+ email   bob 
+EMAIL BOB
+```
+
+- The second and third entries should each be detected as duplicates.
+- Keeping both should produce unique names, normally `email bob again` and `EMAIL BOB again 2` based on the submitted spelling.
+
+## Collision-safe renaming
+
+Enter:
+
+```text
+Plan trip
+Plan trip again
+Plan trip
+```
+
+Keep the duplicate.
+
+- The generated name must not collide with `Plan trip again`.
+- It should become `Plan trip again 2`.
+
+## No duplicates
+
+Enter three distinct tasks.
+
+- No prompt should appear.
+- Sorting should begin normally.
+
+## Capacity display
+
+While typing duplicates, confirm the capacity preview counts every entered line before duplicate resolution. This reflects what the user has typed; final task count is resolved on submission.

@@ -213,7 +213,7 @@ function showTaskInput() { hideStaticScreens(); clearDynamic(); show(el('taskInp
 
 function updateCapacityMessage() {
     const textarea = el('tasks'); if (!textarea) return;
-    const tasks = parsePlainTaskText(textarea.value);
+    const tasks = parseTaskEntryText(textarea.value);
     let message = el('capacityInfoMsg');
     if (!message) { message = document.createElement('p'); message.id='capacityInfoMsg'; message.style.fontWeight='bold'; textarea.insertAdjacentElement('afterend', message); }
     if (!totalAvailableTimeMs) { message.textContent=''; return; }
@@ -221,7 +221,65 @@ function updateCapacityMessage() {
     message.textContent = `Estimated capacity: ${Math.round(estimated/60000)} / ${Math.round(totalAvailableTimeMs/60000)} minutes.`;
     message.style.color = estimated > totalAvailableTimeMs ? '#d32f2f' : '#2e7d32';
 }
-function parsePlainTaskText(text) { const trimmed = String(text || '').trim(); if (!trimmed) return []; const pieces = trimmed.includes('\n') ? trimmed.split(/\r?\n/) : trimmed.split(','); const names = pieces.map(value => value.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean); return [...new Set(names)]; }
+function parseTaskEntryText(text) {
+    const trimmed = String(text || '').trim();
+    if (!trimmed) return [];
+    const pieces = trimmed.includes('\n') ? trimmed.split(/\r?\n/) : trimmed.split(',');
+    return pieces
+        .map(value => value.replace(/^\s*\d+[.)]\s*/, '').trim())
+        .filter(Boolean);
+}
+
+function parsePlainTaskText(text) {
+    return [...new Set(parseTaskEntryText(text))];
+}
+
+function duplicateKey(name) {
+    return String(name || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+
+function nextAvailableAgainName(baseName, usedKeys) {
+    const cleanBase = String(baseName || '').trim().replace(/\s+/g, ' ');
+    let candidate = `${cleanBase} again`;
+    let suffix = 2;
+
+    while (usedKeys.has(duplicateKey(candidate))) {
+        candidate = `${cleanBase} again ${suffix}`;
+        suffix += 1;
+    }
+
+    return candidate;
+}
+
+function resolveDuplicateTaskNames(names) {
+    const resolved = [];
+    const usedKeys = new Set();
+
+    names.forEach(rawName => {
+        const name = String(rawName || '').trim().replace(/\s+/g, ' ');
+        const key = duplicateKey(name);
+
+        if (!usedKeys.has(key)) {
+            resolved.push(name);
+            usedKeys.add(key);
+            return;
+        }
+
+        const renamed = nextAvailableAgainName(name, usedKeys);
+        const keepDuplicate = confirm(
+            `“${name}” appears more than once.\n\n` +
+            `Keep this copy as “${renamed}”?\n\n` +
+            'Choose Cancel to remove the duplicate.'
+        );
+
+        if (keepDuplicate) {
+            resolved.push(renamed);
+            usedKeys.add(duplicateKey(renamed));
+        }
+    });
+
+    return resolved;
+}
 
 function prepareSortingDisplay(sortTask) {
     const compare = el('taskCompare');
@@ -302,7 +360,8 @@ function mergeWithChoices(left, right, runId) {
 }
 
 async function startSorting() {
-    const names = parsePlainTaskText(el('tasks').value);
+    const enteredNames = parseTaskEntryText(el('tasks').value);
+    const names = resolveDuplicateTaskNames(enteredNames);
     if (!names.length) { alert('Please enter at least one task.'); return; }
 
     currentSortNames = [...names];
