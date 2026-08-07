@@ -42,10 +42,6 @@ db.exec(`
     );
 `);
 
-for (const table of ['completed_tasks', 'task_queue']) {
-    db.exec(`DROP TABLE IF EXISTS ${table};`);
-}
-
 function ensureExpectedSchema(tableName, expectedColumns, createSql) {
     const columns = db.prepare(`PRAGMA table_info(${tableName})`).all().map(column => column.name);
     const matches = expectedColumns.every(column => columns.includes(column));
