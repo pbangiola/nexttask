@@ -1,66 +1,54 @@
-# Commit 5 testing
+# Commit 6 testing
 
-## Syntax
+## NextTask-format text
 
-```bash
-node --check script.js
-```
-
-## Exact duplicate
-
-Enter:
+Upload:
 
 ```text
-Wash dishes
-Wash dishes
-Read
+Uncompleted Tasks
+—————————————
+1. Write report — 15 min
+2. Call Sam — blocked
+
+Completed Tasks
+—————————————
+1. Wash dishes ✓
 ```
 
-Submit the list.
+Expected imported tasks:
 
-- A prompt should identify the duplicate.
-- Choose OK.
-- Sorting should contain `Wash dishes`, `Wash dishes again`, and `Read`.
+1. Write report
+2. Call Sam
 
-Repeat and choose Cancel.
+`Uncompleted Tasks`, separator lines, and `Wash dishes` must not become tasks.
 
-- Sorting should contain only one `Wash dishes` task.
+## Checkbox format
 
-## Case and whitespace normalization
-
-Enter:
+Upload:
 
 ```text
-Email Bob
- email   bob 
-EMAIL BOB
+Remaining Tasks:
+[ ] Buy milk
+☐ Send email
 ```
 
-- The second and third entries should each be detected as duplicates.
-- Keeping both should produce unique names, normally `email bob again` and `EMAIL BOB again 2` based on the submitted spelling.
+Expected:
 
-## Collision-safe renaming
+- Buy milk
+- Send email
 
-Enter:
+## Plain-text fallback
+
+Upload:
 
 ```text
-Plan trip
-Plan trip again
-Plan trip
+Draft proposal
+Review budget
 ```
 
-Keep the duplicate.
+Expected: both lines import normally.
 
-- The generated name must not collide with `Plan trip again`.
-- It should become `Plan trip again 2`.
+## CSV regression
 
-## No duplicates
-
-Enter three distinct tasks.
-
-- No prompt should appear.
-- Sorting should begin normally.
-
-## Capacity display
-
-While typing duplicates, confirm the capacity preview counts every entered line before duplicate resolution. This reflects what the user has typed; final task count is resolved on submission.
+Upload a CSV exported by the current app. Estimates, actual time, completion status,
+and task IDs should still parse as before.

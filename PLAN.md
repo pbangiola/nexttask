@@ -1,18 +1,21 @@
-# Commit 5 plan: Restore duplicate task handling
+# Commit 6 plan
 
-This commit changes only `script.js`.
+Restore seamless importing of NextTask-formatted text files.
 
 ## Behavior
 
-- Preserve duplicate lines while reading the task-entry box.
-- Normalize task names for comparison by:
-  - trimming leading and trailing whitespace;
-  - collapsing repeated internal spaces;
-  - comparing case-insensitively.
-- Keep the first occurrence unchanged.
-- For each later duplicate, prompt the user to keep it under a distinct name such as:
-  - `Wash dishes again`
-  - `Wash dishes again 2`
-- Choosing Cancel removes that duplicate.
-- If the user submits duplicates without keeping them, only the first copy enters sorting.
-- Generic text-file parsing remains conservatively deduplicated and is not otherwise redesigned in this commit.
+- Recognize generated headings such as:
+  - Uncompleted Tasks
+  - Incomplete Tasks
+  - Completed Tasks
+  - Task List
+- Ignore separator lines made from hyphens, em dashes, underscores, equals signs, or asterisks.
+- Import unfinished tasks only; do not re-add entries under a completed-tasks section.
+- Strip generated presentation syntax:
+  - numbering and bullets
+  - checkbox markers
+  - completion checkmarks
+  - trailing `— 15 min`
+  - trailing `— blocked` or `— completed`
+- Preserve ordinary user text when the file is not recognized as a NextTask export.
+- Keep structured CSV importing unchanged.

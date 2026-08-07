@@ -616,8 +616,164 @@ function showCompletion(){clearInterval(timerInterval);hideStaticScreens();hide(
 
 async function resumeExistingList(){hideStaticScreens();const container=clearDynamic();container.textContent='Loading saved tasks…';try{await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:'{}'});await fetch(`${API_BASE_URL}/api/session/${encodeURIComponent(sessionId)}/tasks`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId,tasks:[],totalAvailableTimeMs:0,endConstraint:''})});const response=await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}/tasks/import`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId})});if(!response.ok)throw new Error(`Resume failed (${response.status})`);const data=await response.json();sortedTasks=(data.tasks||[]).map(row=>createTask(row.name,{id:row.id,estimatedTimeMs:row.estimated_ms,actualTimeMs:row.elapsed_ms,completed:false,status:row.status,created:row.created,started:row.started,lastChanged:null,blockedByTaskId:row.blocked_by_task_id}));activeTaskId=firstIncompleteTask()?.id||null;if(!sortedTasks.length){alert('No unfinished saved tasks were found.');showWorkChoice();return;}showDashboard();}catch(error){console.error(error);alert('The saved task list could not be loaded.');showWorkChoice();}}
 
-function parseCsv(text){if(globalThis.Papa?.parse){try{const result=Papa.parse(text,{skipEmptyLines:true});if(!result.errors.length)return result.data;}catch(error){console.warn('CSV helper failed; using basic parser:',error);}}return text.split(/\r?\n/).filter(Boolean).map(line=>line.split(',').map(cell=>cell.trim()));}
-function importFile(file){const reader=new FileReader();reader.onload=event=>{const text=String(event.target.result||'');const rows=parseCsv(text);const headers=(rows[0]||[]).map(value=>String(value).trim().toLowerCase());const nameIndex=headers.findIndex(value=>['task name','task','name','title','reminder'].includes(value));const idIndex=headers.findIndex(value=>['task id','id'].includes(value));const estimateIndex=headers.findIndex(value=>value.includes('estimated'));const actualIndex=headers.findIndex(value=>value.includes('actual'));const completedIndex=headers.findIndex(value=>['completed','done','status'].includes(value));const structured=nameIndex>=0;if(structured){sortedTasks=rows.slice(1).map(row=>createTask(row[nameIndex],{id:idIndex>=0?row[idIndex]:undefined,estimatedTimeMs:estimateIndex>=0?Number(row[estimateIndex]||0)*60000:0,actualTimeMs:actualIndex>=0?Number(row[actualIndex]||0)*60000:0,completed:completedIndex>=0&&['true','yes','1','done','completed'].includes(String(row[completedIndex]).toLowerCase())})).filter(task=>task.name);}else{sortedTasks=parsePlainTaskText(text).map(name=>createTask(name));}if(!sortedTasks.length){alert('No tasks were found in that file.');return;}hide(el('taskInput'));el('csvUpload').value='';activeTaskId=firstIncompleteTask()?.id||null;if(structured&&idIndex>=0)showDashboard();else showTimingGateway();};reader.onerror=()=>alert('That file could not be read.');reader.readAsText(file);}
+function parseCsv(text) {
+    if (globalThis.Papa?.parse) {
+        try {
+            const result = Papa.parse(text, { skipEmptyLines: true });
+            if (!result.errors.length) return result.data;
+        } catch (error) {
+            console.warn('CSV helper failed; using basic parser:', error);
+        }
+    }
+
+    return text
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map(line => line.split(',').map(cell => cell.trim()));
+}
+
+function normalizedExportHeading(line) {
+    return String(line || '')
+        .trim()
+        .toLocaleLowerCase()
+        .replace(/[：:]+$/, '')
+        .replace(/\s+/g, ' ');
+}
+
+function isExportSeparator(line) {
+    const compact = String(line || '').replace(/\s/g, '');
+    return compact.length >= 3 && /^[\-—–_=*]+$/.test(compact);
+}
+
+function cleanExportTaskLine(line) {
+    let cleaned = String(line || '').trim();
+
+    cleaned = cleaned
+        .replace(/^\s*(?:[-*•]\s+|\d+[.)]\s+|(?:\[[ xX✓✔]\]|☐|☑)\s*)/, '')
+        .replace(/\s*[✓✔]\s*$/, '')
+        .replace(/\s+[—–-]\s+(?:blocked|completed|complete|done)\s*$/i, '')
+        .replace(/\s+[—–-]\s+\d+(?:\.\d+)?\s*(?:min|mins|minute|minutes)\s*$/i, '')
+        .trim();
+
+    return cleaned;
+}
+
+function parseNextTaskTextExport(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const openHeadings = new Set([
+        'uncompleted tasks',
+        'incomplete tasks',
+        'unfinished tasks',
+        'remaining tasks',
+        'tasks remaining'
+    ]);
+    const completedHeadings = new Set([
+        'completed tasks',
+        'finished tasks',
+        'done tasks'
+    ]);
+    const neutralHeadings = new Set([
+        'task sorter',
+        'task list',
+        'your task list',
+        'sorted task list',
+        'nexttask'
+    ]);
+
+    let recognizedFormat = false;
+    let section = 'open';
+    const names = [];
+
+    for (const rawLine of lines) {
+        const line = String(rawLine || '').trim();
+        if (!line) continue;
+
+        const heading = normalizedExportHeading(line);
+
+        if (openHeadings.has(heading)) {
+            recognizedFormat = true;
+            section = 'open';
+            continue;
+        }
+
+        if (completedHeadings.has(heading)) {
+            recognizedFormat = true;
+            section = 'completed';
+            continue;
+        }
+
+        if (neutralHeadings.has(heading) || isExportSeparator(line)) {
+            recognizedFormat = true;
+            continue;
+        }
+
+        // A restored list should contain unfinished work only. Completed-section
+        // entries remain historical and should not be re-added to the queue.
+        if (section === 'completed') continue;
+
+        const cleaned = cleanExportTaskLine(line);
+        if (cleaned) names.push(cleaned);
+    }
+
+    if (!recognizedFormat) return null;
+    return [...new Set(names)];
+}
+
+function importFile(file) {
+    const reader = new FileReader();
+
+    reader.onload = event => {
+        const text = String(event.target.result || '');
+        const rows = parseCsv(text);
+        const headers = (rows[0] || []).map(value => String(value).trim().toLowerCase());
+        const nameIndex = headers.findIndex(value =>
+            ['task name', 'task', 'name', 'title', 'reminder'].includes(value)
+        );
+        const idIndex = headers.findIndex(value => ['task id', 'id'].includes(value));
+        const estimateIndex = headers.findIndex(value => value.includes('estimated'));
+        const actualIndex = headers.findIndex(value => value.includes('actual'));
+        const completedIndex = headers.findIndex(value =>
+            ['completed', 'done', 'status'].includes(value)
+        );
+        const structured = nameIndex >= 0;
+
+        if (structured) {
+            sortedTasks = rows.slice(1)
+                .map(row => createTask(row[nameIndex], {
+                    id: idIndex >= 0 ? row[idIndex] : undefined,
+                    estimatedTimeMs: estimateIndex >= 0
+                        ? Number(row[estimateIndex] || 0) * 60_000
+                        : 0,
+                    actualTimeMs: actualIndex >= 0
+                        ? Number(row[actualIndex] || 0) * 60_000
+                        : 0,
+                    completed: completedIndex >= 0
+                        && ['true', 'yes', '1', 'done', 'completed']
+                            .includes(String(row[completedIndex]).toLowerCase())
+                }))
+                .filter(task => task.name);
+        } else {
+            const exportedNames = parseNextTaskTextExport(text);
+            const names = exportedNames ?? parsePlainTaskText(text);
+            sortedTasks = names.map(name => createTask(name));
+        }
+
+        if (!sortedTasks.length) {
+            alert('No unfinished tasks were found in that file.');
+            return;
+        }
+
+        hide(el('taskInput'));
+        el('csvUpload').value = '';
+        activeTaskId = firstIncompleteTask()?.id || null;
+
+        if (structured && idIndex >= 0) showDashboard();
+        else showTimingGateway();
+    };
+
+    reader.onerror = () => alert('That file could not be read.');
+    reader.readAsText(file);
+}
 function csvEscape(value){const text=String(value??'');return /[",\n]/.test(text)?`"${text.replace(/"/g,'""')}"`:text;}
 function exportCsv(){const rows=[['Task Name','Estimated Time (Min)','Actual Time (Min)','Completed','Task ID']];sortedTasks.forEach(task=>rows.push([task.name,Math.round(task.estimatedTimeMs/60000),Math.round(task.actualTimeMs/60000),task.completed,task.id]));const blob=new Blob([rows.map(row=>row.map(csvEscape).join(',')).join('\n')],{type:'text/csv'});const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`tasks_${new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')}.csv`;link.click();URL.revokeObjectURL(link.href);}
 
