@@ -353,16 +353,9 @@ function showTimingGateway() {
     screen.append(heading,yes,no); container.appendChild(screen); saveLocal('timing-gateway');
 }
 function showSequentialTiming(startIndex = 0) {
+    clearInterval(timerInterval);
+
     const pending = incompleteTasks();
-    const allocated = allocatedTimeMs();
-    const sessionRemainingMs = sessionTimeRemainingMs();
-    const remainingBudgetMs = sessionRemainingMs === null ? null : sessionRemainingMs - allocated;
-
-    if (remainingBudgetMs !== null && remainingBudgetMs <= 0) {
-        showDashboard();
-        return;
-    }
-
     const index = pending.findIndex((task, i) => i >= startIndex && task.estimatedTimeMs <= 0);
     if (index === -1) {
         showDashboard();
@@ -372,6 +365,7 @@ function showSequentialTiming(startIndex = 0) {
     const task = pending[index];
     hideStaticScreens();
     show(el('startOverBtn'));
+
     const container = clearDynamic();
     const screen = document.createElement('div');
     screen.id = 'timingEntryScreen';
@@ -379,14 +373,16 @@ function showSequentialTiming(startIndex = 0) {
     const heading = document.createElement('h2');
     heading.textContent = `Current Task: ${task.name}`;
 
+    const timerLabel = document.createElement('p');
+    timerLabel.textContent = 'Time to work with:';
+    timerLabel.style.marginBottom = '4px';
+
     const allocationTimer = document.createElement('p');
     allocationTimer.id = 'timer';
     allocationTimer.style.fontSize = '24px';
     allocationTimer.style.fontWeight = 'bold';
     allocationTimer.style.color = 'green';
-    allocationTimer.textContent = remainingBudgetMs === null
-        ? 'No overall time limit'
-        : `${formatDuration(remainingBudgetMs)} remaining to allocate`;
+    allocationTimer.style.marginTop = '0';
 
     const prompt = document.createElement('p');
     prompt.textContent = `Estimate time for task ${index + 1} of ${pending.length}.`;
@@ -394,27 +390,74 @@ function showSequentialTiming(startIndex = 0) {
     const input = document.createElement('input');
     input.type = 'number';
     input.min = '1';
-    const budgetMaxMinutes = remainingBudgetMs === null
-        ? MAX_TASK_MINUTES
-        : Math.max(1, Math.min(MAX_TASK_MINUTES, Math.floor(remainingBudgetMs / 60_000)));
-    input.max = String(budgetMaxMinutes);
-    input.placeholder = `1-${budgetMaxMinutes} minutes`;
 
     const next = document.createElement('button');
     next.textContent = index === pending.length - 1 ? 'Finish and View List' : 'Save & Next';
-    next.onclick = () => {
-        const minutes = Number.parseInt(input.value, 10);
-        if (!Number.isFinite(minutes) || minutes < 1 || minutes > budgetMaxMinutes) {
-            alert(`Enter a number from 1 to ${budgetMaxMinutes}.`);
+
+    function remainingPlanningTimeMs(now = Date.now()) {
+        const sessionRemaining = sessionTimeRemainingMs(now);
+        return sessionRemaining === null ? null : sessionRemaining - allocatedTimeMs();
+    }
+
+    function updatePlanningTimer() {
+        const remainingMs = remainingPlanningTimeMs();
+
+        if (remainingMs === null) {
+            allocationTimer.textContent = 'No overall time limit';
+            input.max = String(MAX_TASK_MINUTES);
+            input.placeholder = `1-${MAX_TASK_MINUTES} minutes`;
+            next.disabled = false;
             return;
         }
+
+        if (remainingMs <= 0) {
+            clearInterval(timerInterval);
+            saveLocal('dashboard');
+            showDashboard();
+            return;
+        }
+
+        allocationTimer.textContent = formatDuration(remainingMs);
+
+        const maxWholeMinutes = Math.min(MAX_TASK_MINUTES, Math.floor(remainingMs / 60_000));
+        if (maxWholeMinutes < 1) {
+            input.max = '0';
+            input.placeholder = 'Less than 1 minute remains';
+            input.disabled = true;
+            next.disabled = true;
+            return;
+        }
+
+        input.disabled = false;
+        next.disabled = false;
+        input.max = String(maxWholeMinutes);
+        input.placeholder = `1-${maxWholeMinutes} minutes`;
+    }
+
+    next.onclick = () => {
+        const minutes = Number.parseInt(input.value, 10);
+        const remainingMs = remainingPlanningTimeMs();
+        const maxWholeMinutes = remainingMs === null
+            ? MAX_TASK_MINUTES
+            : Math.min(MAX_TASK_MINUTES, Math.floor(remainingMs / 60_000));
+
+        if (!Number.isFinite(minutes) || minutes < 1 || minutes > maxWholeMinutes) {
+            alert(`Enter a number from 1 to ${Math.max(1, maxWholeMinutes)}.`);
+            updatePlanningTimer();
+            return;
+        }
+
         task.estimatedTimeMs = minutes * 60_000;
+        clearInterval(timerInterval);
         saveLocal('timing-entry');
         showSequentialTiming(index + 1);
     };
 
-    screen.append(heading, allocationTimer, prompt, input, next);
+    screen.append(heading, timerLabel, allocationTimer, prompt, input, next);
     container.appendChild(screen);
+
+    updatePlanningTimer();
+    timerInterval = setInterval(updatePlanningTimer, 1_000);
     saveLocal('timing-entry');
 }
 
@@ -647,6 +690,8 @@ function init(){
     const active=currentTask();
 
     if (restored.view==='focus'&&active?.lastChanged!==null) showFocus(active);
+    else if (restored.view==='timing-entry') showSequentialTiming(0);
+    else if (restored.view==='timing-gateway') showTimingGateway();
     else if (restored.view==='completion') showCompletion();
     else if (restored.view==='session-ended') showSessionEnded();
     else if (restored.view==='stop-checklist') showStopChecklist();
