@@ -67,12 +67,61 @@ const getOpenTasksStmt = db.prepare(`
     ORDER BY position ASC, created ASC;
 `);
 
+const getOpenTaskByIdStmt = db.prepare(`
+    SELECT id
+    FROM tasks
+    WHERE user_id = ?
+      AND id = ?
+      AND status NOT IN ('completed', 'cancelled');
+`);
+
+const updateTaskPositionStmt = db.prepare(`
+    UPDATE tasks
+    SET position = ?, updated_at = ?
+    WHERE user_id = ? AND id = ?;
+`);
+
 const moveOpenTasksToSessionStmt = db.prepare(`
     UPDATE tasks
     SET session_id = ?, updated_at = ?
     WHERE user_id = ?
       AND status NOT IN ('completed', 'cancelled');
 `);
+
+const prependOpenTasksTransaction = db.transaction((userId, taskIds) => {
+    const normalizedUserId = String(userId);
+    const now = Date.now();
+    const seen = new Set();
+    const requestedIds = [];
+
+    for (const taskId of taskIds) {
+        const normalizedTaskId = String(taskId || '').trim();
+        if (!normalizedTaskId || seen.has(normalizedTaskId)) continue;
+        seen.add(normalizedTaskId);
+        requestedIds.push(normalizedTaskId);
+    }
+
+    for (const taskId of requestedIds) {
+        attachTaskStmt.run(normalizedUserId, now, taskId);
+    }
+
+    const requestedOpenIds = requestedIds.filter(taskId =>
+        Boolean(getOpenTaskByIdStmt.get(normalizedUserId, taskId))
+    );
+    const requestedOpenIdSet = new Set(requestedOpenIds);
+
+    const olderOpenIds = getOpenTasksStmt
+        .all(normalizedUserId)
+        .map(task => task.id)
+        .filter(taskId => !requestedOpenIdSet.has(taskId));
+
+    const orderedIds = [...requestedOpenIds, ...olderOpenIds];
+    orderedIds.forEach((taskId, index) => {
+        updateTaskPositionStmt.run(index + 1, now, normalizedUserId, taskId);
+    });
+
+    return orderedIds.length;
+});
 
 module.exports = {
     ensureUser(userId) {
@@ -88,6 +137,11 @@ module.exports = {
     attachTask(userId, taskId) {
         this.ensureUser(userId);
         return attachTaskStmt.run(String(userId), Date.now(), String(taskId));
+    },
+
+    prependOpenTasks(userId, taskIds) {
+        this.ensureUser(userId);
+        return prependOpenTasksTransaction(String(userId), Array.isArray(taskIds) ? taskIds : []);
     },
 
     getOpenTasks(userId) {
