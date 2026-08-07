@@ -82,7 +82,7 @@ function formatDuration(ms, alwaysHours = false) {
 }
 function allocatedTimeMs() { return incompleteTasks().reduce((sum, task) => sum + Math.max(0, task.estimatedTimeMs || 0), 0); }
 function estimatedComparisonCount(taskCount) { return taskCount <= 1 ? 0 : Math.ceil(taskCount * Math.log2(taskCount)); }
-function estimatedSortingTimeMs(taskCount) { return Math.max(60_000, estimatedComparisonCount(taskCount) * 3_000); }
+function estimatedSortingTimeMs(taskCount) { return Math.ceil(3_000 * taskCount * Math.log2(Math.max(1, taskCount))); }
 
 function hasHardStop() {
     return Number.isFinite(hardStopAtMs) && hardStopAtMs > 0;
@@ -179,6 +179,7 @@ function save(view = inferView()) { saveLocal(view); backupToServer(); }
 function inferView() {
     if (el('focusScreen')) return 'focus';
     if (el('dashboardScreen')) return 'dashboard';
+    if (!el('taskCompare')?.classList.contains('hidden')) return 'sorting';
     if (el('timingGatewayScreen')) return 'timing-gateway';
     if (el('timingEntryScreen')) return 'timing-entry';
     if (el('completionScreen')) return 'completion';
@@ -222,31 +223,57 @@ function updateCapacityMessage() {
 }
 function parsePlainTaskText(text) { const trimmed = String(text || '').trim(); if (!trimmed) return []; const pieces = trimmed.includes('\n') ? trimmed.split(/\r?\n/) : trimmed.split(','); const names = pieces.map(value => value.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean); return [...new Set(names)]; }
 
-async function interactiveMergeSort(items, runId, estimatedMs) {
-    if (runId !== sortRunId || items.length <= 1) return items;
-    const middle = Math.floor(items.length / 2);
-    const left = await interactiveMergeSort(items.slice(0, middle), runId, estimatedMs);
-    const right = await interactiveMergeSort(items.slice(middle), runId, estimatedMs);
-    if (runId !== sortRunId) return [];
-    return mergeWithChoices(left, right, runId, estimatedMs);
+function prepareSortingDisplay(sortTask) {
+    const compare = el('taskCompare');
+    let taskHeading = el('sortTaskHeading');
+    let sortTimer = el('sortTaskTimer');
+
+    if (!taskHeading) {
+        taskHeading = document.createElement('h2');
+        taskHeading.id = 'sortTaskHeading';
+        compare.insertBefore(taskHeading, compare.firstChild);
+    }
+
+    if (!sortTimer) {
+        sortTimer = document.createElement('p');
+        sortTimer.id = 'sortTaskTimer';
+        sortTimer.style.fontSize = '24px';
+        sortTimer.style.fontWeight = 'bold';
+        taskHeading.insertAdjacentElement('afterend', sortTimer);
+    }
+
+    taskHeading.textContent = `Current Task: ${sortTask.name}`;
+
+    function renderSortingTimer() {
+        checkpointTask(sortTask);
+        const remainingMs = sortTask.estimatedTimeMs - sortTask.actualTimeMs;
+        sortTimer.style.color = remainingMs >= 0 ? 'green' : 'red';
+        sortTimer.textContent = remainingMs >= 0
+            ? `${formatDuration(remainingMs)} remaining`
+            : `${formatDuration(remainingMs)} overdue`;
+        saveLocal('sorting');
+    }
+
+    renderSortingTimer();
+    clearInterval(timerInterval);
+    timerInterval = setInterval(renderSortingTimer, 1_000);
 }
 
-function mergeWithChoices(left, right, runId, estimatedMs) {
+async function interactiveMergeSort(items, runId) {
+    if (runId !== sortRunId || items.length <= 1) return items;
+    const middle = Math.floor(items.length / 2);
+    const left = await interactiveMergeSort(items.slice(0, middle), runId);
+    const right = await interactiveMergeSort(items.slice(middle), runId);
+    if (runId !== sortRunId) return [];
+    return mergeWithChoices(left, right, runId);
+}
+
+function mergeWithChoices(left, right, runId) {
     return new Promise(resolve => {
         const merged = [];
         const compare = el('taskCompare');
         const task1 = el('task1');
         const task2 = el('task2');
-        let estimate = el('sortEstimateHeader');
-
-        if (!estimate) {
-            estimate = document.createElement('p');
-            estimate.id = 'sortEstimateHeader';
-            estimate.style.fontWeight = 'bold';
-            estimate.style.color = '#555';
-            compare.insertBefore(estimate, compare.firstChild);
-        }
-        estimate.textContent = `Estimated sorting time: ~${Math.max(1, Math.ceil(estimatedMs / 60_000))} min`;
 
         show(compare);
         hide(el('taskInput'));
@@ -279,30 +306,42 @@ async function startSorting() {
     if (!names.length) { alert('Please enter at least one task.'); return; }
 
     currentSortNames = [...names];
-    sortedTasks = names.map(name => createTask(name));
-    sortStartedAt = Date.now();
-    const runId = ++sortRunId;
+    const workTasks = names.map(name => createTask(name));
+    const sortStartedAtMs = Date.now();
     const estimatedMs = estimatedSortingTimeMs(names.length);
+    const sortTask = createTask('Sort Tasks', {
+        estimatedTimeMs: estimatedMs,
+        actualTimeMs: 0,
+        completed: false,
+        status: 'active',
+        created: sortStartedAtMs,
+        started: sortStartedAtMs,
+        lastChanged: sortStartedAtMs
+    });
+
+    sortedTasks = [sortTask, ...workTasks];
+    activeTaskId = sortTask.id;
+    sortStartedAt = sortStartedAtMs;
+    const runId = ++sortRunId;
 
     hide(el('taskInput'));
     show(el('startOverBtn'));
+    prepareSortingDisplay(sortTask);
+    save('sorting');
 
+    let sortedWorkTasks = workTasks;
     if (!el('skipSortCheckbox').checked) {
-        sortedTasks = await interactiveMergeSort(sortedTasks, runId, estimatedMs);
+        sortedWorkTasks = await interactiveMergeSort(workTasks, runId);
         if (runId !== sortRunId) return;
     }
 
-    const finished = Date.now();
-    sortedTasks.unshift(createTask('Sorting tasks', {
-        estimatedTimeMs: estimatedMs,
-        actualTimeMs: Math.max(0, finished - sortStartedAt),
-        completed: true,
-        status: 'completed',
-        created: sortStartedAt,
-        started: sortStartedAt,
-        completedTime: finished
-    }));
+    const finishedAtMs = Date.now();
+    clearInterval(timerInterval);
+    completeTask(sortTask, finishedAtMs);
+    sortedTasks = [sortTask, ...sortedWorkTasks];
     activeTaskId = firstIncompleteTask()?.id || null;
+    hide(el('taskCompare'));
+    save('timing-gateway');
     showTimingGateway();
 }
 
