@@ -1,32 +1,36 @@
-# Commit 3 testing
+# Testing commit 4
 
-This commit restores the sequential planning timer on top of commits 1 and 2.
+## Syntax checks
 
-## Expected behavior
+```bash
+node --check server.js
+node --check user-store.js
+```
 
-1. Start a timed session and sort a list.
-2. Choose **Yes** when asked whether to set timings.
-3. The estimate screen should show:
-   - `Current Task: ...`
-   - `Time to work with:`
-   - a large green live timer
-4. The timer should be calculated from:
+## Functional test
 
-   `hardStopAtMs - Date.now() - sum(incomplete task estimates)`
+1. Ensure the backend already has an older open list:
+   - Old A
+   - Old B
+2. Start a new session with:
+   - New 1
+   - New 2
+3. End the session without completing either new task.
+4. Resume the saved list.
+5. Expected order:
+   - New 1
+   - New 2
+   - Old A
+   - Old B
 
-5. Wait several seconds. The displayed time should tick down.
-6. Save an estimate. The timer on the next task should immediately drop by that estimate.
-7. The input maximum should never exceed the whole minutes still available.
-8. When no allocatable time remains, planning should return to the task-list dashboard.
-9. Reload while on a timing-entry screen. The app should restore the planning screen and continue from the current hard stop rather than resetting the budget.
+## Repeat-save test
 
-## Regression checks
+1. Save the same current session several times.
+2. Resume the task list.
+3. Confirm tasks are not duplicated and positions remain compact and ordered.
 
-- Sorting still appears as the completed `Sort Tasks` task.
-- The sorting timer still counts down and turns red when overdue.
-- The hard stop still ends the session without completing the active task.
-- Focus-task timing still works normally.
+## Completion test
 
-## Syntax validation
-
-`node --check script.js` passed before packaging.
+1. Complete `New 1` and save again.
+2. Resume.
+3. Confirm `New 1` is absent from the open queue and the order begins with `New 2`.
