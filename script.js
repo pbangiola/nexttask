@@ -8,18 +8,35 @@ let activeScopePath = [];
 let activeTaskId = null;
 let pendingHasParts = false;
 
+// Path B state: local stand-in for the future Task Sorter backlog integration.
+let backlog = [];
+let backlogReviewIndex = 0;
+let backlogSeedTaskId = null;
+let backlogSelectedTaskIds = [];
+let returnToBacklogAfterProject = false;
+let pendingBacklogProjectTaskIds = [];
+
 function makeId(prefix = 'item') {
     return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function createTask(name) {
+function createTask(name, values = {}) {
     return {
-        id: makeId('task'),
+        id: values.id || makeId('task'),
         name: String(name || '').trim(),
-        estimatedMinutes: null,
-        children: [],
-        isProject: false,
-        decompositionReviewed: false
+        estimatedMinutes: values.estimatedMinutes ?? null,
+        children: Array.isArray(values.children) ? values.children : [],
+        isProject: Boolean(values.isProject),
+        decompositionReviewed: Boolean(values.decompositionReviewed)
+    };
+}
+
+function createBacklogTask(name, values = {}) {
+    return {
+        id: values.id || makeId('backlog'),
+        name: String(name || '').trim(),
+        reviewed: Boolean(values.reviewed),
+        projectId: values.projectId || null
     };
 }
 
@@ -29,7 +46,13 @@ function saveSession() {
         currentView,
         activeScopePath,
         activeTaskId,
-        pendingHasParts
+        pendingHasParts,
+        backlog,
+        backlogReviewIndex,
+        backlogSeedTaskId,
+        backlogSelectedTaskIds,
+        returnToBacklogAfterProject,
+        pendingBacklogProjectTaskIds
     }));
 }
 
@@ -47,6 +70,12 @@ function loadSession() {
         activeScopePath = Array.isArray(state.activeScopePath) ? state.activeScopePath : [];
         activeTaskId = state.activeTaskId || null;
         pendingHasParts = Boolean(state.pendingHasParts);
+        backlog = Array.isArray(state.backlog) ? state.backlog : [];
+        backlogReviewIndex = Number.isInteger(state.backlogReviewIndex) ? state.backlogReviewIndex : 0;
+        backlogSeedTaskId = state.backlogSeedTaskId || null;
+        backlogSelectedTaskIds = Array.isArray(state.backlogSelectedTaskIds) ? state.backlogSelectedTaskIds : [];
+        returnToBacklogAfterProject = Boolean(state.returnToBacklogAfterProject);
+        pendingBacklogProjectTaskIds = Array.isArray(state.pendingBacklogProjectTaskIds) ? state.pendingBacklogProjectTaskIds : [];
         restoreView();
     } catch (error) {
         console.warn('Saved Project Planner state could not be restored.', error);
@@ -62,6 +91,12 @@ function clearSession() {
     activeScopePath = [];
     activeTaskId = null;
     pendingHasParts = false;
+    backlog = [];
+    backlogReviewIndex = 0;
+    backlogSeedTaskId = null;
+    backlogSelectedTaskIds = [];
+    returnToBacklogAfterProject = false;
+    pendingBacklogProjectTaskIds = [];
 }
 
 function hideCompare() {
@@ -76,18 +111,26 @@ function clearDynamic() {
 }
 
 function restoreView() {
-    if (!project && currentView !== 'home' && currentView !== 'define-project') {
-        showHome();
-        return;
-    }
-
-    if (currentView === 'define-project') showProjectDefinition();
+    if (currentView === 'home') showHome();
+    else if (currentView === 'review-entry') showReviewEntry();
+    else if (currentView === 'backlog-import') showBacklogImport();
+    else if (currentView === 'backlog-list') showBacklogList();
+    else if (currentView === 'backlog-membership') showBacklogMembershipQuestion(backlogSeedTaskId);
+    else if (currentView === 'backlog-related') showRelatedWorkSelection(backlogSeedTaskId);
+    else if (currentView === 'define-project') showProjectDefinition();
     else if (currentView === 'parts-entry') showPartsEntry(activeScopePath);
     else if (currentView === 'estimate-task') showEstimateTask(activeScopePath, activeTaskId);
     else if (currentView === 'reorder-task') showReorderTask(activeScopePath, activeTaskId, pendingHasParts);
     else if (currentView === 'subproject-callout') showSubprojectCallout(activeScopePath, activeTaskId);
-    else if (currentView === 'summary') showProjectSummary();
+    else if (currentView === 'summary' && project) showProjectSummary();
     else showHome();
+}
+
+function resetProjectPlanningState() {
+    project = null;
+    activeScopePath = [];
+    activeTaskId = null;
+    pendingHasParts = false;
 }
 
 function showHome() {
@@ -103,17 +146,213 @@ function showHome() {
                 CREATE A PROJECT
                 <span class="choice-note">I know what I want to accomplish.</span>
             </div>
-            <div class="forced-choice-box disabled" aria-disabled="true">
+            <div id="reviewBacklogChoice" class="forced-choice-box">
                 REVIEW YOUR EXISTING BACKLOG
-                <span class="choice-note">Coming soon.</span>
+                <span class="choice-note">Find work that belongs together.</span>
             </div>
         </div>
     `;
 
     document.getElementById('createProjectChoice').onclick = () => {
-        project = null;
+        returnToBacklogAfterProject = false;
+        pendingBacklogProjectTaskIds = [];
+        resetProjectPlanningState();
         showProjectDefinition();
     };
+    document.getElementById('reviewBacklogChoice').onclick = showReviewEntry;
+    saveSession();
+}
+
+// --- B0: choose uncategorized backlog or existing projects ---
+function showReviewEntry() {
+    currentView = 'review-entry';
+    const container = clearDynamic();
+    container.innerHTML = `
+        <h2>What would you like to review?</h2>
+        <div class="choice-box-container">
+            <div id="uncategorizedBacklogChoice" class="forced-choice-box">
+                UNCATEGORIZED BACKLOG
+                <span class="choice-note">Look for tasks that belong to projects.</span>
+            </div>
+            <div class="forced-choice-box disabled" aria-disabled="true">
+                EXISTING PROJECTS
+                <span class="choice-note">Coming soon.</span>
+            </div>
+        </div>
+        <button id="reviewBackButton" class="secondary-button">Back</button>
+    `;
+    document.getElementById('uncategorizedBacklogChoice').onclick = () => {
+        if (uncategorizedBacklog().length) showBacklogList();
+        else showBacklogImport();
+    };
+    document.getElementById('reviewBackButton').onclick = showHome;
+    saveSession();
+}
+
+function uncategorizedBacklog() {
+    return backlog.filter(task => !task.projectId);
+}
+
+// Local-only adapter until this prototype reads the real Task Sorter backlog.
+function showBacklogImport() {
+    currentView = 'backlog-import';
+    const container = clearDynamic();
+    container.innerHTML = `
+        <h2>Load Your Backlog</h2>
+        <p class="muted">For this browser-only prototype, paste or upload your backlog. Later this will come directly from Task Sorter.</p>
+        <textarea id="backlogTextarea" rows="10" placeholder="Enter one task per line"></textarea>
+        <button id="backlogLoadButton" class="btn-action">Review Backlog</button>
+        <div class="file-upload-section">
+            <p class="muted">Or upload a text or CSV list:</p>
+            <input type="file" id="backlogFileInput" accept=".txt,.csv,text/plain,text/csv">
+        </div>
+        <button id="backlogImportBack" class="secondary-button">Back</button>
+    `;
+
+    document.getElementById('backlogFileInput').onchange = event => {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = loadEvent => {
+            document.getElementById('backlogTextarea').value = parseUploadedNames(String(loadEvent.target.result || ''), file.name).join('\n');
+        };
+        reader.readAsText(file);
+    };
+
+    document.getElementById('backlogLoadButton').onclick = () => {
+        const names = parseTaskText(document.getElementById('backlogTextarea').value);
+        if (!names.length) {
+            alert('Please enter at least one backlog task.');
+            return;
+        }
+        const existingByName = new Map(backlog.map(task => [task.name, task]));
+        backlog = names.map(name => existingByName.get(name) || createBacklogTask(name));
+        backlogReviewIndex = 0;
+        saveSession();
+        showBacklogList();
+    };
+    document.getElementById('backlogImportBack').onclick = showReviewEntry;
+    saveSession();
+}
+
+// --- B1: choose a backlog item to review ---
+function showBacklogList() {
+    currentView = 'backlog-list';
+    backlogSeedTaskId = null;
+    backlogSelectedTaskIds = [];
+    const remaining = uncategorizedBacklog();
+    const container = clearDynamic();
+
+    if (!remaining.length) {
+        container.innerHTML = `
+            <h2>Uncategorized Backlog</h2>
+            <p>Everything in this local backlog has been assigned to a project.</p>
+            <button id="backlogDoneButton" class="btn-action">Back to Project Planner</button>
+        `;
+        document.getElementById('backlogDoneButton').onclick = showHome;
+        saveSession();
+        return;
+    }
+
+    container.innerHTML = `
+        <h2>Uncategorized Backlog</h2>
+        <p>Choose a task to review.</p>
+        <div id="backlogTaskChoices" class="choice-box-container"></div>
+        <button id="backlogListBack" class="secondary-button">Back</button>
+    `;
+
+    const choices = document.getElementById('backlogTaskChoices');
+    remaining.forEach(task => {
+        const choice = document.createElement('div');
+        choice.className = 'forced-choice-box';
+        choice.textContent = task.name;
+        choice.onclick = () => showBacklogMembershipQuestion(task.id);
+        choices.appendChild(choice);
+    });
+    document.getElementById('backlogListBack').onclick = showReviewEntry;
+    saveSession();
+}
+
+// --- B2: is this part of a project? ---
+function showBacklogMembershipQuestion(taskId) {
+    const task = backlog.find(item => item.id === taskId && !item.projectId);
+    if (!task) {
+        showBacklogList();
+        return;
+    }
+
+    currentView = 'backlog-membership';
+    backlogSeedTaskId = taskId;
+    backlogSelectedTaskIds = [taskId];
+    const container = clearDynamic();
+    container.innerHTML = `
+        <h2>${escapeHtml(task.name)}</h2>
+        <p><strong>Is this part of a project?</strong></p>
+        <div class="choice-box-container">
+            <div id="membershipYes" class="forced-choice-box">YES</div>
+            <div id="membershipNo" class="forced-choice-box">NO</div>
+        </div>
+        <button id="membershipBack" class="secondary-button">Back</button>
+    `;
+
+    document.getElementById('membershipYes').onclick = () => showRelatedWorkSelection(taskId);
+    document.getElementById('membershipNo').onclick = () => {
+        task.reviewed = true;
+        saveSession();
+        showBacklogList();
+    };
+    document.getElementById('membershipBack').onclick = showBacklogList;
+    saveSession();
+}
+
+// --- B3: identify the related work, then hand off to A1/A2 ---
+function showRelatedWorkSelection(seedTaskId) {
+    const seed = backlog.find(item => item.id === seedTaskId && !item.projectId);
+    if (!seed) {
+        showBacklogList();
+        return;
+    }
+
+    currentView = 'backlog-related';
+    backlogSeedTaskId = seedTaskId;
+    const container = clearDynamic();
+    container.innerHTML = `
+        <h2>${escapeHtml(seed.name)}</h2>
+        <p><strong>What other work belongs with this?</strong></p>
+        <div id="relatedWorkChecklist"></div>
+        <button id="relatedContinue" class="btn-action">Create a Project</button>
+        <button id="relatedBack" class="secondary-button">Back</button>
+    `;
+
+    const checklist = document.getElementById('relatedWorkChecklist');
+    uncategorizedBacklog()
+        .filter(task => task.id !== seedTaskId)
+        .forEach(task => {
+            const label = document.createElement('label');
+            label.className = 'checkbox-row';
+            label.innerHTML = `<input type="checkbox" value="${task.id}"><span>${escapeHtml(task.name)}</span>`;
+            checklist.appendChild(label);
+        });
+
+    document.getElementById('relatedContinue').onclick = () => {
+        const selectedIds = Array.from(checklist.querySelectorAll('input[type="checkbox"]:checked')).map(input => input.value);
+        const allIds = [seedTaskId, ...selectedIds];
+        const selectedTasks = allIds.map(id => backlog.find(item => item.id === id)).filter(Boolean);
+        if (!selectedTasks.length) return;
+
+        backlogSelectedTaskIds = allIds;
+        pendingBacklogProjectTaskIds = allIds;
+        returnToBacklogAfterProject = true;
+        project = {
+            id: makeId('project'),
+            name: '',
+            initialEstimateMinutes: null,
+            tasks: selectedTasks.map(item => createTask(item.name))
+        };
+        saveSession();
+        showProjectDefinition();
+    };
+    document.getElementById('relatedBack').onclick = () => showBacklogMembershipQuestion(seedTaskId);
     saveSession();
 }
 
@@ -121,9 +360,10 @@ function showHome() {
 function showProjectDefinition() {
     currentView = 'define-project';
     const container = clearDynamic();
+    const discovered = returnToBacklogAfterProject && pendingBacklogProjectTaskIds.length;
     container.innerHTML = `
-        <h2>Create a Project</h2>
-        <label class="field-label" for="projectNameInput">What are you working on?</label>
+        <h2>${discovered ? 'These tasks belong together.' : 'Create a Project'}</h2>
+        <label class="field-label" for="projectNameInput">${discovered ? 'What should we call this project?' : 'What are you working on?'}</label>
         <input id="projectNameInput" type="text" placeholder="e.g., Plan the science fair">
 
         <label class="field-label" for="projectEstimateInput">About how long do you think the whole project will take?</label>
@@ -160,7 +400,16 @@ function showProjectDefinition() {
         showPartsEntry([]);
     };
 
-    document.getElementById('defineProjectCancel').onclick = showHome;
+    document.getElementById('defineProjectCancel').onclick = () => {
+        if (returnToBacklogAfterProject && backlogSeedTaskId) {
+            resetProjectPlanningState();
+            pendingBacklogProjectTaskIds = [];
+            returnToBacklogAfterProject = false;
+            showRelatedWorkSelection(backlogSeedTaskId);
+        } else {
+            showHome();
+        }
+    };
     saveSession();
 }
 
@@ -210,6 +459,17 @@ function parseTaskText(text) {
         .filter(Boolean);
 }
 
+function parseUploadedNames(text, fileName = '') {
+    const lines = String(text || '').split(/\r?\n/).filter(Boolean);
+    const looksLikeCsv = String(fileName).toLowerCase().endsWith('.csv') || lines[0]?.includes(',');
+    if (!looksLikeCsv) return parseTaskText(text);
+    const startsWithHeader = /task|name/i.test(lines[0] || '');
+    return lines
+        .slice(startsWithHeader ? 1 : 0)
+        .map(line => line.split(',')[0].replace(/^"|"$/g, '').trim())
+        .filter(Boolean);
+}
+
 // --- A2: enter all known parts ---
 function showPartsEntry(scopePath) {
     activeScopePath = [...scopePath];
@@ -247,18 +507,7 @@ function showPartsEntry(scopePath) {
         if (!file) return;
         const reader = new FileReader();
         reader.onload = loadEvent => {
-            const text = String(loadEvent.target.result || '');
-            const lines = text.split(/\r?\n/).filter(Boolean);
-            const looksLikeCsv = file.name.toLowerCase().endsWith('.csv') || lines[0]?.includes(',');
-            if (looksLikeCsv) {
-                const names = lines
-                    .slice(lines[0]?.toLowerCase().includes('task') ? 1 : 0)
-                    .map(line => line.split(',')[0].replace(/^"|"$/g, '').trim())
-                    .filter(Boolean);
-                document.getElementById('partsTextarea').value = names.join('\n');
-            } else {
-                document.getElementById('partsTextarea').value = parseTaskText(text).join('\n');
-            }
+            document.getElementById('partsTextarea').value = parseUploadedNames(String(loadEvent.target.result || ''), file.name).join('\n');
         };
         reader.readAsText(file);
     };
@@ -592,19 +841,41 @@ function showProjectSummary() {
         <div id="summaryTasks"></div>
         <div class="choice-box-container">
             <div id="downloadPlanChoice" class="forced-choice-box">DOWNLOAD PROJECT PLAN</div>
-            <div id="newProjectChoice" class="forced-choice-box">START A NEW PROJECT</div>
+            <div id="finishProjectChoice" class="forced-choice-box">${returnToBacklogAfterProject ? 'RETURN TO BACKLOG' : 'START A NEW PROJECT'}</div>
         </div>
     `;
 
     document.getElementById('summaryTasks').appendChild(renderSummaryTasks(project.tasks));
     document.getElementById('downloadPlanChoice').onclick = downloadProjectPlan;
-    document.getElementById('newProjectChoice').onclick = () => {
+    document.getElementById('finishProjectChoice').onclick = () => {
+        if (returnToBacklogAfterProject) {
+            finalizeBacklogProjectAndReturn();
+            return;
+        }
         if (confirm('Start a new project and clear this local plan?')) {
-            clearSession();
+            resetProjectPlanningState();
+            saveSession();
             showHome();
         }
     };
     saveSession();
+}
+
+function finalizeBacklogProjectAndReturn() {
+    const assignedIds = new Set(pendingBacklogProjectTaskIds);
+    backlog.forEach(task => {
+        if (assignedIds.has(task.id)) {
+            task.projectId = project.id;
+            task.reviewed = true;
+        }
+    });
+    pendingBacklogProjectTaskIds = [];
+    backlogSelectedTaskIds = [];
+    backlogSeedTaskId = null;
+    returnToBacklogAfterProject = false;
+    resetProjectPlanningState();
+    saveSession();
+    showBacklogList();
 }
 
 function flattenTasks(tasks, depth = 0, rows = []) {
