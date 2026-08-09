@@ -1,412 +1,333 @@
-// --- Project Planner State & Local Persistence ---
+// --- Project Planner: browser-only planning prototype ---
 const PROJECT_PLANNER_STATE_KEY = 'projectPlannerState';
+const AUTO_SUBPROJECT_THRESHOLD_MINUTES = 20;
 
-let sortedTasks = [];
-let currentProjectContext = null;
+let project = null;
+let currentView = 'home';
+let activeScopePath = [];
+let activeTaskId = null;
+let pendingHasParts = false;
+
+function makeId(prefix = 'item') {
+    return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createTask(name) {
+    return {
+        id: makeId('task'),
+        name: String(name || '').trim(),
+        estimatedMinutes: null,
+        children: [],
+        isProject: false,
+        decompositionReviewed: false
+    };
+}
 
 function saveSession() {
-    const sessionState = {
-        sortedTasks,
-        currentProjectContext,
-        activeView: getActiveViewContext()
-    };
-    localStorage.setItem(PROJECT_PLANNER_STATE_KEY, JSON.stringify(sessionState));
+    localStorage.setItem(PROJECT_PLANNER_STATE_KEY, JSON.stringify({
+        project,
+        currentView,
+        activeScopePath,
+        activeTaskId,
+        pendingHasParts
+    }));
 }
 
 function loadSession() {
     const saved = localStorage.getItem(PROJECT_PLANNER_STATE_KEY);
-    initInitialListeners();
-    if (!saved) return;
+    if (!saved) {
+        showHome();
+        return;
+    }
 
     try {
         const state = JSON.parse(saved);
-        sortedTasks = Array.isArray(state.sortedTasks) ? state.sortedTasks : [];
-        currentProjectContext = state.currentProjectContext || null;
-        routeToStoredView(state.activeView);
+        project = state.project || null;
+        currentView = state.currentView || 'home';
+        activeScopePath = Array.isArray(state.activeScopePath) ? state.activeScopePath : [];
+        activeTaskId = state.activeTaskId || null;
+        pendingHasParts = Boolean(state.pendingHasParts);
+        restoreView();
     } catch (error) {
-        console.warn('Saved Project Planner session could not be restored.', error);
+        console.warn('Saved Project Planner state could not be restored.', error);
+        clearSession();
+        showHome();
     }
 }
 
 function clearSession() {
     localStorage.removeItem(PROJECT_PLANNER_STATE_KEY);
-    sortedTasks = [];
-    currentProjectContext = null;
+    project = null;
+    currentView = 'home';
+    activeScopePath = [];
+    activeTaskId = null;
+    pendingHasParts = false;
 }
 
-function getActiveViewContext() {
-    if (document.getElementById('projectBuilderPanel')) return 'project-wizard';
-    if (document.getElementById('dashboardScreen')) return 'dashboard';
-    if (document.getElementById('timingGatewayScreen')) return 'timing-gateway';
-    if (document.getElementById('timingEntryScreen')) return 'timing-entry';
-    return 'landing';
-}
-
-function routeToStoredView(view) {
-    if (!view || view === 'landing') return;
-
-    document.getElementById('taskInputContainer').classList.add('hidden');
-
-    if (view === 'project-wizard') resumeProjectWizard();
-    else if (view === 'timing-gateway') runUpfrontTimingGateway();
-    else if (view === 'timing-entry') runSequentialTimingLoop(findFirstUntimedTask());
-    else displaySortedTasks();
-}
-
-// --- Project Planner Entry & Import ---
-function initInitialListeners() {
-    const submitBtn = document.getElementById('btnSubmitText');
-    const fileInput = document.getElementById('csvFileInput');
-
-    if (submitBtn) {
-        submitBtn.onclick = () => {
-            const input = document.getElementById('tasksTextarea').value.trim();
-            if (!input) {
-                alert('Please enter at least one task to get started.');
-                return;
-            }
-
-            const items = input.split('\n').map(task => task.trim()).filter(Boolean);
-            const skip = document.getElementById('skipSortCheckbox').checked;
-            document.getElementById('taskInputContainer').classList.add('hidden');
-
-            if (skip || items.length <= 1) {
-                sortedTasks = items.map(name => ({ name, estimatedTime: 0 }));
-                runUpfrontTimingGateway();
-            } else {
-                startMergeSort(items);
-            }
-        };
-    }
-
-    if (fileInput) {
-        fileInput.onchange = event => {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = loadEvent => {
-                const lines = loadEvent.target.result.split('\n').map(line => line.trim()).filter(Boolean);
-                const items = [];
-
-                for (let i = 1; i < lines.length; i++) {
-                    const parts = lines[i].match(/(".*?"|[^,]+)(?=\s*,|\s*$|\s*\n)/g);
-                    if (!parts || parts.length < 1) continue;
-
-                    const name = parts[0].replace(/^"|"$/g, '').trim();
-                    const estimatedTime = parseInt(parts[1], 10) || 0;
-                    items.push({ name, estimatedTime });
-                }
-
-                if (!items.length) {
-                    alert("Couldn't find any valid task rows in that file.");
-                    return;
-                }
-
-                document.getElementById('taskInputContainer').classList.add('hidden');
-                sortedTasks = items;
-                displaySortedTasks();
-            };
-            reader.readAsText(file);
-        };
-    }
-}
-
-function showTaskInputPage() {
-    document.getElementById('dynamicContainer').innerHTML = '';
+function hideCompare() {
     document.getElementById('taskCompare').classList.add('hidden');
-    document.getElementById('taskInputContainer').classList.remove('hidden');
 }
 
-// --- Project Planner Timing ---
-function runUpfrontTimingGateway() {
+function clearDynamic() {
+    hideCompare();
     const container = document.getElementById('dynamicContainer');
-    container.innerHTML = `
-        <div id="timingGatewayScreen">
-            <h2>Project Planner: Set Task Times</h2>
-            <p>Would you like to estimate task durations now, or jump straight to your plan?</p>
-            <div class="choice-box-container">
-                <div id="gateYes" class="forced-choice-box">Set Times Now</div>
-                <div id="gateNo" class="forced-choice-box">Skip and Open Plan</div>
-            </div>
-        </div>
-    `;
-
-    document.getElementById('gateYes').onclick = () => runSequentialTimingLoop(0);
-    document.getElementById('gateNo').onclick = displaySortedTasks;
-    saveSession();
+    container.innerHTML = '';
+    return container;
 }
 
-function findFirstUntimedTask() {
-    const index = sortedTasks.findIndex(task => !task.estimatedTime);
-    return index < 0 ? sortedTasks.length : index;
-}
-
-function runSequentialTimingLoop(index) {
-    if (index >= sortedTasks.length) {
-        displaySortedTasks();
+function restoreView() {
+    if (!project && currentView !== 'home' && currentView !== 'define-project') {
+        showHome();
         return;
     }
 
-    const target = sortedTasks[index];
-    const container = document.getElementById('dynamicContainer');
+    if (currentView === 'define-project') showProjectDefinition();
+    else if (currentView === 'parts-entry') showPartsEntry(activeScopePath);
+    else if (currentView === 'estimate-task') showEstimateTask(activeScopePath, activeTaskId);
+    else if (currentView === 'reorder-task') showReorderTask(activeScopePath, activeTaskId, pendingHasParts);
+    else if (currentView === 'subproject-callout') showSubprojectCallout(activeScopePath, activeTaskId);
+    else if (currentView === 'summary') showProjectSummary();
+    else showHome();
+}
+
+function showHome() {
+    currentView = 'home';
+    activeScopePath = [];
+    activeTaskId = null;
+    pendingHasParts = false;
+    const container = clearDynamic();
     container.innerHTML = `
-        <div id="timingEntryScreen">
-            <h2>Project Planner: Estimate Task Time</h2>
-            <p>Task ${index + 1} of ${sortedTasks.length}: <strong>${target.name}</strong></p>
-            <input type="number" id="timingValInput" placeholder="Minutes (1-20)" min="1" max="20">
-            <div class="choice-box-container">
-                <div id="btnCommitTime" class="forced-choice-box">Save Estimate</div>
+        <h2>What would you like to do?</h2>
+        <div class="choice-box-container">
+            <div id="createProjectChoice" class="forced-choice-box">
+                CREATE A PROJECT
+                <span class="choice-note">I know what I want to accomplish.</span>
+            </div>
+            <div class="forced-choice-box disabled" aria-disabled="true">
+                REVIEW YOUR EXISTING BACKLOG
+                <span class="choice-note">Coming soon.</span>
             </div>
         </div>
     `;
 
-    document.getElementById('btnCommitTime').onclick = () => {
-        const value = parseInt(document.getElementById('timingValInput').value, 10);
-        if (isNaN(value) || value < 1 || value > 20) {
-            alert('Please pick a time between 1 and 20 minutes.');
+    document.getElementById('createProjectChoice').onclick = () => {
+        project = null;
+        showProjectDefinition();
+    };
+    saveSession();
+}
+
+// --- A1: define the project ---
+function showProjectDefinition() {
+    currentView = 'define-project';
+    const container = clearDynamic();
+    container.innerHTML = `
+        <h2>Create a Project</h2>
+        <label class="field-label" for="projectNameInput">What are you working on?</label>
+        <input id="projectNameInput" type="text" placeholder="e.g., Plan the science fair">
+
+        <label class="field-label" for="projectEstimateInput">About how long do you think the whole project will take?</label>
+        <input id="projectEstimateInput" type="number" min="1" placeholder="Minutes">
+
+        <button id="defineProjectContinue" class="btn-action">Continue</button>
+        <button id="defineProjectCancel" class="secondary-button">Back</button>
+    `;
+
+    if (project) {
+        document.getElementById('projectNameInput').value = project.name || '';
+        document.getElementById('projectEstimateInput').value = project.initialEstimateMinutes || '';
+    }
+
+    document.getElementById('defineProjectContinue').onclick = () => {
+        const name = document.getElementById('projectNameInput').value.trim();
+        const estimate = Number.parseInt(document.getElementById('projectEstimateInput').value, 10);
+        if (!name) {
+            alert('Please give the project a name.');
+            return;
+        }
+        if (!Number.isFinite(estimate) || estimate < 1) {
+            alert('Please enter your best estimate in minutes.');
             return;
         }
 
-        target.estimatedTime = value;
+        project = {
+            id: project?.id || makeId('project'),
+            name,
+            initialEstimateMinutes: estimate,
+            tasks: project?.tasks || []
+        };
         saveSession();
-
-        if (value > 15) initiateProjectWizard(index);
-        else runSequentialTimingLoop(index + 1);
+        showPartsEntry([]);
     };
 
+    document.getElementById('defineProjectCancel').onclick = showHome;
     saveSession();
 }
 
-// --- Project Decomposition Wizard ---
-function initiateProjectWizard(parentIndex) {
-    currentProjectContext = {
-        parentIndex,
-        parentName: sortedTasks[parentIndex].name,
-        subTaskObjects: [],
-        subIndex: 0,
-        step: 'subtask-input'
-    };
-    renderProjectWizardScreen();
+// --- shared hierarchy helpers ---
+function getTaskByPath(path) {
+    if (!project || !path.length) return null;
+    let tasks = project.tasks;
+    let current = null;
+    for (const id of path) {
+        current = tasks.find(task => task.id === id);
+        if (!current) return null;
+        tasks = current.children || [];
+    }
+    return current;
 }
 
-function resumeProjectWizard() {
-    if (!currentProjectContext) {
-        displaySortedTasks();
+function getScopeTasks(scopePath) {
+    if (!scopePath.length) return project?.tasks || [];
+    const owner = getTaskByPath(scopePath);
+    if (!owner) return [];
+    owner.children ||= [];
+    return owner.children;
+}
+
+function setScopeTasks(scopePath, tasks) {
+    if (!scopePath.length) {
+        project.tasks = tasks;
         return;
     }
-    renderProjectWizardScreen();
+    const owner = getTaskByPath(scopePath);
+    if (owner) owner.children = tasks;
 }
 
-function renderProjectWizardScreen() {
-    const container = document.getElementById('dynamicContainer');
+function scopeTitle(scopePath) {
+    if (!scopePath.length) return project?.name || 'Project';
+    return getTaskByPath(scopePath)?.name || project?.name || 'Project';
+}
 
-    if (currentProjectContext.step === 'subtask-input') {
-        container.innerHTML = `
-            <div id="projectBuilderPanel">
-                <h2>Project Planner: Project Detected</h2>
-                <p><strong>${currentProjectContext.parentName}</strong> is estimated at more than 15 minutes.</p>
-                <div class="choice-box-container">
-                    <div id="projKeepSingle" class="forced-choice-box">Keep as a Single Task</div>
-                    <div id="projDeconstruct" class="forced-choice-box">Break into Sub-tasks</div>
-                </div>
-            </div>
-        `;
+function findTaskInScope(scopePath, taskId) {
+    return getScopeTasks(scopePath).find(task => task.id === taskId) || null;
+}
 
-        document.getElementById('projKeepSingle').onclick = () => {
-            const nextIndex = currentProjectContext.parentIndex + 1;
-            currentProjectContext = null;
-            saveSession();
-            runSequentialTimingLoop(nextIndex);
-        };
+function parseTaskText(text) {
+    return String(text || '')
+        .split(/\r?\n/)
+        .map(line => line.replace(/^\s*\d+[.)]\s*/, '').trim())
+        .filter(Boolean);
+}
 
-        document.getElementById('projDeconstruct').onclick = () => {
-            currentProjectContext.step = 'enter-subtasks';
-            saveSession();
-            renderProjectWizardScreen();
-        };
-    } else if (currentProjectContext.step === 'enter-subtasks') {
-        container.innerHTML = `
-            <div id="projectBuilderPanel">
-                <h2>Project Planner: Add Sub-tasks</h2>
-                <p>Project: <strong>${currentProjectContext.parentName}</strong></p>
-                <textarea id="subtaskTextarea" rows="6" placeholder="Enter sub-tasks (one per line)..."></textarea>
-                <div class="choice-box-container">
-                    <div id="subtaskSubmit" class="forced-choice-box">Add Sub-tasks</div>
-                </div>
-            </div>
-        `;
+// --- A2: enter all known parts ---
+function showPartsEntry(scopePath) {
+    activeScopePath = [...scopePath];
+    activeTaskId = null;
+    pendingHasParts = false;
+    currentView = 'parts-entry';
 
-        document.getElementById('subtaskSubmit').onclick = () => {
-            const input = document.getElementById('subtaskTextarea').value.trim();
-            if (!input) {
-                alert('Please enter at least one sub-task.');
-                return;
+    const title = scopeTitle(scopePath);
+    const existing = getScopeTasks(scopePath);
+    const container = clearDynamic();
+    container.innerHTML = `
+        <h2>${escapeHtml(title)}</h2>
+        <p><strong>What are all the parts of this project you can think of?</strong></p>
+        <textarea id="partsTextarea" rows="9" placeholder="Enter one task or step per line"></textarea>
+
+        <label class="checkbox-row">
+            <input type="checkbox" id="skipSortCheckbox">
+            <span><strong>Keep this order</strong><br><span class="muted">Skip comparison sorting.</span></span>
+        </label>
+
+        <button id="partsContinue" class="btn-action">Continue</button>
+
+        <div class="file-upload-section">
+            <p class="muted">Or upload a text or CSV list:</p>
+            <input type="file" id="partsFileInput" accept=".txt,.csv,text/plain,text/csv">
+        </div>
+    `;
+
+    if (existing.length) {
+        document.getElementById('partsTextarea').value = existing.map(task => task.name).join('\n');
+    }
+
+    document.getElementById('partsFileInput').onchange = event => {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = loadEvent => {
+            const text = String(loadEvent.target.result || '');
+            const lines = text.split(/\r?\n/).filter(Boolean);
+            const looksLikeCsv = file.name.toLowerCase().endsWith('.csv') || lines[0]?.includes(',');
+            if (looksLikeCsv) {
+                const names = lines
+                    .slice(lines[0]?.toLowerCase().includes('task') ? 1 : 0)
+                    .map(line => line.split(',')[0].replace(/^"|"$/g, '').trim())
+                    .filter(Boolean);
+                document.getElementById('partsTextarea').value = names.join('\n');
+            } else {
+                document.getElementById('partsTextarea').value = parseTaskText(text).join('\n');
             }
-
-            currentProjectContext.subTaskObjects = input
-                .split('\n')
-                .map(task => task.trim())
-                .filter(Boolean)
-                .map(name => ({ name, estimatedTime: 0 }));
-
-            currentProjectContext.subIndex = 0;
-            currentProjectContext.step = 'timing-subtasks';
-            saveSession();
-            renderProjectWizardScreen();
         };
-    } else if (currentProjectContext.step === 'timing-subtasks') {
-        const index = currentProjectContext.subIndex;
-        const subTasks = currentProjectContext.subTaskObjects;
+        reader.readAsText(file);
+    };
 
-        if (index >= subTasks.length) {
-            finalizeProjectFlattening(currentProjectContext.parentName);
+    document.getElementById('partsContinue').onclick = async () => {
+        const names = parseTaskText(document.getElementById('partsTextarea').value);
+        if (!names.length) {
+            alert('Please enter at least one part of the project.');
             return;
         }
 
-        const targetSub = subTasks[index];
-        container.innerHTML = `
-            <div id="projectBuilderPanel">
-                <h2>Project Planner: Estimate Sub-task</h2>
-                <p>Sub-task ${index + 1} of ${subTasks.length}: <strong>${targetSub.name}</strong></p>
-                <input type="number" id="subTimingInput" placeholder="Minutes (1-20)" min="1" max="20">
-                <div class="choice-box-container">
-                    <div id="subTimingSubmit" class="forced-choice-box">Save Sub-task Estimate</div>
-                </div>
-            </div>
-        `;
+        const existingByName = new Map(existing.map(task => [task.name, task]));
+        const tasks = names.map(name => existingByName.get(name) || createTask(name));
+        const skipSort = document.getElementById('skipSortCheckbox').checked;
 
-        document.getElementById('subTimingSubmit').onclick = () => {
-            const value = parseInt(document.getElementById('subTimingInput').value, 10);
-            if (isNaN(value) || value < 1 || value > 20) {
-                alert('Please enter a value between 1 and 20 minutes.');
-                return;
-            }
-
-            targetSub.estimatedTime = value;
-            if (value > 15) targetSub.name = `${currentProjectContext.parentName}:${targetSub.name}`;
-            currentProjectContext.subIndex++;
+        if (skipSort || tasks.length <= 1) {
+            setScopeTasks(scopePath, tasks);
             saveSession();
-            renderProjectWizardScreen();
-        };
-    }
-
-    saveSession();
-}
-
-function finalizeProjectFlattening(finalProjectTitle) {
-    const parentIndex = currentProjectContext.parentIndex;
-    const children = currentProjectContext.subTaskObjects.map(subTask => ({
-        name: subTask.name.startsWith(finalProjectTitle)
-            ? subTask.name
-            : `${finalProjectTitle}:${subTask.name}`,
-        estimatedTime: subTask.estimatedTime
-    }));
-
-    sortedTasks.splice(parentIndex, 1, ...children);
-    const resumeIndex = parentIndex + children.length;
-    currentProjectContext = null;
-    saveSession();
-    runSequentialTimingLoop(resumeIndex);
-}
-
-// --- Project Planner Dashboard ---
-function displaySortedTasks() {
-    document.getElementById('taskInputContainer').classList.add('hidden');
-    document.getElementById('taskCompare').classList.add('hidden');
-
-    const container = document.getElementById('dynamicContainer');
-    container.innerHTML = `<div id="dashboardScreen"><h2>Project Planner: Your Plan</h2></div>`;
-
-    const view = document.getElementById('dashboardScreen');
-    const total = sortedTasks.reduce((sum, task) => sum + (task.estimatedTime || 0), 0);
-
-    const duration = document.createElement('h3');
-    duration.textContent = `Total Estimated Duration: ${total} Minutes`;
-    view.appendChild(duration);
-
-    const list = document.createElement('ol');
-    sortedTasks.forEach(task => {
-        const item = document.createElement('li');
-        item.textContent = `${task.name}${task.estimatedTime ? ` — ${task.estimatedTime} min` : ''}`;
-        list.appendChild(item);
-    });
-    view.appendChild(list);
-
-    const controls = document.createElement('div');
-    controls.className = 'choice-box-container';
-
-    const exportButton = document.createElement('div');
-    exportButton.className = 'forced-choice-box';
-    exportButton.textContent = 'Download Project Plan';
-    exportButton.onclick = downloadTaskList;
-
-    const restartButton = document.createElement('div');
-    restartButton.className = 'forced-choice-box';
-    restartButton.textContent = 'Start a New Plan';
-    restartButton.onclick = () => {
-        if (confirm('Reset this project plan and create a new one?')) {
-            clearSession();
-            showTaskInputPage();
+            continueScopePlanning(scopePath);
+            return;
         }
+
+        const sorted = await sortTaskObjects(tasks, title);
+        setScopeTasks(scopePath, sorted);
+        saveSession();
+        continueScopePlanning(scopePath);
     };
 
-    controls.append(exportButton, restartButton);
-    view.appendChild(controls);
     saveSession();
 }
 
-function downloadTaskList() {
-    const rows = [
-        'Task,Estimated Minutes',
-        ...sortedTasks.map(task => `"${String(task.name).replace(/"/g, '""')}",${task.estimatedTime || 0}`)
-    ];
-
-    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'project-plan.csv';
-    anchor.click();
-    URL.revokeObjectURL(url);
+// --- A3: forced-choice sorting ---
+async function sortTaskObjects(tasks, contextTitle) {
+    const sorted = await mergeSortInteractive([...tasks], contextTitle);
+    hideCompare();
+    return sorted;
 }
 
-// --- Interactive Priority Sort ---
-function startMergeSort(array) {
-    mergeSortInteractive(array).then(result => {
-        sortedTasks = result.map(name => ({ name, estimatedTime: 0 }));
-        runUpfrontTimingGateway();
-    });
+async function mergeSortInteractive(items, contextTitle) {
+    if (items.length <= 1) return items;
+    const midpoint = Math.floor(items.length / 2);
+    const left = await mergeSortInteractive(items.slice(0, midpoint), contextTitle);
+    const right = await mergeSortInteractive(items.slice(midpoint), contextTitle);
+    return mergeInteractive(left, right, contextTitle);
 }
 
-async function mergeSortInteractive(array) {
-    if (array.length <= 1) return array;
-
-    const midpoint = Math.floor(array.length / 2);
-    const left = await mergeSortInteractive(array.slice(0, midpoint));
-    const right = await mergeSortInteractive(array.slice(midpoint));
-    return mergeInteractive(left, right);
-}
-
-function mergeInteractive(left, right) {
+function mergeInteractive(left, right, contextTitle) {
     return new Promise(resolve => {
         const result = [];
+        const compare = document.getElementById('taskCompare');
+        const task1 = document.getElementById('task1');
+        const task2 = document.getElementById('task2');
+        document.getElementById('sortContext').textContent = contextTitle;
+        document.getElementById('dynamicContainer').innerHTML = '';
+        compare.classList.remove('hidden');
 
         function step() {
             if (!left.length || !right.length) {
-                document.getElementById('taskCompare').classList.add('hidden');
                 resolve([...result, ...left, ...right]);
                 return;
             }
 
-            document.getElementById('taskCompare').classList.remove('hidden');
-            document.getElementById('task1').textContent = left[0];
-            document.getElementById('task2').textContent = right[0];
-            document.getElementById('task1').onclick = () => {
+            task1.textContent = left[0].name;
+            task2.textContent = right[0].name;
+            task1.onclick = () => {
                 result.push(left.shift());
                 step();
             };
-            document.getElementById('task2').onclick = () => {
+            task2.onclick = () => {
                 result.push(right.shift());
                 step();
             };
@@ -414,6 +335,316 @@ function mergeInteractive(left, right) {
 
         step();
     });
+}
+
+// --- A4: estimate and edit ---
+function continueScopePlanning(scopePath) {
+    const tasks = getScopeTasks(scopePath);
+    const next = tasks.find(task => task.estimatedMinutes === null);
+
+    if (next) {
+        showEstimateTask(scopePath, next.id);
+        return;
+    }
+
+    if (scopePath.length) {
+        const parentScope = scopePath.slice(0, -1);
+        continueScopePlanning(parentScope);
+        return;
+    }
+
+    showProjectSummary();
+}
+
+function showEstimateTask(scopePath, taskId) {
+    const task = findTaskInScope(scopePath, taskId);
+    if (!task) {
+        continueScopePlanning(scopePath);
+        return;
+    }
+
+    activeScopePath = [...scopePath];
+    activeTaskId = taskId;
+    pendingHasParts = false;
+    currentView = 'estimate-task';
+
+    const tasks = getScopeTasks(scopePath);
+    const index = tasks.findIndex(item => item.id === taskId);
+    const container = clearDynamic();
+    container.innerHTML = `
+        <h2>${escapeHtml(scopeTitle(scopePath))}</h2>
+        <p class="muted">Task ${index + 1} of ${tasks.length}</p>
+        <h3>${escapeHtml(task.name)}</h3>
+
+        <label class="field-label" for="taskEstimateInput">How long do you think this will take?</label>
+        <input id="taskEstimateInput" type="number" min="1" placeholder="Minutes" value="${task.estimatedMinutes || ''}">
+
+        <label class="checkbox-row">
+            <input type="checkbox" id="outOfOrderCheckbox">
+            <span><strong>This task is out of order</strong><br><span class="muted">Move it to the right place in this project.</span></span>
+        </label>
+
+        <label class="checkbox-row">
+            <input type="checkbox" id="hasPartsCheckbox">
+            <span><strong>This task has parts</strong><br><span class="muted">Turn it into a subproject and break it down.</span></span>
+        </label>
+
+        <button id="estimateContinue" class="btn-action">Continue</button>
+    `;
+
+    document.getElementById('estimateContinue').onclick = () => {
+        const estimate = Number.parseInt(document.getElementById('taskEstimateInput').value, 10);
+        if (!Number.isFinite(estimate) || estimate < 1) {
+            alert('Please enter your best estimate in minutes.');
+            return;
+        }
+
+        task.estimatedMinutes = estimate;
+        const outOfOrder = document.getElementById('outOfOrderCheckbox').checked;
+        const hasParts = document.getElementById('hasPartsCheckbox').checked;
+        pendingHasParts = hasParts;
+        saveSession();
+
+        if (outOfOrder) {
+            showReorderTask(scopePath, taskId, hasParts);
+            return;
+        }
+
+        handleDecompositionDecision(scopePath, taskId, hasParts);
+    };
+
+    saveSession();
+}
+
+function showReorderTask(scopePath, taskId, hasParts) {
+    const task = findTaskInScope(scopePath, taskId);
+    if (!task) {
+        continueScopePlanning(scopePath);
+        return;
+    }
+
+    activeScopePath = [...scopePath];
+    activeTaskId = taskId;
+    pendingHasParts = Boolean(hasParts);
+    currentView = 'reorder-task';
+
+    const tasks = getScopeTasks(scopePath);
+    const rest = tasks.filter(item => item.id !== taskId);
+    const container = clearDynamic();
+    container.innerHTML = `
+        <h2>Where should this task go?</h2>
+        <div class="reorder-layout">
+            <div id="reorderList"></div>
+            <div>
+                <p class="muted">Moving:</p>
+                <div class="task-card">${escapeHtml(task.name)}</div>
+            </div>
+        </div>
+    `;
+
+    const list = document.getElementById('reorderList');
+    for (let slot = 0; slot <= rest.length; slot++) {
+        const slotRow = document.createElement('div');
+        slotRow.className = 'insert-slot';
+        const button = document.createElement('button');
+        button.className = 'insert-button';
+        button.textContent = slot === 0 ? 'Move to top' : slot === rest.length ? 'Move to end' : 'Move here';
+        button.onclick = () => {
+            const reordered = [...rest];
+            reordered.splice(slot, 0, task);
+            setScopeTasks(scopePath, reordered);
+            saveSession();
+            handleDecompositionDecision(scopePath, taskId, hasParts);
+        };
+        slotRow.appendChild(button);
+        list.appendChild(slotRow);
+
+        if (slot < rest.length) {
+            const row = document.createElement('div');
+            row.className = 'ordered-task';
+            row.textContent = `${slot + 1}. ${rest[slot].name}`;
+            list.appendChild(row);
+        }
+    }
+
+    saveSession();
+}
+
+function handleDecompositionDecision(scopePath, taskId, hasParts) {
+    const task = findTaskInScope(scopePath, taskId);
+    if (!task) {
+        continueScopePlanning(scopePath);
+        return;
+    }
+
+    if (hasParts) {
+        startSubproject(scopePath, taskId);
+        return;
+    }
+
+    if (task.estimatedMinutes > AUTO_SUBPROJECT_THRESHOLD_MINUTES && !task.decompositionReviewed) {
+        showSubprojectCallout(scopePath, taskId);
+        return;
+    }
+
+    continueScopePlanning(scopePath);
+}
+
+function showSubprojectCallout(scopePath, taskId) {
+    const task = findTaskInScope(scopePath, taskId);
+    if (!task) {
+        continueScopePlanning(scopePath);
+        return;
+    }
+
+    activeScopePath = [...scopePath];
+    activeTaskId = taskId;
+    pendingHasParts = false;
+    currentView = 'subproject-callout';
+
+    const container = clearDynamic();
+    container.innerHTML = `
+        <h2>${escapeHtml(scopeTitle(scopePath))}</h2>
+        <div class="callout">
+            <h3>This may be a project</h3>
+            <p><strong>${escapeHtml(task.name)}</strong></p>
+            <p>Estimated time: <strong>${task.estimatedMinutes} minutes</strong></p>
+            <p>Breaking larger work into smaller parts can make the plan easier to use.</p>
+            <div class="choice-box-container">
+                <div id="breakIntoPartsChoice" class="forced-choice-box">BREAK INTO PARTS</div>
+                <div id="keepSingleChoice" class="forced-choice-box">KEEP AS ONE TASK</div>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('breakIntoPartsChoice').onclick = () => startSubproject(scopePath, taskId);
+    document.getElementById('keepSingleChoice').onclick = () => {
+        task.decompositionReviewed = true;
+        saveSession();
+        continueScopePlanning(scopePath);
+    };
+
+    saveSession();
+}
+
+function startSubproject(parentScopePath, taskId) {
+    const task = findTaskInScope(parentScopePath, taskId);
+    if (!task) {
+        continueScopePlanning(parentScopePath);
+        return;
+    }
+
+    task.isProject = true;
+    task.decompositionReviewed = true;
+    task.children ||= [];
+    const childScopePath = [...parentScopePath, task.id];
+    saveSession();
+    showPartsEntry(childScopePath);
+}
+
+// --- finished project summary ---
+function plannedMinutesForTask(task) {
+    if (task.children?.length) {
+        return task.children.reduce((sum, child) => sum + plannedMinutesForTask(child), 0);
+    }
+    return Number(task.estimatedMinutes || 0);
+}
+
+function plannedProjectMinutes() {
+    return (project?.tasks || []).reduce((sum, task) => sum + plannedMinutesForTask(task), 0);
+}
+
+function renderSummaryTasks(tasks) {
+    const list = document.createElement('ul');
+    list.className = 'summary-list';
+
+    tasks.forEach(task => {
+        const item = document.createElement('li');
+        const line = document.createElement('div');
+        const minutes = task.children?.length ? plannedMinutesForTask(task) : task.estimatedMinutes;
+        line.innerHTML = `<strong>${escapeHtml(task.name)}</strong>${minutes ? ` — ${minutes} min` : ''}`;
+        item.appendChild(line);
+
+        if (task.children?.length) {
+            const children = document.createElement('div');
+            children.className = 'summary-children';
+            children.appendChild(renderSummaryTasks(task.children));
+            item.appendChild(children);
+        }
+        list.appendChild(item);
+    });
+
+    return list;
+}
+
+function showProjectSummary() {
+    currentView = 'summary';
+    activeScopePath = [];
+    activeTaskId = null;
+    pendingHasParts = false;
+
+    const container = clearDynamic();
+    container.innerHTML = `
+        <h2>${escapeHtml(project.name)}</h2>
+        <p>Initial estimate: <strong>${project.initialEstimateMinutes} minutes</strong></p>
+        <p>Planned estimate: <strong>${plannedProjectMinutes()} minutes</strong></p>
+        <h3>Project Plan</h3>
+        <div id="summaryTasks"></div>
+        <div class="choice-box-container">
+            <div id="downloadPlanChoice" class="forced-choice-box">DOWNLOAD PROJECT PLAN</div>
+            <div id="newProjectChoice" class="forced-choice-box">START A NEW PROJECT</div>
+        </div>
+    `;
+
+    document.getElementById('summaryTasks').appendChild(renderSummaryTasks(project.tasks));
+    document.getElementById('downloadPlanChoice').onclick = downloadProjectPlan;
+    document.getElementById('newProjectChoice').onclick = () => {
+        if (confirm('Start a new project and clear this local plan?')) {
+            clearSession();
+            showHome();
+        }
+    };
+    saveSession();
+}
+
+function flattenTasks(tasks, depth = 0, rows = []) {
+    tasks.forEach(task => {
+        rows.push({
+            name: `${'  '.repeat(depth)}${task.name}`,
+            estimatedMinutes: task.children?.length ? plannedMinutesForTask(task) : (task.estimatedMinutes || 0)
+        });
+        if (task.children?.length) flattenTasks(task.children, depth + 1, rows);
+    });
+    return rows;
+}
+
+function downloadProjectPlan() {
+    const rows = [
+        ['Project', project.name],
+        ['Initial Estimate Minutes', project.initialEstimateMinutes],
+        ['Planned Estimate Minutes', plannedProjectMinutes()],
+        [],
+        ['Task', 'Estimated Minutes'],
+        ...flattenTasks(project.tasks).map(item => [item.name, item.estimatedMinutes])
+    ];
+
+    const csv = rows.map(row => row.map(value => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'project'}-plan.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 window.addEventListener('DOMContentLoaded', loadSession);
