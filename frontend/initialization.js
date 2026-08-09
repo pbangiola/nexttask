@@ -24,6 +24,7 @@ let endConstraint = '';
 let sortStartedAt = null;
 let currentSortNames = [];
 let sortRunId = 0;
+let timeLimitNextStep = null;
 
 function createId(prefix) {
     const random = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2, 11);
@@ -38,17 +39,66 @@ function beginTimedSession(durationMs, now = Date.now()) {
     startHardStopWatch();
 }
 
+function continueAfterTimeLimitChoice() {
+    const nextStep = timeLimitNextStep;
+    timeLimitNextStep = null;
+
+    if (nextStep === 'resume-list') {
+        resumeExistingList();
+        return;
+    }
+
+    saveLocal('input');
+    showTaskInput();
+}
+
+function showTimeLimitQuestion(nextStep) {
+    timeLimitNextStep = nextStep;
+
+    // Every new work session gets a fresh timing decision. This prevents a
+    // previous session's hard stop from carrying into a new or resumed list.
+    clearSessionTiming();
+    endConstraint = '';
+
+    hideStaticScreens();
+    hide(el('stopWorkingBtn'));
+    show(el('startOverBtn'));
+
+    const container = clearDynamic();
+    const screen = document.createElement('div');
+    screen.id = 'timeLimitQuestionScreen';
+
+    const heading = document.createElement('h2');
+    heading.textContent = 'Do you have a time limit?';
+
+    const yes = document.createElement('button');
+    yes.textContent = 'Yes, I have a definite stop time.';
+    yes.onclick = showTimeConstraint;
+
+    const no = document.createElement('button');
+    no.textContent = "No, I don't have a set stop time.";
+    no.onclick = () => {
+        clearSessionTiming();
+        endConstraint = '';
+        continueAfterTimeLimitChoice();
+    };
+
+    screen.append(heading, yes, no);
+    container.appendChild(screen);
+    saveLocal('work-choice');
+}
+
 function bindEvents(){
     el('workBtn').onclick=showWorkChoice;
-    el('createNewListBtn').onclick=showTimeConstraint;
-    el('resumeExistingListBtn').onclick=resumeExistingList;
+    el('createNewListBtn').onclick=()=>showTimeLimitQuestion('new-list');
+    el('resumeExistingListBtn').onclick=()=>showTimeLimitQuestion('resume-list');
     el('timeConstraintNextBtn').onclick=()=>{
         const minutes=Number.parseInt(el('availableTime').value,10);
         if(!Number.isFinite(minutes)||minutes<1){alert('Enter the number of minutes you have available.');return;}
         beginTimedSession(minutes * 60000);
         endConstraint=el('endConstraint').value.trim();
-        saveLocal('input');
-        showTaskInput();
+        saveLocal(timeLimitNextStep === 'resume-list' ? 'work-choice' : 'input');
+        continueAfterTimeLimitChoice();
     };
     el('tasks').addEventListener('input',updateCapacityMessage);
     el('startSort').onclick=startSorting;
