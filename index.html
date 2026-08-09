@@ -5,50 +5,150 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Project Planner</title>
     <style>
-        :root { --primary-color:#2e7d32; --bg-color:#f4f6f8; --card-bg:#fff; --text-color:#333; --border-radius:8px; }
-        body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg-color); color:var(--text-color); margin:0; padding:20px; display:flex; justify-content:center; }
-        .app-container { width:100%; max-width:600px; background:var(--card-bg); border-radius:var(--border-radius); box-shadow:0 4px 12px rgba(0,0,0,.08); padding:24px; box-sizing:border-box; }
-        header { border-bottom:2px solid #f0f0f0; padding-bottom:12px; margin-bottom:20px; }
-        h1,h2,h3 { margin-top:0; color:#1b5e20; }
-        textarea,input[type="number"] { width:100%; padding:12px; border:1px solid #ccc; border-radius:var(--border-radius); font-size:16px; box-sizing:border-box; margin-bottom:12px; }
-        .checkbox-label { display:flex; align-items:center; gap:8px; margin-bottom:16px; cursor:pointer; font-size:14px; }
-        .choice-box-container { display:flex; flex-direction:column; gap:12px; margin-top:16px; }
-        .forced-choice-box { padding:14px; background:#f0f7f4; border:1px solid #c8e6c9; border-radius:var(--border-radius); text-align:center; font-weight:600; cursor:pointer; }
-        .forced-choice-box:hover { background:#dcedc8; }
-        .btn-action { background:var(--primary-color); color:#fff; border:0; padding:12px 20px; font-size:16px; border-radius:var(--border-radius); cursor:pointer; font-weight:bold; width:100%; }
+        :root {
+            --primary:#2e7d32;
+            --primary-dark:#1b5e20;
+            --bg:#f4f6f8;
+            --card:#ffffff;
+            --text:#333333;
+            --muted:#6b7280;
+            --border:#d7dde3;
+            --radius:10px;
+        }
+        * { box-sizing:border-box; }
+        body {
+            margin:0;
+            padding:20px;
+            display:flex;
+            justify-content:center;
+            background:var(--bg);
+            color:var(--text);
+            font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+        }
+        .app-container {
+            width:100%;
+            max-width:700px;
+            padding:24px;
+            background:var(--card);
+            border-radius:var(--radius);
+            box-shadow:0 4px 16px rgba(0,0,0,.08);
+        }
+        header { border-bottom:2px solid #eef1f3; margin-bottom:24px; padding-bottom:12px; }
+        h1,h2,h3 { color:var(--primary-dark); margin-top:0; }
+        p { line-height:1.45; }
+        .muted { color:var(--muted); }
         .hidden { display:none !important; }
-        .file-upload-section { margin-top:20px; padding-top:16px; border-top:1px dashed #ccc; }
-        .compare-box { display:flex; gap:12px; margin-top:16px; }
-        .compare-card { flex:1; padding:20px; background:#e8f5e9; border:2px solid #a5d6a7; border-radius:var(--border-radius); text-align:center; font-size:18px; font-weight:bold; cursor:pointer; }
+        textarea,input[type="text"],input[type="number"] {
+            width:100%;
+            padding:12px;
+            margin:6px 0 14px;
+            border:1px solid var(--border);
+            border-radius:8px;
+            font:inherit;
+        }
+        textarea { resize:vertical; }
+        label.field-label { display:block; font-weight:600; margin-top:12px; }
+        .choice-box-container { display:flex; flex-direction:column; gap:12px; margin-top:18px; }
+        .forced-choice-box {
+            width:100%;
+            padding:16px;
+            border:1px solid #c8e6c9;
+            border-radius:var(--radius);
+            background:#f0f7f4;
+            text-align:center;
+            font-weight:700;
+            cursor:pointer;
+        }
+        .forced-choice-box:hover { background:#dcedc8; }
+        .forced-choice-box.disabled {
+            background:#eeeeee;
+            border-color:#d5d5d5;
+            color:#9e9e9e;
+            cursor:not-allowed;
+        }
+        .forced-choice-box.disabled:hover { background:#eeeeee; }
+        .choice-note { display:block; margin-top:4px; font-size:13px; font-weight:400; }
+        .btn-action,.insert-button {
+            border:0;
+            border-radius:8px;
+            background:var(--primary);
+            color:white;
+            padding:11px 14px;
+            font:inherit;
+            font-weight:700;
+            cursor:pointer;
+        }
+        .btn-action { width:100%; margin-top:8px; }
+        .secondary-button {
+            width:100%;
+            margin-top:10px;
+            padding:10px 14px;
+            border:1px solid var(--border);
+            border-radius:8px;
+            background:white;
+            cursor:pointer;
+            font:inherit;
+        }
+        .checkbox-row {
+            display:flex;
+            align-items:flex-start;
+            gap:10px;
+            margin:12px 0;
+            padding:12px;
+            border:1px solid #e4e7eb;
+            border-radius:8px;
+            background:#fafafa;
+        }
+        .checkbox-row input { margin-top:3px; }
+        .file-upload-section { margin-top:20px; padding-top:16px; border-top:1px dashed #c7ccd1; }
+        .compare-box { display:flex; gap:12px; margin-top:18px; }
+        .compare-card {
+            flex:1;
+            padding:22px 14px;
+            border:2px solid #a5d6a7;
+            border-radius:var(--radius);
+            background:#e8f5e9;
+            text-align:center;
+            font-size:18px;
+            font-weight:700;
+            cursor:pointer;
+        }
         .compare-card:hover { background:#c8e6c9; }
-        ol { padding-left:24px; }
-        li { margin-bottom:8px; }
+        .callout {
+            margin-top:18px;
+            padding:18px;
+            border:2px solid #ffcc80;
+            border-radius:var(--radius);
+            background:#fff8e1;
+        }
+        .task-card {
+            padding:16px;
+            border:2px solid #a5d6a7;
+            border-radius:var(--radius);
+            background:#f1f8e9;
+            font-weight:700;
+        }
+        .reorder-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(180px,.65fr); gap:18px; align-items:start; }
+        .ordered-task { padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:white; }
+        .insert-slot { display:flex; align-items:center; gap:8px; margin:7px 0; }
+        .insert-slot::before,.insert-slot::after { content:""; height:1px; background:#cfd5da; flex:1; }
+        .insert-button { padding:6px 9px; font-size:12px; white-space:nowrap; }
+        .summary-list { list-style:none; padding:0; }
+        .summary-list li { margin:7px 0; }
+        .summary-children { margin:6px 0 10px 22px; padding-left:16px; border-left:2px solid #d7e7d8; }
+        @media (max-width:600px) {
+            .compare-box { flex-direction:column; }
+            .reorder-layout { grid-template-columns:1fr; }
+        }
     </style>
 </head>
 <body>
 <div class="app-container">
     <header><h1>Project Planner</h1></header>
 
-    <div id="taskInputContainer">
-        <h2>Project Planner: Start a Plan</h2>
-        <p style="color:#666;font-size:14px;">Enter the tasks or steps you want to plan, one per line:</p>
-        <textarea id="tasksTextarea" rows="6" placeholder="e.g.,&#10;Research options&#10;Draft outline&#10;Review with team"></textarea>
-
-        <label class="checkbox-label">
-            <input type="checkbox" id="skipSortCheckbox">
-            Keep this order (skip comparison sorting)
-        </label>
-
-        <button id="btnSubmitText" class="btn-action">Build Project Plan</button>
-
-        <div class="file-upload-section">
-            <p style="font-size:14px;color:#666;margin-bottom:8px;">Or load an existing project-plan CSV:</p>
-            <input type="file" id="csvFileInput" accept=".csv">
-        </div>
-    </div>
-
     <div id="taskCompare" class="hidden">
-        <h2>Project Planner: Which Comes First?</h2>
+        <h2>Which comes first?</h2>
+        <p id="sortContext" class="muted"></p>
         <div class="compare-box">
             <div id="task1" class="compare-card">Task A</div>
             <div id="task2" class="compare-card">Task B</div>
