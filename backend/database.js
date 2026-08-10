@@ -65,23 +65,13 @@ function addColumnIfMissing(tableName, columnName, definition) {
 }
 
 // Additive task-node migration. Existing Task Sorter rows remain root task nodes.
-// project_id is retained for compatibility with older deployments, but parent_id
-// is the canonical hierarchy relationship going forward.
+// project_id is retained unchanged for compatibility with older deployments;
+// parent_id is the canonical hierarchy relationship for new project data.
 addColumnIfMissing('tasks', 'user_id', 'TEXT');
 addColumnIfMissing('tasks', 'parent_id', 'TEXT REFERENCES tasks(id) ON DELETE SET NULL');
 addColumnIfMissing('tasks', 'project_id', 'TEXT');
 addColumnIfMissing('tasks', 'node_type', "TEXT NOT NULL DEFAULT 'task' CHECK(node_type IN ('task', 'project'))");
 addColumnIfMissing('tasks', 'independently_actionable', 'INTEGER NOT NULL DEFAULT 1 CHECK(independently_actionable IN (0, 1))');
-
-// Existing project_id values represented an early project relationship. Preserve
-// them by copying to parent_id only where a parent has not already been assigned.
-db.exec(`
-    UPDATE tasks
-    SET parent_id = project_id
-    WHERE parent_id IS NULL
-      AND project_id IS NOT NULL
-      AND project_id != '';
-`);
 
 // Create indexes only after migrations have guaranteed the indexed columns exist.
 db.exec(`
@@ -157,7 +147,7 @@ function normalizeTask(sessionId, task, position) {
     const status = task.completed === true || completedTime
         ? 'completed'
         : (task.status || 'pending');
-    const parentId = task.parentId ?? task.parent_id ?? task.projectId ?? task.project_id ?? null;
+    const parentId = task.parentId ?? task.parent_id ?? null;
     const nodeType = task.nodeType ?? task.node_type ?? (task.isProject ? 'project' : 'task');
     const independentlyActionable = task.independentlyActionable
         ?? task.independently_actionable
@@ -169,7 +159,7 @@ function normalizeTask(sessionId, task, position) {
         session_id: sessionId,
         user_id: task.userId ?? task.user_id ?? null,
         parent_id: parentId,
-        project_id: task.projectId ?? task.project_id ?? parentId,
+        project_id: task.projectId ?? task.project_id ?? null,
         node_type: nodeType === 'project' ? 'project' : 'task',
         independently_actionable: independentlyActionable ? 1 : 0,
         name: String(task.name || '').trim(),
