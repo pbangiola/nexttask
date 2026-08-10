@@ -7,7 +7,7 @@ const userRoutes = require('./user-routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BACKEND_VERSION = 'canonical-task-list-v3';
+const BACKEND_VERSION = 'task-node-tree-v1';
 
 const defaultAllowedOrigins = [
     'https://pbangiola.github.io',
@@ -31,7 +31,7 @@ app.use(cors({
         if (allowedOrigins.has(normalizedOrigin)) return callback(null, true);
         return callback(new Error(`CORS blocked request from ${origin}`));
     },
-    methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type']
 }));
 
@@ -52,7 +52,9 @@ app.get('/api/health', (req, res) => {
                 'sessions',
                 'full-task-list-sync',
                 'incomplete-task-resume',
-                'unfinished-task-prepend'
+                'unfinished-task-prepend',
+                'hierarchical-task-nodes',
+                'project-tree-crud'
             ],
             timestamp: Date.now()
         });
@@ -63,11 +65,8 @@ app.get('/api/health', (req, res) => {
 });
 
 app.get('/api/session/:id', (req, res) => {
-    try {
-        res.json(db.getSession(req.params.id));
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to retrieve session', detail: error.message });
-    }
+    try { res.json(db.getSession(req.params.id)); }
+    catch (error) { res.status(500).json({ error: 'Failed to retrieve session', detail: error.message }); }
 });
 
 app.get('/api/session/:id/tasks', (req, res) => {
@@ -82,37 +81,20 @@ app.get('/api/session/:id/tasks', (req, res) => {
 app.put('/api/session/:id/tasks', (req, res) => {
     try {
         const tasks = req.body.tasks;
-        if (!Array.isArray(tasks)) {
-            return res.status(400).json({ error: 'tasks must be an array' });
-        }
-
+        if (!Array.isArray(tasks)) return res.status(400).json({ error: 'tasks must be an array' });
         if (req.body.userId) userStore.ensureUser(req.body.userId);
-
         const savedTasks = db.saveTaskList(req.params.id, tasks, {
             totalAvailableTimeMs: req.body.totalAvailableTimeMs,
             endConstraint: req.body.endConstraint
         });
-
         if (req.body.userId) {
-            const unfinishedTaskIds = tasks
-                .filter(task => {
-                    const status = String(task.status || '').toLowerCase();
-                    return task.id
-                        && task.completed !== true
-                        && !task.completedTime
-                        && status !== 'completed'
-                        && status !== 'cancelled';
-                })
-                .map(task => task.id);
-
+            const unfinishedTaskIds = tasks.filter(task => {
+                const status = String(task.status || '').toLowerCase();
+                return task.id && task.completed !== true && !task.completedTime && status !== 'completed' && status !== 'cancelled';
+            }).map(task => task.id);
             userStore.prependOpenTasks(req.body.userId, unfinishedTaskIds);
         }
-
-        return res.json({
-            success: true,
-            count: savedTasks.length,
-            timestamp: Date.now()
-        });
+        return res.json({ success: true, count: savedTasks.length, timestamp: Date.now() });
     } catch (error) {
         console.error('Failed to save task list:', error);
         return res.status(500).json({ error: 'Failed to save task list', detail: error.message });
@@ -120,17 +102,12 @@ app.put('/api/session/:id/tasks', (req, res) => {
 });
 
 app.get('/api/session/:id/stats', (req, res) => {
-    try {
-        res.json({ summary: db.getStats(req.params.id) });
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch statistics', detail: error.message });
-    }
+    try { res.json({ summary: db.getStats(req.params.id) }); }
+    catch (error) { res.status(500).json({ error: 'Failed to fetch statistics', detail: error.message }); }
 });
 
 app.use((error, req, res, next) => {
-    if (error.message?.startsWith('CORS blocked')) {
-        return res.status(403).json({ error: error.message });
-    }
+    if (error.message?.startsWith('CORS blocked')) return res.status(403).json({ error: error.message });
     console.error(error);
     return res.status(500).json({ error: 'Unexpected server error' });
 });
