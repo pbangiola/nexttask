@@ -1,11 +1,11 @@
 {
-  "name": "task-sorter-backend",
+  "name": "task-sorter",
   "version": "1.0.0",
-  "description": "Backend service for Task Sorter application with persistent SQLite session storage.",
-  "main": "server.js",
+  "description": "Task Sorter application with a static frontend and persistent Node/SQLite backend.",
+  "main": "backend/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node backend/server.js",
+    "dev": "node --watch backend/server.js"
   },
   "keywords": [],
   "author": "",
