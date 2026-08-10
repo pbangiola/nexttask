@@ -6,7 +6,7 @@ const dbPath = path.join(dataDir, 'task_sorter.db');
 const db = new Database(dbPath);
 db.pragma('foreign_keys = ON');
 
-const TASK_SCHEMA_VERSION = 1;
+const TASK_SCHEMA_VERSION = 2;
 
 db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -24,7 +24,13 @@ db.exec(`
     CREATE TABLE IF NOT EXISTS tasks (
         id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,
+        user_id TEXT,
+        parent_id TEXT,
         project_id TEXT,
+        node_type TEXT NOT NULL DEFAULT 'task'
+            CHECK(node_type IN ('task', 'project')),
+        independently_actionable INTEGER NOT NULL DEFAULT 1
+            CHECK(independently_actionable IN (0, 1)),
         name TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending'
             CHECK(status IN ('pending', 'active', 'blocked', 'completed', 'cancelled')),
@@ -38,6 +44,7 @@ db.exec(`
         last_changed INTEGER,
         updated_at INTEGER NOT NULL,
         FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY(parent_id) REFERENCES tasks(id) ON DELETE SET NULL,
         FOREIGN KEY(blocked_by_task_id) REFERENCES tasks(id) ON DELETE SET NULL
     );
 `);
@@ -46,61 +53,49 @@ for (const table of ['completed_tasks', 'task_queue']) {
     db.exec(`DROP TABLE IF EXISTS ${table};`);
 }
 
-function ensureExpectedSchema(tableName, expectedColumns, createSql) {
-    const columns = db.prepare(`PRAGMA table_info(${tableName})`).all().map(column => column.name);
-    const matches = expectedColumns.every(column => columns.includes(column));
-    if (!matches) {
-        db.exec('PRAGMA foreign_keys = OFF;');
-        db.exec(`DROP TABLE IF EXISTS ${tableName};`);
-        db.exec(createSql);
-        db.exec('PRAGMA foreign_keys = ON;');
+function getColumns(tableName) {
+    return db.prepare(`PRAGMA table_info(${tableName})`).all().map(column => column.name);
+}
+
+function addColumnIfMissing(tableName, columnName, definition) {
+    const columns = getColumns(tableName);
+    if (!columns.includes(columnName)) {
+        db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition};`);
     }
 }
 
-ensureExpectedSchema(
-    'sessions',
-    ['id', 'updated_at', 'total_available_time_ms', 'end_constraint'],
-    `CREATE TABLE sessions (
-        id TEXT PRIMARY KEY,
-        updated_at INTEGER NOT NULL,
-        total_available_time_ms INTEGER NOT NULL DEFAULT 0,
-        end_constraint TEXT NOT NULL DEFAULT ''
-    );`
-);
+// Additive task-node migration. Existing Task Sorter rows remain root task nodes.
+// project_id is retained for compatibility with older deployments, but parent_id
+// is the canonical hierarchy relationship going forward.
+addColumnIfMissing('tasks', 'user_id', 'TEXT');
+addColumnIfMissing('tasks', 'parent_id', 'TEXT REFERENCES tasks(id) ON DELETE SET NULL');
+addColumnIfMissing('tasks', 'project_id', 'TEXT');
+addColumnIfMissing('tasks', 'node_type', "TEXT NOT NULL DEFAULT 'task' CHECK(node_type IN ('task', 'project'))");
+addColumnIfMissing('tasks', 'independently_actionable', 'INTEGER NOT NULL DEFAULT 1 CHECK(independently_actionable IN (0, 1))');
 
-ensureExpectedSchema(
-    'tasks',
-    ['id', 'session_id', 'project_id', 'name', 'status', 'estimated_ms', 'elapsed_ms',
-     'position', 'blocked_by_task_id', 'created', 'started', 'completed', 'last_changed', 'updated_at'],
-    `CREATE TABLE tasks (
-        id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        project_id TEXT,
-        name TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending'
-            CHECK(status IN ('pending', 'active', 'blocked', 'completed', 'cancelled')),
-        estimated_ms INTEGER NOT NULL DEFAULT 0,
-        elapsed_ms INTEGER NOT NULL DEFAULT 0,
-        position INTEGER NOT NULL DEFAULT 0,
-        blocked_by_task_id TEXT,
-        created INTEGER NOT NULL,
-        started INTEGER,
-        completed INTEGER,
-        last_changed INTEGER,
-        updated_at INTEGER NOT NULL,
-        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
-        FOREIGN KEY(blocked_by_task_id) REFERENCES tasks(id) ON DELETE SET NULL
-    );`
-);
+// Existing project_id values represented an early project relationship. Preserve
+// them by copying to parent_id only where a parent has not already been assigned.
+db.exec(`
+    UPDATE tasks
+    SET parent_id = project_id
+    WHERE parent_id IS NULL
+      AND project_id IS NOT NULL
+      AND project_id != '';
+`);
 
-// Create indexes only after old schemas have been rebuilt. Creating them earlier
-// crashes startup when an existing tasks table still uses sort_order instead of position.
+// Create indexes only after migrations have guaranteed the indexed columns exist.
 db.exec(`
     CREATE INDEX IF NOT EXISTS idx_tasks_session_position
         ON tasks(session_id, position);
 
     CREATE INDEX IF NOT EXISTS idx_tasks_session_status
         ON tasks(session_id, status);
+
+    CREATE INDEX IF NOT EXISTS idx_tasks_parent_position
+        ON tasks(parent_id, position);
+
+    CREATE INDEX IF NOT EXISTS idx_tasks_user_parent_position
+        ON tasks(user_id, parent_id, position);
 `);
 
 db.prepare(`
@@ -128,15 +123,21 @@ const getTaskStmt = db.prepare(`SELECT * FROM tasks WHERE session_id = ? AND id 
 
 const upsertTaskStmt = db.prepare(`
     INSERT INTO tasks (
-        id, session_id, project_id, name, status, estimated_ms, elapsed_ms, position,
-        blocked_by_task_id, created, started, completed, last_changed, updated_at
+        id, session_id, user_id, parent_id, project_id, node_type, independently_actionable,
+        name, status, estimated_ms, elapsed_ms, position, blocked_by_task_id,
+        created, started, completed, last_changed, updated_at
     ) VALUES (
-        @id, @session_id, @project_id, @name, @status, @estimated_ms, @elapsed_ms, @position,
-        @blocked_by_task_id, @created, @started, @completed, @last_changed, @updated_at
+        @id, @session_id, @user_id, @parent_id, @project_id, @node_type, @independently_actionable,
+        @name, @status, @estimated_ms, @elapsed_ms, @position, @blocked_by_task_id,
+        @created, @started, @completed, @last_changed, @updated_at
     )
     ON CONFLICT(id) DO UPDATE SET
         session_id = excluded.session_id,
+        user_id = COALESCE(excluded.user_id, tasks.user_id),
+        parent_id = excluded.parent_id,
         project_id = excluded.project_id,
+        node_type = excluded.node_type,
+        independently_actionable = excluded.independently_actionable,
         name = excluded.name,
         status = excluded.status,
         estimated_ms = excluded.estimated_ms,
@@ -156,21 +157,31 @@ function normalizeTask(sessionId, task, position) {
     const status = task.completed === true || completedTime
         ? 'completed'
         : (task.status || 'pending');
+    const parentId = task.parentId ?? task.parent_id ?? task.projectId ?? task.project_id ?? null;
+    const nodeType = task.nodeType ?? task.node_type ?? (task.isProject ? 'project' : 'task');
+    const independentlyActionable = task.independentlyActionable
+        ?? task.independently_actionable
+        ?? task.severable
+        ?? true;
 
     return {
         id: String(task.id),
         session_id: sessionId,
-        project_id: task.projectId ?? null,
+        user_id: task.userId ?? task.user_id ?? null,
+        parent_id: parentId,
+        project_id: task.projectId ?? task.project_id ?? parentId,
+        node_type: nodeType === 'project' ? 'project' : 'task',
+        independently_actionable: independentlyActionable ? 1 : 0,
         name: String(task.name || '').trim(),
         status,
         estimated_ms: Math.max(0, Number(task.estimatedTimeMs ?? task.estimatedMs ?? 0)),
         elapsed_ms: Math.max(0, Number(task.actualTimeMs ?? task.elapsedMs ?? 0)),
-        position: Number(position),
-        blocked_by_task_id: task.blockedByTaskId ?? null,
+        position: Number(task.position ?? position),
+        blocked_by_task_id: task.blockedByTaskId ?? task.blocked_by_task_id ?? null,
         created: Number(task.created ?? task.createdAt ?? now),
         started: task.started ?? task.startedAt ?? null,
         completed: completedTime || null,
-        last_changed: task.lastChanged ?? null,
+        last_changed: task.lastChanged ?? task.last_changed ?? null,
         updated_at: now
     };
 }
