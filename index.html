@@ -14,6 +14,25 @@
         #stopWorkingBtn, #startOverBtn { position: absolute; top: 0; right: 0; border-radius: 4px; }
         #stopWorkingBtn { background-color: #ffcdd2; border: 1px solid #e53935; color: #b71c1c; font-weight: bold; }
         #startOverBtn { background-color: #eceff1; border: 1px solid #90a4ae; color: #37474f; }
+
+        /* Project Planner */
+        .planner-choice-grid { display: flex; flex-direction: column; gap: 10px; margin: 18px 0; }
+        .planner-choice-grid > button, .planner-list > button {
+            display: block; width: 100%; max-width: 520px; padding: 14px; text-align: left;
+            border: 1px solid #b7d7bb; border-radius: 6px; background: #f1f8f2; font-weight: bold;
+        }
+        .planner-choice-grid > button span { display: block; margin-top: 4px; color: #666; font-size: 12px; font-weight: normal; }
+        .planner-secondary { background: #eceff1; border: 1px solid #b0bec5; }
+        .planner-check { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .planner-check input { width: auto; margin: 2px 0 0; }
+        .planner-list { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+        .planner-project-row { padding: 12px 0; border-bottom: 1px solid #ddd; }
+        .planner-project-link { padding: 0; margin: 0 0 4px; border: 0; background: none; color: #1565c0; text-decoration: underline; font-size: 16px; font-weight: bold; }
+        .planner-project-row span { display: block; color: #666; font-size: 13px; }
+        .planner-callout { padding: 14px; background: #fff8e1; border: 1px solid #ffcc80; border-radius: 6px; }
+        .planner-insert { display: block; margin: 7px 0; padding: 5px 8px; font-size: 12px; }
+        .planner-order-row { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .planner-moving { margin-top: 12px; padding: 10px; background: #f1f8e9; border-radius: 4px; }
     </style>
 </head>
 <body>
@@ -22,7 +41,7 @@
     <h1>Task Sorter</h1>
     <div id="modeSelect">
         <button id="workBtn">Work</button>
-        <button id="planBtn" disabled>Plan <i>(Coming Soon)</i></button>
+        <button id="planBtn">Plan</button>
     </div>
     <div id="workChoiceStep" class="hidden">
         <h2>What do you want to do?</h2>
@@ -58,10 +77,11 @@
     </div>
     <div id="dynamicContainer"></div>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.3/papaparse.min.js" onerror="console.warn('CSV helper unavailable; using built-in parser.')"></script>
-    <script src="frontend/initialization.js?v=20260806-2"></script>
-    <script src="frontend/persistence.js?v=20260806-2"></script>
-    <script src="frontend/ui.js?v=20260806-2"></script>
-    <script src="frontend/core.js?v=20260806-2"></script>
-    <script src="frontend/timing.js?v=20260806-2"></script>
+    <script src="frontend/initialization.js?v=20260810-plan"></script>
+    <script src="frontend/persistence.js?v=20260810-plan"></script>
+    <script src="frontend/ui.js?v=20260810-plan"></script>
+    <script src="frontend/core.js?v=20260810-plan"></script>
+    <script src="frontend/timing.js?v=20260810-plan"></script>
+    <script src="frontend/planner.js?v=20260810-plan"></script>
 </body>
 </html>
