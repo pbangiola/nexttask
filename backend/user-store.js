@@ -49,6 +49,11 @@ const ensureUserStmt = db.prepare(`
     VALUES (?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at;
 `);
+const ensureSessionStmt = db.prepare(`
+    INSERT INTO sessions (id, updated_at, total_available_time_ms, end_constraint)
+    VALUES (?, ?, 0, '')
+    ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at;
+`);
 const claimUnownedTasksStmt = db.prepare(`UPDATE tasks SET user_id = ? WHERE user_id IS NULL;`);
 const attachTaskStmt = db.prepare(`UPDATE tasks SET user_id = ?, updated_at = ? WHERE id = ?;`);
 const getOpenTasksStmt = db.prepare(`
@@ -118,6 +123,12 @@ const cancelNodeStmt = db.prepare(`
 
 function normalizeNodeType(value) { return value === 'project' ? 'project' : 'task'; }
 function normalizeActionable(value) { return value === false || value === 0 ? 0 : 1; }
+function ensureSession(sessionId) {
+    const normalized = String(sessionId || '').trim();
+    if (!normalized) throw new Error('session id is required');
+    ensureSessionStmt.run(normalized, Date.now());
+    return normalized;
+}
 function requireNode(userId, nodeId) {
     const node = getNodeStmt.get(String(userId), String(nodeId));
     if (!node) throw new Error(`Task node not found: ${nodeId}`);
@@ -183,7 +194,8 @@ module.exports = {
     getOpenTasks(userId) { this.ensureUser(userId); return getOpenTasksStmt.all(String(userId)); },
     importOpenTasksIntoSession(userId, sessionId) {
         this.ensureUser(userId); this.claimUnownedTasks(userId);
-        moveOpenTasksToSessionStmt.run(String(sessionId), Date.now(), String(userId));
+        const normalizedSessionId = ensureSession(sessionId);
+        moveOpenTasksToSessionStmt.run(normalizedSessionId, Date.now(), String(userId));
         return getOpenTasksStmt.all(String(userId));
     },
     getRootNodes(userId) { this.ensureUser(userId); return getRootNodesStmt.all(String(userId)); },
@@ -199,8 +211,9 @@ module.exports = {
         const parentId = assertValidParent(userId, id, input.parentId ?? input.parent_id ?? null);
         const now = Date.now();
         const position = Number(input.position) > 0 ? Number(input.position) : nextSiblingPosition(userId, parentId);
+        const nodeSessionId = ensureSession(input.sessionId || input.session_id || `planner:${userId}`);
         insertNodeStmt.run({
-            id, session_id: String(input.sessionId || input.session_id || `planner:${userId}`), user_id: String(userId),
+            id, session_id: nodeSessionId, user_id: String(userId),
             parent_id: parentId, project_id: parentId, node_type: normalizeNodeType(input.nodeType ?? input.node_type),
             independently_actionable: normalizeActionable(input.independentlyActionable ?? input.independently_actionable),
             name, status: 'pending', estimated_ms: Math.max(0, Number(input.estimatedTimeMs ?? input.estimated_ms ?? 0)),
