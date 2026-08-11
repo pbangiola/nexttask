@@ -7,7 +7,7 @@ const userRoutes = require('./user-routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BACKEND_VERSION = 'task-actionability-v1';
+const BACKEND_VERSION = 'sequence-actionability-v1';
 
 const defaultAllowedOrigins = [
     'https://pbangiola.github.io',
@@ -55,9 +55,8 @@ app.get('/api/health', (req, res) => {
                 'unfinished-task-prepend',
                 'hierarchical-task-nodes',
                 'project-tree-crud',
-                'task-dependencies',
                 'independently-actionable-tasks',
-                'priority-aware-actionability'
+                'sequence-based-actionability'
             ],
             timestamp: Date.now()
         });
