@@ -191,54 +191,54 @@ window.ProjectPlanner = (() => {
             c.innerHTML=`<h2>${esc(parent.name)}</h2><p>What are all the parts of this project you can think of?</p><textarea id="partsText" rows="10"></textarea><label class="planner-check"><input id="partsSkipSort" type="checkbox"><span>Keep this order (skip comparison sorting)</span></label><button id="partsContinue">Continue</button><div class="upload-container"><input id="partsUpload" type="file" accept=".txt,.csv,text/plain,text/csv"></div><button id="partsBack">Back</button>`;
             el('partsText').value=children.map(child=>child.name).join('\n');
             el('partsUpload').onchange=e=>{const file=e.target.files?.[0];if(!file)return;const r=new FileReader();r.onload=x=>{el('partsText').value=parseTaskEntryText(String(x.target.result||'')).join('\n');};r.readAsText(file);};
-            el('partsContinue').onclick=async()=>{try{const names=resolveDuplicateTaskNames(parseTaskEntryText(el('partsText').value));if(!names.length)return alert('Please add at least one part.');const byName=new Map(children.map(ch=>[ch.name,ch]));let nodes=[];for(const name of names)nodes.push(byName.get(name)||await createNode({name,nodeType:'task',parentId,sessionId}));if(!el('partsSkipSort').checked&&nodes.length>1)nodes=await plannerSort(nodes);for(let i=0;i<nodes.length;i++)await updateNode(nodes[i].id,{position:i+1});const refreshed=(await getNode(parentId)).children;const first=refreshed.find(ch=>Number(ch.estimated_ms||0)<=0)||refreshed[0];if(first)showEstimate(first.id);else showSummary(currentProjectId);}catch(error){fail(error,()=>showPartsEntry(parentId));}};
-            el('partsBack').onclick=()=>showSummary(currentProjectId);saveUi();
-        } catch(error){fail(error,()=>showSummary(currentProjectId));}
+            el('partsContinue').onclick=async()=>{try{const names=resolveDuplicateTaskNames(parseTaskEntryText(el('partsText').value));if(!names.length)return alert('Please add at least one part.');const byName=new Map(children.map(child=>[child.name,child]));const nodes=[];for(const name of names){let node=byName.get(name);if(!node)node=await createNode({name,nodeType:'task',parentId,sessionId});nodes.push(node);}if(el('partsSkipSort').checked){for(let i=0;i<nodes.length;i++)await updateNode(nodes[i].id,{position:i+1});showEstimate(nodes[0].id);return;}await sortPlannerNodes(nodes);showEstimate(nodes[0].id);}catch(error){fail(error,()=>showPartsEntry(parentId));}};
+            el('partsBack').onclick=()=>showSummary(currentProjectId); saveUi();
+        } catch(error){fail(error,showProjects);}
     }
 
-    function plannerSort(items) {
-        const sort=async list=>{if(list.length<=1)return list;const mid=Math.floor(list.length/2);return merge(await sort(list.slice(0,mid)),await sort(list.slice(mid)));};
-        const merge=(left,right)=>new Promise(resolve=>{const out=[];const next=()=>{if(!left.length||!right.length){hide(el('taskCompare'));resolve([...out,...left,...right]);return;}show(el('taskCompare'));el('task1').textContent=left[0].name;el('task2').textContent=right[0].name;el('task1').onclick=()=>{out.push(left.shift());next();};el('task2').onclick=()=>{out.push(right.shift());next();};};next();});
-        return sort(items);
+    async function sortPlannerNodes(nodes) {
+        // Clear the planner's parts-entry DOM before showing the shared forced-choice
+        // comparison screen; otherwise both screens remain visible together.
+        clearDynamic();
+        show(el('taskCompare'));
+        const runId=++sortRunId;
+        const sorted=await interactiveMergeSort(nodes,runId);
+        hide(el('taskCompare'));
+        for(let i=0;i<sorted.length;i++) await updateNode(sorted[i].id,{position:i+1});
+        clearDynamic();
     }
 
-    async function context(id){const {node}=await getNode(id);const parent=node.parent_id?(await getNode(node.parent_id)):null;return {node,parent:parent?.node||null,siblings:parent?.children||[]};}
-
-    async function showEstimate(id) {
+    async function showEstimate(nodeId) {
         try {
-            activeNodeId=id;pendingHasParts=false;view='estimate-task';const {node,parent,siblings}=await context(id);const index=siblings.findIndex(n=>n.id===id);const c=clearShell();
-            c.innerHTML=`<h2>${esc(parent?.name||'Project')}</h2><p>Task ${index+1} of ${siblings.length}</p><h3>${esc(node.name)}</h3><label>How long do you think this will take?<input id="taskEstimate" type="number" min="1"></label><label class="planner-check"><input id="taskOutOfOrder" type="checkbox"><span>This task is out of order</span></label><label class="planner-check"><input id="taskHasParts" type="checkbox"><span>This task has parts</span></label><button id="estimateContinue">Continue</button><button id="estimateBack">Back</button>`;
-            if(node.estimated_ms)el('taskEstimate').value=Math.round(node.estimated_ms/60000);
-            el('estimateContinue').onclick=async()=>{try{const minutes=parseInt(el('taskEstimate').value,10);if(!Number.isFinite(minutes)||minutes<1)return alert('Please enter your best estimate in minutes.');const outOfOrder=el('taskOutOfOrder').checked;const hasParts=el('taskHasParts').checked;await updateNode(id,{estimatedTimeMs:minutes*60000});pendingHasParts=hasParts;if(outOfOrder)return showReorder(id,hasParts);if(hasParts)return decompose(id);if(minutes>PROJECT_THRESHOLD_MINUTES)return showSubprojectCallout(id);advance(parent.id,id);}catch(error){fail(error,()=>showEstimate(id));}};
-            el('estimateBack').onclick=()=>showPartsEntry(parent.id);saveUi();
+            const {node}=await getNode(nodeId); activeNodeId=nodeId; view='estimate-task'; const c=clearShell();
+            c.innerHTML=`<h2>${esc(node.name)}</h2><label>How long do you think this will take?<input id="nodeEstimate" type="number" min="1" placeholder="Minutes"></label><label class="planner-check"><input id="nodeOutOfOrder" type="checkbox"><span>This task is out of order</span></label><label class="planner-check"><input id="nodeHasParts" type="checkbox"><span>This task has parts</span></label><button id="estimateContinue">Continue</button><button id="estimateBack">Back</button>`;
+            if(node.estimated_ms)el('nodeEstimate').value=Math.round(node.estimated_ms/60000);
+            el('estimateContinue').onclick=async()=>{try{const minutes=parseInt(el('nodeEstimate').value,10);if(!Number.isFinite(minutes)||minutes<1)return alert('Enter an estimate in minutes.');const hasParts=el('nodeHasParts').checked;const outOfOrder=el('nodeOutOfOrder').checked;await updateNode(nodeId,{estimatedTimeMs:minutes*60000});pendingHasParts=hasParts;if(outOfOrder)return showReorder(nodeId,hasParts);if(hasParts)return convertToSubproject(nodeId);if(minutes>PROJECT_THRESHOLD_MINUTES)return showSubprojectCallout(nodeId);advanceEstimate(node.parent_id,nodeId);}catch(error){fail(error,()=>showEstimate(nodeId));}};
+            el('estimateBack').onclick=()=>showPartsEntry(node.parent_id); saveUi();
         } catch(error){fail(error,()=>showPartsEntry(currentParentId));}
     }
 
-    async function showReorder(id, hasParts) {
-        try {
-            activeNodeId=id;pendingHasParts=hasParts;view='reorder-task';const {node,parent,siblings}=await context(id);const others=siblings.filter(n=>n.id!==id);const c=clearShell();
-            c.innerHTML=`<h2>Where should this task go?</h2><div id="reorderList"></div><div class="planner-moving"><strong>${esc(node.name)}</strong></div><button id="reorderBack">Back</button>`;
-            const list=el('reorderList');const slot=(pos,label)=>{const b=document.createElement('button');b.className='planner-insert';b.textContent=label;b.onclick=async()=>{await reparent(id,parent.id,pos);if(hasParts)return decompose(id);const refreshed=(await getNode(id)).node;if(Number(refreshed.estimated_ms)>PROJECT_THRESHOLD_MINUTES)return showSubprojectCallout(id);advance(parent.id,id);};list.appendChild(b);};slot(1,'Move to beginning');others.forEach((item,i)=>{const row=document.createElement('div');row.className='planner-order-row';row.textContent=`${i+1}. ${item.name}`;list.appendChild(row);slot(i+2,`Move after ${item.name}`);});
-            el('reorderBack').onclick=()=>showEstimate(id);saveUi();
-        } catch(error){fail(error,()=>showEstimate(id));}
+    async function advanceEstimate(parentId,currentId) {
+        const {children}=await getNode(parentId);const idx=children.findIndex(child=>child.id===currentId);const next=children.slice(idx+1).find(child=>!child.estimated_ms);if(next)return showEstimate(next.id);if(parentId===currentProjectId)return showSummary(currentProjectId);const parent=(await getNode(parentId)).node;return advanceEstimate(parent.parent_id,parent.id);
     }
 
-    async function showSubprojectCallout(id) {
+    async function showReorder(nodeId,hasParts) {
         try {
-            activeNodeId=id;view='subproject-callout';const {node}=await getNode(id);const minutes=Math.round(Number(node.estimated_ms||0)/60000);const c=clearShell();
-            c.innerHTML=`<div class="planner-callout"><h2>This may be a project</h2><p><strong>${esc(node.name)}</strong></p><p>Estimated time: ${minutes} minutes</p><div class="planner-choice-grid"><button id="breakTask">Break Into Parts</button><button id="keepTask">Keep As One Task</button></div></div>`;
-            el('breakTask').onclick=()=>decompose(id);el('keepTask').onclick=async()=>{const fresh=(await getNode(id)).node;advance(fresh.parent_id,id);};saveUi();
-        } catch(error){fail(error,()=>showEstimate(id));}
+            const {node}=await getNode(nodeId);const {children}=await getNode(node.parent_id);view='reorder-task';const c=clearShell();c.innerHTML=`<h2>Where should this task go?</h2><div id="orderList"></div><div class="planner-moving">${esc(node.name)}</div><button id="orderBack">Back</button>`;const list=el('orderList');const others=children.filter(ch=>ch.id!==nodeId);for(let i=0;i<=others.length;i++){const b=document.createElement('button');b.textContent=i===others.length?'Move to end':`Move before ${others[i].name}`;b.onclick=async()=>{for(let j=0;j<others.length;j++)await updateNode(others[j].id,{position:j+(j>=i?2:1)});await updateNode(nodeId,{position:i+1});if(hasParts)return convertToSubproject(nodeId);const mins=Math.round(Number(node.estimated_ms||0)/60000);if(mins>PROJECT_THRESHOLD_MINUTES)return showSubprojectCallout(nodeId);advanceEstimate(node.parent_id,nodeId);};list.appendChild(b);}el('orderBack').onclick=()=>showEstimate(nodeId);saveUi();
+        } catch(error){fail(error,()=>showEstimate(nodeId));}
     }
 
-    async function decompose(id){try{await updateNode(id,{nodeType:'project',independentlyActionable:false});currentParentId=id;showPartsEntry(id);}catch(error){fail(error,()=>showEstimate(id));}}
-    async function advance(parentId,completedId){const siblings=(await getNode(parentId)).children;const i=siblings.findIndex(n=>n.id===completedId);if(siblings[i+1])return showEstimate(siblings[i+1].id);if(parentId!==currentProjectId){const parent=(await getNode(parentId)).node;if(parent.parent_id)return advance(parent.parent_id,parentId);}showSummary(currentProjectId);}
+    async function showSubprojectCallout(nodeId) {
+        try {
+            const {node}=await getNode(nodeId);view='subproject-callout';const c=clearShell();c.innerHTML=`<div class="planner-callout"><h2>This may be a project</h2><p>${esc(node.name)}</p><p>Estimated time: ${Math.round(node.estimated_ms/60000)} minutes</p><div class="planner-choice-grid"><button id="breakParts">Break Into Parts</button><button id="keepTask">Keep As One Task</button></div></div>`;el('breakParts').onclick=()=>convertToSubproject(nodeId);el('keepTask').onclick=()=>advanceEstimate(node.parent_id,nodeId);saveUi();
+        } catch(error){fail(error,()=>showEstimate(nodeId));}
+    }
+
+    async function convertToSubproject(nodeId) { try { const node=await updateNode(nodeId,{nodeType:'project',independentlyActionable:false}); currentParentId=node.id; showPartsEntry(node.id); } catch(error){fail(error,()=>showEstimate(nodeId));} }
 
     async function showSummary(projectId) {
         try {
-            currentProjectId=projectId;currentParentId=projectId;view='summary';const full=findInTree(await tree(),projectId);if(!full)return showProjects();const stats=leafStats(full);const render=(nodes,depth=0)=>(nodes||[]).map((n,i)=>`${'&nbsp;'.repeat(depth*4)}${i+1}. ${esc(n.name)}${n.children?.length?`<br>${render(n.children,depth+1)}`:` — ${Math.round(Number(n.estimated_ms||0)/60000)} min`}`).join('<br>');const c=clearShell();
-            c.innerHTML=`<h2>${esc(full.name)}</h2><p>Initial estimate: ${Math.round(Number(full.estimated_ms||0)/60000)} minutes</p><p>Planned estimate: ${Math.round(stats.ms/60000)} minutes</p><div>${render(full.children||[])}</div><div class="planner-choice-grid"><button id="editProject">Edit Project</button><button id="summaryDone">Done</button></div>`;
-            el('editProject').onclick=()=>showPartsEntry(projectId);el('summaryDone').onclick=()=>returnTarget==='backlog-list'?showBacklogList():showProjects();saveUi();
+            currentProjectId=projectId;view='summary';const full=findInTree(await tree(),projectId);if(!full)return showProjects();const s=leafStats(full);const c=clearShell();c.innerHTML=`<h2>${esc(full.name)}</h2><p>Initial estimate: ${Math.round(Number(full.estimated_ms||0)/60000)} minutes</p><p>Planned estimate: ${Math.round(s.ms/60000)} minutes</p><div id="summaryTree"></div><div class="planner-choice-grid"><button id="editProject">Edit Project</button><button id="summaryDone">Done</button></div>`;const render=(node,depth=0)=>{const div=document.createElement('div');div.style.marginLeft=`${depth*20}px`;div.textContent=`${node.name}${node.children?.length?'':` — ${Math.round(Number(node.estimated_ms||0)/60000)} min`}`;el('summaryTree').appendChild(div);(node.children||[]).forEach(ch=>render(ch,depth+1));};(full.children||[]).forEach(ch=>render(ch));el('editProject').onclick=()=>showPartsEntry(projectId);el('summaryDone').onclick=()=>returnTarget==='backlog-list'?showBacklogList():returnTarget==='projects-list'?showProjects():showPlannerHome();saveUi();
         } catch(error){fail(error,showProjects);}
     }
 
