@@ -35,49 +35,73 @@ function buildIndexes(rows) {
     return { children };
 }
 
-// Sequence is the source of truth. A project contributes only its first
-// independently-actionable unfinished leaf in sibling order.
-function findEligibleLeaf(node, indexes, path = []) {
-    if (!isActive(node)) return null;
-
+function collectEligibleLeaves(node, indexes, path = [], out = []) {
+    if (!isActive(node)) return out;
     const nextPath = [...path, { id: node.id, name: node.name, node_type: node.node_type }];
     const directChildren = indexes.children.get(String(node.id)) || [];
 
     if (node.node_type === 'project' || directChildren.length) {
-        for (const child of directChildren) {
-            const candidate = findEligibleLeaf(child, indexes, nextPath);
-            if (candidate) return candidate;
-        }
-        return null;
+        for (const child of directChildren) collectEligibleLeaves(child, indexes, nextPath, out);
+        return out;
     }
 
-    if (!Number(node.independently_actionable)) return null;
-    return { task: node, path: nextPath };
+    if (Number(node.independently_actionable)) out.push({ task: node, path: nextPath });
+    return out;
+}
+
+function orderedEligibleLeaves(rows) {
+    const indexes = buildIndexes(rows);
+    const roots = sortNodes(indexes.children.get(null) || []).filter(isActive);
+    const leaves = [];
+    for (const root of roots) {
+        const candidates = collectEligibleLeaves(root, indexes, [], []);
+        for (const candidate of candidates) leaves.push({
+            root: { id: root.id, name: root.name, node_type: root.node_type, position: root.position },
+            task: candidate.task,
+            path: candidate.path
+        });
+    }
+    return leaves;
 }
 
 module.exports = {
     getActionableCandidates(userId) {
-        const uid = String(userId);
-        const rows = getUserNodesStmt.all(uid);
-        const indexes = buildIndexes(rows);
-        const roots = sortNodes(indexes.children.get(null) || []).filter(isActive);
-        const candidates = [];
+        const leaves = orderedEligibleLeaves(getUserNodesStmt.all(String(userId)));
+        const seenRoots = new Set();
+        return leaves.filter(candidate => {
+            if (seenRoots.has(candidate.root.id)) return false;
+            seenRoots.add(candidate.root.id);
+            return true;
+        });
+    },
 
-        for (const root of roots) {
-            const candidate = findEligibleLeaf(root, indexes, []);
-            if (!candidate) continue;
-            candidates.push({
-                root: {
-                    id: root.id,
-                    name: root.name,
-                    node_type: root.node_type,
-                    position: root.position
-                },
-                task: candidate.task,
-                path: candidate.path
+    getTimeFitPlan(userId, availableMs) {
+        const limit = Math.max(0, Number(availableMs || 0));
+        if (!Number.isFinite(limit) || limit <= 0) throw new Error('availableMs must be greater than zero');
+
+        const leaves = orderedEligibleLeaves(getUserNodesStmt.all(String(userId)));
+        const remainingCandidates = [...leaves];
+        const selected = [];
+        let remainingMs = limit;
+
+        while (remainingMs > 0 && remainingCandidates.length) {
+            const index = remainingCandidates.findIndex(candidate => {
+                const estimate = Number(candidate.task.estimated_ms || 0);
+                return estimate > 0 && estimate <= remainingMs;
             });
+            if (index < 0) break;
+            const [candidate] = remainingCandidates.splice(index, 1);
+            const estimate = Number(candidate.task.estimated_ms || 0);
+            selected.push(candidate);
+            remainingMs -= estimate;
         }
 
-        return candidates;
+        return {
+            available_ms: limit,
+            planned_ms: limit - remainingMs,
+            remaining_ms: remainingMs,
+            tasks: selected,
+            skipped_unestimated: leaves.filter(candidate => Number(candidate.task.estimated_ms || 0) <= 0).map(candidate => candidate.task.id)
+        };
     }
 };
