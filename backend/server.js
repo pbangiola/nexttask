@@ -7,7 +7,7 @@ const userRoutes = require('./user-routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BACKEND_VERSION = 'sequence-actionability-v1';
+const BACKEND_VERSION = 'time-fit-work-v1';
 
 const defaultAllowedOrigins = [
     'https://pbangiola.github.io',
@@ -48,15 +48,10 @@ app.get('/api/health', (req, res) => {
             service: 'task-sorter-backend',
             version: BACKEND_VERSION,
             capabilities: [
-                'users',
-                'sessions',
-                'full-task-list-sync',
-                'incomplete-task-resume',
-                'unfinished-task-prepend',
-                'hierarchical-task-nodes',
-                'project-tree-crud',
-                'independently-actionable-tasks',
-                'sequence-based-actionability'
+                'users', 'sessions', 'full-task-list-sync', 'incomplete-task-resume',
+                'unfinished-task-prepend', 'hierarchical-task-nodes', 'project-tree-crud',
+                'independently-actionable-tasks', 'sequence-based-actionability',
+                'time-fit-work-plans', 'structural-blocker-flow'
             ],
             timestamp: Date.now()
         });
@@ -90,10 +85,12 @@ app.put('/api/session/:id/tasks', (req, res) => {
             endConstraint: req.body.endConstraint
         });
         if (req.body.userId) {
+            // Prepending remains intentional. For a planned child task, prepend its
+            // root project rather than detaching/reordering the child independently.
             const unfinishedTaskIds = tasks.filter(task => {
                 const status = String(task.status || '').toLowerCase();
                 return task.id && task.completed !== true && !task.completedTime && status !== 'completed' && status !== 'cancelled';
-            }).map(task => task.id);
+            }).map(task => task.priorityRootId || task.priority_root_id || task.id);
             userStore.prependOpenTasks(req.body.userId, unfinishedTaskIds);
         }
         return res.json({ success: true, count: savedTasks.length, timestamp: Date.now() });
