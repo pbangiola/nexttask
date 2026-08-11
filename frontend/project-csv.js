@@ -26,6 +26,10 @@ window.ProjectCSV = (() => {
         return body;
     }
 
+    async function roots() {
+        return (await api('/nodes')).nodes || [];
+    }
+
     async function tree() {
         return (await api('/nodes?tree=1')).nodes || [];
     }
@@ -119,6 +123,7 @@ window.ProjectCSV = (() => {
             if (!name) throw new Error(`Missing name on row ${index + 2}.`);
             if (!['task', 'project'].includes(nodeType)) throw new Error(`Invalid node_type on row ${index + 2}.`);
             if (!Number.isFinite(estimatedMs) || estimatedMs < 0) throw new Error(`Invalid estimated_ms on row ${index + 2}.`);
+            if (!Number.isFinite(position) || position < 0) throw new Error(`Invalid position on row ${index + 2}.`);
             return { sourceId, sourceParentId, nodeType, name, estimatedMs, position, independentlyActionable };
         });
 
@@ -129,9 +134,9 @@ window.ProjectCSV = (() => {
                 throw new Error(`Missing parent row for ${row.name}.`);
             }
         }
-        const roots = rows.filter(row => !row.sourceParentId);
-        if (!roots.length) throw new Error('The CSV has no root project.');
-        if (roots.some(row => row.nodeType !== 'project')) throw new Error('Every imported root must be a project.');
+        const rootRows = rows.filter(row => !row.sourceParentId);
+        if (!rootRows.length) throw new Error('The CSV has no root project.');
+        if (rootRows.some(row => row.nodeType !== 'project')) throw new Error('Every imported root must be a project.');
         return rows;
     }
 
@@ -169,47 +174,49 @@ window.ProjectCSV = (() => {
         return created;
     }
 
+    async function addExportButtons(projectList) {
+        if (projectList.dataset.csvExportsReady === 'true') return;
+        const projects = (await roots()).filter(node => node.node_type === 'project' && !['completed', 'cancelled'].includes(node.status));
+        const rows = Array.from(projectList.querySelectorAll('.planner-project-row'));
+        rows.forEach((row, index) => {
+            const project = projects[index];
+            if (!project || row.querySelector('.projectCsvExport')) return;
+            const button = document.createElement('button');
+            button.className = 'projectCsvExport';
+            button.textContent = 'Export CSV';
+            button.onclick = event => {
+                event.preventDefault();
+                event.stopPropagation();
+                exportProject(project.id).catch(error => alert(`Export failed: ${error.message}`));
+            };
+            row.appendChild(button);
+        });
+        projectList.dataset.csvExportsReady = 'true';
+    }
+
     function injectControls() {
         const projectList = document.getElementById('projectList');
-        if (projectList && !document.getElementById('projectCsvImport')) {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'upload-container';
-            wrapper.innerHTML = '<h3>Import Project CSV</h3><input id="projectCsvImport" type="file" accept=".csv,text/csv">';
-            projectList.insertAdjacentElement('afterend', wrapper);
-            const input = document.getElementById('projectCsvImport');
-            input.onchange = async event => {
-                const file = event.target.files?.[0];
-                if (!file) return;
-                try {
-                    const count = await importProjectCsv(file);
-                    alert(`Imported ${count} project node${count === 1 ? '' : 's'}.`);
-                    localStorage.setItem('nextTaskProjectPlannerUi', JSON.stringify({ view: 'projects-list' }));
-                    window.ProjectPlanner?.open?.();
-                } catch (error) {
-                    alert(`Import failed: ${error.message}`);
-                }
-            };
-        }
-
-        const editorBack = document.getElementById('projectEditorBack');
-        if (editorBack && !document.getElementById('projectCsvExport')) {
-            const button = document.createElement('button');
-            button.id = 'projectCsvExport';
-            button.textContent = 'Export Project CSV';
-            button.onclick = async () => {
-                try {
-                    const title = document.querySelector('#dynamicContainer h2')?.textContent || '';
-                    const all = await tree();
-                    const match = all.flatMap(function collect(node) {
-                        return [node, ...(node.children || []).flatMap(collect)];
-                    }).find(node => node.node_type === 'project' && node.name === title && !['completed', 'cancelled'].includes(node.status));
-                    if (!match) throw new Error('Could not identify the open project.');
-                    await exportProject(match.id);
-                } catch (error) {
-                    alert(`Export failed: ${error.message}`);
-                }
-            };
-            editorBack.parentNode.insertBefore(button, editorBack);
+        if (projectList) {
+            addExportButtons(projectList).catch(error => console.error('Could not add project export controls:', error));
+            if (!document.getElementById('projectCsvImport')) {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'upload-container';
+                wrapper.innerHTML = '<h3>Import Project CSV</h3><input id="projectCsvImport" type="file" accept=".csv,text/csv">';
+                projectList.insertAdjacentElement('afterend', wrapper);
+                const input = document.getElementById('projectCsvImport');
+                input.onchange = async event => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    try {
+                        const count = await importProjectCsv(file);
+                        alert(`Imported ${count} project node${count === 1 ? '' : 's'}.`);
+                        localStorage.setItem('nextTaskProjectPlannerUi', JSON.stringify({ view: 'projects-list' }));
+                        window.ProjectPlanner?.open?.();
+                    } catch (error) {
+                        alert(`Import failed: ${error.message}`);
+                    }
+                };
+            }
         }
     }
 
