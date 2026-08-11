@@ -23,8 +23,6 @@
         return task;
     }
 
-    // Preserve hierarchy metadata when normal Work persistence writes a planned leaf
-    // back to the canonical task-node table.
     window.serverPayload = function serverPayloadWithNodeMetadata() {
         const payload = originalServerPayload();
         payload.tasks.forEach((row, index) => {
@@ -38,14 +36,32 @@
         return payload;
     };
 
-    async function fetchWorkPlan() {
+    async function ensureUser() {
+        const response = await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}'
+        });
+        if (!response.ok) throw new Error(`User setup failed (${response.status})`);
+    }
+
+    async function fetchWorkPlan(rootId = null) {
+        const params = new URLSearchParams();
+        params.set('availableMs', String(totalAvailableTimeMs || 0));
+        if (rootId) params.set('rootId', rootId);
         const response = await fetch(
-            `${API_BASE_URL}/api/users/${encodeURIComponent(userId)}/work-plan?availableMs=${encodeURIComponent(totalAvailableTimeMs)}`
+            `${API_BASE_URL}/api/users/${encodeURIComponent(userId)}/work-plan?${params.toString()}`
         );
         let body = null;
         try { body = await response.json(); } catch (_) {}
         if (!response.ok) throw new Error(body?.error || `Work plan failed (${response.status})`);
         return body;
+    }
+
+    async function fetchRootProjects() {
+        const response = await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}/nodes`);
+        let body = null;
+        try { body = await response.json(); } catch (_) {}
+        if (!response.ok) throw new Error(body?.error || `Project list failed (${response.status})`);
+        return (body.nodes || []).filter(node => node.node_type === 'project' && !['completed', 'cancelled'].includes(node.status));
     }
 
     function changeAvailableTime() {
@@ -54,7 +70,7 @@
         showTimeConstraint();
     }
 
-    function showWorkPlan(plan) {
+    function showWorkPlan(plan, projectName = '') {
         hideStaticScreens();
         hide(el('stopWorkingBtn'));
         show(el('startOverBtn'));
@@ -63,12 +79,16 @@
         screen.id = 'workPlanScreen';
 
         const heading = document.createElement('h2');
-        heading.textContent = `Your ${Math.round(plan.available_ms / 60000)} minute plan`;
+        heading.textContent = projectName
+            ? (plan.available_ms ? `${projectName}: ${Math.round(plan.available_ms / 60000)} minute plan` : projectName)
+            : (plan.available_ms ? `Your ${Math.round(plan.available_ms / 60000)} minute plan` : 'Your work plan');
         screen.appendChild(heading);
 
         if (!plan.tasks?.length) {
             const note = document.createElement('p');
-            note.textContent = 'No estimated actionable task fits completely in the time available.';
+            note.textContent = plan.available_ms
+                ? 'No estimated actionable task fits completely in the time available.'
+                : 'No estimated actionable tasks were found.';
             screen.appendChild(note);
         } else {
             const list = document.createElement('ol');
@@ -80,7 +100,9 @@
             });
             screen.appendChild(list);
             const total = document.createElement('p');
-            total.textContent = `${Math.round(plan.planned_ms / 60000)} minutes planned • ${Math.round(plan.remaining_ms / 60000)} minutes unfilled`;
+            total.textContent = plan.available_ms
+                ? `${Math.round(plan.planned_ms / 60000)} minutes planned • ${Math.round(plan.remaining_ms / 60000)} minutes unfilled`
+                : `${Math.round(plan.planned_ms / 60000)} minutes planned`;
             screen.appendChild(total);
         }
 
@@ -97,28 +119,118 @@
         const change = document.createElement('button');
         change.textContent = 'Change Available Time';
         change.onclick = changeAvailableTime;
-        screen.append(work, change);
+        const back = document.createElement('button');
+        back.textContent = 'Back';
+        back.onclick = showResumeSourceChoice;
+        screen.append(work, change, back);
         container.appendChild(screen);
         saveLocal('work-choice');
     }
 
-    window.resumeExistingList = async function resumeExistingListWithTimeFit() {
+    async function loadTodoList() {
         if (!totalAvailableTimeMs) return originalResumeExistingList();
         hideStaticScreens();
         const container = clearDynamic();
         container.textContent = 'Building a work plan…';
         try {
-            await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}`, {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}'
-            });
+            await ensureUser();
             const plan = await fetchWorkPlan();
             showWorkPlan(plan);
         } catch (error) {
             console.error(error);
             alert('A work plan could not be built from the saved backlog.');
-            showWorkChoice();
+            showResumeSourceChoice();
         }
-    };
+    }
+
+    async function showProjectWorkList() {
+        hideStaticScreens();
+        hide(el('stopWorkingBtn'));
+        show(el('startOverBtn'));
+        const container = clearDynamic();
+        container.textContent = 'Loading projects…';
+        try {
+            await ensureUser();
+            const projects = await fetchRootProjects();
+            container.innerHTML = '';
+            const screen = document.createElement('div');
+            screen.id = 'workProjectSelectScreen';
+            const heading = document.createElement('h2');
+            heading.textContent = 'Work on My Projects';
+            screen.appendChild(heading);
+
+            if (!projects.length) {
+                const note = document.createElement('p');
+                note.textContent = 'You do not have any planned projects yet.';
+                const planner = document.createElement('button');
+                planner.textContent = 'Open Project Planner';
+                planner.onclick = () => window.ProjectPlanner?.open?.();
+                const start = document.createElement('button');
+                start.textContent = 'Back to Start';
+                start.onclick = showModeSelect;
+                screen.append(note, planner, start);
+                container.appendChild(screen);
+                return;
+            }
+
+            const list = document.createElement('div');
+            list.className = 'planner-list';
+            projects.forEach(project => {
+                const button = document.createElement('button');
+                const mins = Math.round(Number(project.estimated_ms || 0) / 60000);
+                button.textContent = mins ? `${project.name} — ${mins} min estimated` : project.name;
+                button.onclick = async () => {
+                    button.disabled = true;
+                    try {
+                        const plan = await fetchWorkPlan(project.id);
+                        showWorkPlan(plan, project.name);
+                    } catch (error) {
+                        console.error(error);
+                        alert('That project could not be loaded for work.');
+                        button.disabled = false;
+                    }
+                };
+                list.appendChild(button);
+            });
+            const back = document.createElement('button');
+            back.textContent = 'Back';
+            back.onclick = showResumeSourceChoice;
+            screen.append(list, back);
+            container.appendChild(screen);
+            saveLocal('work-choice');
+        } catch (error) {
+            console.error(error);
+            alert('Projects could not be loaded.');
+            showResumeSourceChoice();
+        }
+    }
+
+    function showResumeSourceChoice() {
+        hideStaticScreens();
+        hide(el('stopWorkingBtn'));
+        show(el('startOverBtn'));
+        const container = clearDynamic();
+        const screen = document.createElement('div');
+        screen.id = 'resumeSourceChoiceScreen';
+        const heading = document.createElement('h2');
+        heading.textContent = 'What do you want to work on?';
+        const todo = document.createElement('button');
+        todo.textContent = 'Work on My To-Do List';
+        todo.onclick = loadTodoList;
+        const projects = document.createElement('button');
+        projects.textContent = 'Work on My Projects';
+        projects.onclick = showProjectWorkList;
+        const start = document.createElement('button');
+        start.textContent = 'Back to Start';
+        start.onclick = showModeSelect;
+        screen.append(heading, todo, projects, start);
+        container.appendChild(screen);
+        saveLocal('work-choice');
+    }
+
+    // Resume now means: choose time first, then choose whether that time is spent
+    // against the global to-do sequence or inside one planned project.
+    window.resumeExistingList = showResumeSourceChoice;
 
     window.showBlockedFlow = function showStructuralBlockedFlow(blockedTask) {
         hideStaticScreens();
