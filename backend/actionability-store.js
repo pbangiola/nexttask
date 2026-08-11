@@ -13,26 +13,8 @@ const getUserNodesStmt = db.prepare(`
     ORDER BY parent_id, position, created;
 `);
 
-const getNodeStmt = db.prepare(`
-    SELECT *
-    FROM tasks
-    WHERE user_id = ? AND id = ?;
-`);
-
-const setDependencyStmt = db.prepare(`
-    UPDATE tasks
-    SET blocked_by_task_id = ?, updated_at = ?
-    WHERE user_id = ? AND id = ?;
-`);
-
 function isActive(node) {
     return node && !['completed', 'cancelled'].includes(String(node.status || '').toLowerCase());
-}
-
-function dependencySatisfied(node, byId) {
-    if (!node?.blocked_by_task_id) return true;
-    const blocker = byId.get(String(node.blocked_by_task_id));
-    return Boolean(blocker) && String(blocker.status || '').toLowerCase() === 'completed';
 }
 
 function sortNodes(nodes) {
@@ -43,7 +25,6 @@ function sortNodes(nodes) {
 }
 
 function buildIndexes(rows) {
-    const byId = new Map(rows.map(row => [String(row.id), row]));
     const children = new Map();
     for (const row of rows) {
         const parentId = row.parent_id == null ? null : String(row.parent_id);
@@ -51,12 +32,13 @@ function buildIndexes(rows) {
         children.get(parentId).push(row);
     }
     for (const [key, value] of children.entries()) children.set(key, sortNodes(value));
-    return { byId, children };
+    return { children };
 }
 
+// Sequence is the source of truth. A project contributes only its first
+// independently-actionable unfinished leaf in sibling order.
 function findEligibleLeaf(node, indexes, path = []) {
     if (!isActive(node)) return null;
-    if (!dependencySatisfied(node, indexes.byId)) return null;
 
     const nextPath = [...path, { id: node.id, name: node.name, node_type: node.node_type }];
     const directChildren = indexes.children.get(String(node.id)) || [];
@@ -70,49 +52,10 @@ function findEligibleLeaf(node, indexes, path = []) {
     }
 
     if (!Number(node.independently_actionable)) return null;
-
-    return {
-        task: node,
-        path: nextPath
-    };
-}
-
-function assertDependencyDoesNotCycle(userId, nodeId, blockerId) {
-    if (!blockerId) return;
-    const uid = String(userId);
-    const targetId = String(nodeId);
-    let cursorId = String(blockerId);
-    const seen = new Set();
-
-    while (cursorId) {
-        if (cursorId === targetId) throw new Error('Dependency would create a cycle');
-        if (seen.has(cursorId)) throw new Error('Existing dependency cycle detected');
-        seen.add(cursorId);
-        const cursor = getNodeStmt.get(uid, cursorId);
-        if (!cursor) throw new Error(`Task node not found: ${cursorId}`);
-        cursorId = cursor.blocked_by_task_id ? String(cursor.blocked_by_task_id) : '';
-    }
+    return { task: node, path: nextPath };
 }
 
 module.exports = {
-    setDependency(userId, nodeId, blockedByTaskId) {
-        const uid = String(userId);
-        const id = String(nodeId);
-        const node = getNodeStmt.get(uid, id);
-        if (!node) throw new Error(`Task node not found: ${id}`);
-
-        const blockerId = blockedByTaskId == null || blockedByTaskId === '' ? null : String(blockedByTaskId);
-        if (blockerId === id) throw new Error('A task cannot depend on itself');
-        if (blockerId) {
-            const blocker = getNodeStmt.get(uid, blockerId);
-            if (!blocker) throw new Error(`Task node not found: ${blockerId}`);
-            assertDependencyDoesNotCycle(uid, id, blockerId);
-        }
-
-        setDependencyStmt.run(blockerId, Date.now(), uid, id);
-        return getNodeStmt.get(uid, id);
-    },
-
     getActionableCandidates(userId) {
         const uid = String(userId);
         const rows = getUserNodesStmt.all(uid);
