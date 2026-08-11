@@ -25,6 +25,7 @@ function sortNodes(nodes) {
 }
 
 function buildIndexes(rows) {
+    const byId = new Map(rows.map(row => [String(row.id), row]));
     const children = new Map();
     for (const row of rows) {
         const parentId = row.parent_id == null ? null : String(row.parent_id);
@@ -32,7 +33,7 @@ function buildIndexes(rows) {
         children.get(parentId).push(row);
     }
     for (const [key, value] of children.entries()) children.set(key, sortNodes(value));
-    return { children };
+    return { byId, children };
 }
 
 function collectEligibleLeaves(node, indexes, path = [], out = []) {
@@ -49,9 +50,18 @@ function collectEligibleLeaves(node, indexes, path = [], out = []) {
     return out;
 }
 
-function orderedEligibleLeaves(rows) {
+function orderedEligibleLeaves(rows, rootId = null) {
     const indexes = buildIndexes(rows);
-    const roots = sortNodes(indexes.children.get(null) || []).filter(isActive);
+    let roots;
+
+    if (rootId) {
+        const root = indexes.byId.get(String(rootId));
+        if (!root || !isActive(root) || root.node_type !== 'project') return [];
+        roots = [root];
+    } else {
+        roots = sortNodes(indexes.children.get(null) || []).filter(isActive);
+    }
+
     const leaves = [];
     for (const root of roots) {
         const candidates = collectEligibleLeaves(root, indexes, [], []);
@@ -75,11 +85,30 @@ module.exports = {
         });
     },
 
-    getTimeFitPlan(userId, availableMs) {
-        const limit = Math.max(0, Number(availableMs || 0));
-        if (!Number.isFinite(limit) || limit <= 0) throw new Error('availableMs must be greater than zero');
+    getTimeFitPlan(userId, availableMs, rootId = null) {
+        const rawLimit = Number(availableMs || 0);
+        const limited = Number.isFinite(rawLimit) && rawLimit > 0;
+        const limit = limited ? rawLimit : 0;
+        const leaves = orderedEligibleLeaves(getUserNodesStmt.all(String(userId)), rootId);
 
-        const leaves = orderedEligibleLeaves(getUserNodesStmt.all(String(userId)));
+        if (rootId && !leaves.length) {
+            const rows = getUserNodesStmt.all(String(userId));
+            const project = rows.find(row => String(row.id) === String(rootId));
+            if (!project || project.node_type !== 'project' || !isActive(project)) throw new Error('Project not found');
+        }
+
+        if (!limited) {
+            const selected = leaves.filter(candidate => Number(candidate.task.estimated_ms || 0) > 0);
+            return {
+                available_ms: 0,
+                planned_ms: selected.reduce((sum, candidate) => sum + Number(candidate.task.estimated_ms || 0), 0),
+                remaining_ms: 0,
+                tasks: selected,
+                skipped_unestimated: leaves.filter(candidate => Number(candidate.task.estimated_ms || 0) <= 0).map(candidate => candidate.task.id),
+                root_id: rootId || null
+            };
+        }
+
         const remainingCandidates = [...leaves];
         const selected = [];
         let remainingMs = limit;
@@ -101,7 +130,8 @@ module.exports = {
             planned_ms: limit - remainingMs,
             remaining_ms: remainingMs,
             tasks: selected,
-            skipped_unestimated: leaves.filter(candidate => Number(candidate.task.estimated_ms || 0) <= 0).map(candidate => candidate.task.id)
+            skipped_unestimated: leaves.filter(candidate => Number(candidate.task.estimated_ms || 0) <= 0).map(candidate => candidate.task.id),
+            root_id: rootId || null
         };
     }
 };
