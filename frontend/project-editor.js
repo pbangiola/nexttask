@@ -2,7 +2,7 @@
 
 window.ProjectEditor = (() => {
     const UNDO_KEY = 'nextTaskProjectEditorUndo';
-    const esc = value => String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    const esc = value => String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#039;');
     const makeId = prefix => `${prefix}_${globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2,11)}`;
     const history=[];
     let currentId=null;
@@ -12,6 +12,7 @@ window.ProjectEditor = (() => {
     async function roots(){return (await api('/nodes')).nodes||[];}
     async function tree(){return (await api('/nodes?tree=1')).nodes||[];}
     async function createNode(input){return (await api('/nodes',{method:'POST',body:JSON.stringify({id:input.id||makeId(input.nodeType==='project'?'project':'task'),...input})})).node;}
+    async function updateNode(id,input){return (await api(`/nodes/${encodeURIComponent(id)}`,{method:'PUT',body:JSON.stringify(input)})).node;}
     async function reparent(id,parentId,position){return api(`/nodes/${encodeURIComponent(id)}/parent`,{method:'PUT',body:JSON.stringify({parentId,position})});}
     async function removeNode(id,mode='subtree'){return api(`/nodes/${encodeURIComponent(id)}?mode=${encodeURIComponent(mode)}`,{method:'DELETE'});}
     async function restore(snapshot){return api('/nodes/undo',{method:'POST',body:JSON.stringify({snapshot})});}
@@ -76,7 +77,48 @@ window.ProjectEditor = (() => {
     async function showDelete(item,parent){const {children}=await getNode(item.id);if(item.node_type==='project'&&children.length){const c=shell();c.innerHTML=`<h2>Delete ${esc(item.name)}?</h2><p>This project contains ${children.length} direct item${children.length===1?'':'s'}.</p><div class="planner-choice-grid"><button id="deleteAll">Delete Project & Contents</button><button id="deleteUngroup">Keep Contents / Ungroup</button></div><button id="deleteBack">Back</button>`;el('deleteAll').onclick=()=>performDelete(item,parent,'subtree');el('deleteUngroup').onclick=()=>performDelete(item,parent,'ungroup');el('deleteBack').onclick=()=>open(parent.id,{push:false});return;}if(confirm(`Delete “${item.name}”?`))performDelete(item,parent,'subtree');}
     async function performDelete(item,parent,mode){try{const result=await removeNode(item.id,mode);setUndo({snapshot:result.undo,returnId:parent.id});open(parent.id,{push:false});}catch(error){alert(error.message);}}
 
-    function showAddTask(parent){const c=shell();c.innerHTML=`<h2>Add Task to ${esc(parent.name)}</h2><label>Task name<input id="projectEditorTaskName"></label><label>Estimated time<input id="projectEditorTaskMinutes" type="number" min="1" placeholder="Minutes"></label><button id="projectEditorTaskSave">Add Task</button><button id="projectEditorTaskCancel">Back</button>`;el('projectEditorTaskSave').onclick=async()=>{const name=el('projectEditorTaskName').value.trim(),mins=parseInt(el('projectEditorTaskMinutes').value,10);if(!name)return alert('Please enter a task name.');if(!Number.isFinite(mins)||mins<1)return alert('Please enter an estimate in minutes.');try{await createNode({name,nodeType:'task',parentId:parent.id,estimatedTimeMs:mins*60000,sessionId});open(parent.id,{push:false});}catch(error){alert(error.message);}};el('projectEditorTaskCancel').onclick=()=>open(parent.id,{push:false});}
+    function showAddTask(parent){
+        const c=shell();
+        c.innerHTML=`<h2>Add Task to ${esc(parent.name)}</h2><label>Task name<input id="projectEditorTaskName"></label><label>Estimated time<input id="projectEditorTaskMinutes" type="number" min="1" placeholder="Minutes"></label><button id="projectEditorTaskNext">Choose Position</button><button id="projectEditorTaskCancel">Back</button>`;
+        el('projectEditorTaskNext').onclick=async()=>{
+            const name=el('projectEditorTaskName').value.trim();
+            const mins=parseInt(el('projectEditorTaskMinutes').value,10);
+            if(!name)return alert('Please enter a task name.');
+            if(!Number.isFinite(mins)||mins<1)return alert('Please enter an estimate in minutes.');
+            try{
+                const {children}=await getNode(parent.id);
+                showTaskInsertion(parent,{name,mins},children);
+            }catch(error){alert(error.message);}
+        };
+        el('projectEditorTaskCancel').onclick=()=>open(parent.id,{push:false});
+    }
+
+    function showTaskInsertion(parent,draft,children){
+        const ordered=[...(children||[])].sort((a,b)=>(Number(a.position||0)-Number(b.position||0))||(Number(a.created||0)-Number(b.created||0)));
+        const c=shell();
+        c.innerHTML=`<h2>Where should this task go?</h2><p class="planner-moving">${esc(draft.name)} — ${draft.mins} min</p><div id="projectEditorInsertSlots" class="planner-list"></div><button id="projectEditorInsertBack">Back</button>`;
+        const list=el('projectEditorInsertSlots');
+        for(let i=0;i<=ordered.length;i++){
+            const button=document.createElement('button');
+            button.textContent=i===ordered.length?'Add at end':`Add before ${ordered[i].name}`;
+            button.onclick=async()=>{
+                button.disabled=true;
+                try{
+                    for(let j=ordered.length-1;j>=i;j--){
+                        await updateNode(ordered[j].id,{position:Number(ordered[j].position||j+1)+1});
+                    }
+                    await createNode({name:draft.name,nodeType:'task',parentId:parent.id,position:i+1,estimatedTimeMs:draft.mins*60000,sessionId});
+                    open(parent.id,{push:false});
+                }catch(error){
+                    alert(error.message);
+                    button.disabled=false;
+                }
+            };
+            list.appendChild(button);
+        }
+        el('projectEditorInsertBack').onclick=()=>showAddTask(parent);
+    }
+
     function showAddProject(parent){const c=shell();c.innerHTML=`<h2>Add Subproject to ${esc(parent.name)}</h2><label>Project name<input id="projectEditorProjectName"></label><label>Estimated time<input id="projectEditorProjectMinutes" type="number" min="1" placeholder="Minutes"></label><button id="projectEditorProjectSave">Add Subproject</button><button id="projectEditorProjectCancel">Back</button>`;el('projectEditorProjectSave').onclick=async()=>{const name=el('projectEditorProjectName').value.trim(),mins=parseInt(el('projectEditorProjectMinutes').value,10);if(!name)return alert('Please enter a project name.');if(!Number.isFinite(mins)||mins<1)return alert('Please enter an estimate in minutes.');try{const child=await createNode({name,nodeType:'project',parentId:parent.id,estimatedTimeMs:mins*60000,independentlyActionable:false,sessionId});await open(child.id);}catch(error){alert(error.message);}};el('projectEditorProjectCancel').onclick=()=>open(parent.id,{push:false});}
 
     document.addEventListener('click',async event=>{const link=event.target.closest?.('.planner-project-link');if(!link||link.closest('#projectEditorProjects'))return;const allLinks=Array.from(document.querySelectorAll('#projectList .planner-project-link'));const index=allLinks.indexOf(link);if(index<0)return;event.preventDefault();event.stopImmediatePropagation();try{const projects=(await roots()).filter(n=>n.node_type==='project'&&!['completed','cancelled'].includes(n.status));if(projects[index]){history.length=0;currentId=null;await open(projects[index].id,{push:false});}}catch(error){console.error('Could not open recursive project editor:',error);}},true);
