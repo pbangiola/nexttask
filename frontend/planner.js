@@ -230,12 +230,21 @@ window.ProjectPlanner = (() => {
     async function showProjects() {
         try {
             view='projects-list'; const [rootNodes,fullTree]=await Promise.all([roots(),tree()]); const projects=openRootProjects(rootNodes); const c=clearShell();
-            c.innerHTML=`<h2>Existing Projects</h2><div id="projectList"></div><div class="planner-choice-grid"><button id="addProject">Add New Project</button><button id="combineProjects">Combine Projects</button></div><button id="projectsBack">Back</button>`;
+            c.innerHTML=`<h2>Existing Projects</h2><div id="projectList"></div><div class="planner-choice-grid"><button id="sortProjects">Sort Projects<span>Use forced choices to set the order.</span></button><button id="addProject">Add New Project</button><button id="combineProjects">Combine Projects</button></div><button id="projectsBack">Back</button>`;
             const list=el('projectList'); if(!projects.length) list.innerHTML='<p>No projects yet.</p>';
             projects.forEach(item=>{const full=findInTree(fullTree,item.id);const s=leafStats(full);const row=document.createElement('div');row.className='planner-project-row';const link=document.createElement('button');link.className='planner-project-link';link.textContent=item.name;link.onclick=()=>showSummary(item.id);const meta=document.createElement('span');meta.textContent=`${Math.round(s.ms/60000)} min • ${s.steps} steps • Click to view or edit`;row.append(link,meta);list.appendChild(row);});
+            el('sortProjects').disabled=projects.length<2;
+            el('sortProjects').onclick=()=>sortProjects(projects);
             el('addProject').onclick=()=>{currentProjectId=null;pendingBacklogIds=[];returnTarget='projects-list';showDefineProject();};
             el('combineProjects').onclick=showCombineProjects; el('projectsBack').onclick=showReviewEntry; saveUi();
         } catch(error){fail(error,showReviewEntry);}
+    }
+
+    async function sortProjects(projects) {
+        try {
+            await sortPlannerNodes([...projects]);
+            showProjects();
+        } catch(error){hide(el('taskCompare'));fail(error,showProjects);}
     }
 
     async function showCombineProjects() {
