@@ -12,6 +12,7 @@ window.ProjectPlanner = (() => {
     let returnTarget = 'planner-home';
     let seedBacklogId = null;
     let pendingBacklogIds = [];
+    let backlogUndoSnapshot = null;
 
     const makeId = prefix => `${prefix}_${globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2, 11)}`;
     const esc = value => String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
@@ -72,6 +73,12 @@ window.ProjectPlanner = (() => {
     async function reparent(id, parentId, position) {
         return (await api(`/nodes/${encodeURIComponent(id)}/parent`, { method:'PUT', body:JSON.stringify({ parentId, position }) })).node;
     }
+    async function deleteNode(id) {
+        return api(`/nodes/${encodeURIComponent(id)}`, { method:'DELETE' });
+    }
+    async function undoSnapshot(snapshot) {
+        return api('/nodes/undo', { method:'POST', body:JSON.stringify({ snapshot }) });
+    }
 
     function openRootTasks(nodes) {
         return nodes.filter(n => n.node_type !== 'project' && !['completed','cancelled'].includes(n.status) && String(n.name).toLowerCase() !== 'sort tasks');
@@ -97,6 +104,7 @@ window.ProjectPlanner = (() => {
         try {
             if (view === 'review-entry') return showReviewEntry();
             if (view === 'backlog-list') return showBacklogList();
+            if (view === 'backlog-delete') return showBacklogDelete();
             if (view === 'backlog-membership' && seedBacklogId) return showMembership(seedBacklogId);
             if (view === 'backlog-related' && seedBacklogId) return showRelated(seedBacklogId);
             if (view === 'projects-list') return showProjects();
@@ -113,7 +121,7 @@ window.ProjectPlanner = (() => {
     function showPlannerHome() {
         view='planner-home'; currentParentId=null; activeNodeId=null;
         const c=clearShell();
-        c.innerHTML=`<h2>Project Planner</h2><p>What would you like to do?</p><div class="planner-choice-grid"><button id="plannerCreate">Create a Project<span>I know what I want to accomplish.</span></button><button id="plannerReview">Review Your Existing Backlog<span>Find work that belongs together.</span></button></div><button id="plannerExit">Back to Task Sorter</button>`;
+        c.innerHTML=`<h2>Project Planner</h2><p>What would you like to do?</p><div class="planner-choice-grid"><button id="plannerCreate">Create a Project<span>I know what I want to accomplish.</span></button><button id="plannerReview">Review Your Existing Backlog<span>Sort, delete, or find work that belongs together.</span></button></div><button id="plannerExit">Back to Task Sorter</button>`;
         el('plannerCreate').onclick=()=>{currentProjectId=null;pendingBacklogIds=[];returnTarget='planner-home';showDefineProject();};
         el('plannerReview').onclick=showReviewEntry;
         el('plannerExit').onclick=()=>{view='planner-home';saveUi();showModeSelect();};
@@ -123,18 +131,82 @@ window.ProjectPlanner = (() => {
     function showReviewEntry() {
         view='review-entry';
         const c=clearShell();
-        c.innerHTML=`<h2>Project Planner</h2><p>What would you like to review?</p><div class="planner-choice-grid"><button id="reviewBacklog">Uncategorized Backlog<span>Look for tasks that belong to projects.</span></button><button id="reviewProjects">Existing Projects<span>View or edit projects you already created.</span></button></div><button id="reviewBack">Back</button>`;
+        c.innerHTML=`<h2>Project Planner</h2><p>What would you like to review?</p><div class="planner-choice-grid"><button id="reviewBacklog">Uncategorized Backlog<span>Sort, delete, or group tasks.</span></button><button id="reviewProjects">Existing Projects<span>View or edit projects you already created.</span></button></div><button id="reviewBack">Back</button>`;
         el('reviewBacklog').onclick=showBacklogList; el('reviewProjects').onclick=showProjects; el('reviewBack').onclick=showPlannerHome; saveUi();
     }
 
     async function showBacklogList() {
         try {
-            view='backlog-list'; const items=openRootTasks(await roots()); const c=clearShell();
-            c.innerHTML=`<h2>Uncategorized Backlog</h2><p>Choose a task to review.</p><div id="backlogLinks" class="planner-list"></div><button id="backlogBack">Back</button>`;
-            const list=el('backlogLinks'); if(!items.length) list.innerHTML='<p>There are no uncategorized tasks in your backlog.</p>';
-            items.forEach(item=>{const b=document.createElement('button');b.textContent=item.name;b.onclick=()=>showMembership(item.id);list.appendChild(b);});
-            el('backlogBack').onclick=showReviewEntry; saveUi();
+            view='backlog-list';
+            const items=openRootTasks(await roots());
+            const c=clearShell();
+            c.innerHTML=`<h2>Uncategorized Backlog</h2><p>${items.length} task${items.length===1?'':'s'}.</p><div class="planner-choice-grid"><button id="backlogSort">Sort Backlog<span>Use forced choices to set the order.</span></button><button id="backlogDelete">Delete Tasks<span>Remove work you no longer need.</span></button></div><h3>Tasks</h3><div id="backlogLinks" class="planner-list"></div><button id="backlogBack">Back</button>`;
+            const list=el('backlogLinks');
+            if(!items.length) list.innerHTML='<p>There are no uncategorized tasks in your backlog.</p>';
+            items.forEach(item=>{const b=document.createElement('button');b.textContent=item.name;b.title='Review this task for project grouping';b.onclick=()=>showMembership(item.id);list.appendChild(b);});
+            el('backlogSort').disabled=items.length<2;
+            el('backlogSort').onclick=()=>sortBacklog(items);
+            el('backlogDelete').disabled=!items.length;
+            el('backlogDelete').onclick=showBacklogDelete;
+            el('backlogBack').onclick=showReviewEntry;
+            saveUi();
         } catch(error){fail(error,showReviewEntry);}
+    }
+
+    async function sortBacklog(items) {
+        try {
+            clearDynamic();
+            show(el('taskCompare'));
+            const runId=++sortRunId;
+            const sorted=await interactiveMergeSort([...items],runId);
+            hide(el('taskCompare'));
+            if(runId!==sortRunId)return;
+            for(let i=0;i<sorted.length;i++) await updateNode(sorted[i].id,{position:i+1});
+            showBacklogList();
+        } catch(error){hide(el('taskCompare'));fail(error,showBacklogList);}
+    }
+
+    async function showBacklogDelete() {
+        try {
+            view='backlog-delete';
+            const items=openRootTasks(await roots());
+            const c=clearShell();
+            c.innerHTML=`<h2>Delete Tasks</h2><p>Delete anything you no longer need.</p><div id="deleteBacklogList" class="planner-list"></div><button id="undoBacklogDelete">Undo Last Delete</button><button id="deleteBacklogBack">Back</button>`;
+            const list=el('deleteBacklogList');
+            if(!items.length) list.innerHTML='<p>There are no uncategorized tasks to delete.</p>';
+            items.forEach(item=>{
+                const row=document.createElement('div');
+                row.className='planner-project-row';
+                const name=document.createElement('span');
+                name.textContent=item.name;
+                name.style.fontSize='16px';
+                name.style.color='inherit';
+                const button=document.createElement('button');
+                button.textContent='Delete';
+                button.onclick=async()=>{
+                    if(!confirm(`Delete “${item.name}”?`))return;
+                    button.disabled=true;
+                    try{
+                        const result=await deleteNode(item.id);
+                        backlogUndoSnapshot=result.undo || null;
+                        showBacklogDelete();
+                    }catch(error){fail(error,showBacklogDelete);}
+                };
+                row.append(name,button);
+                list.appendChild(row);
+            });
+            const undo=el('undoBacklogDelete');
+            undo.disabled=!backlogUndoSnapshot;
+            undo.onclick=async()=>{
+                if(!backlogUndoSnapshot)return;
+                const snapshot=backlogUndoSnapshot;
+                undo.disabled=true;
+                try{await undoSnapshot(snapshot);backlogUndoSnapshot=null;showBacklogDelete();}
+                catch(error){fail(error,showBacklogDelete);}
+            };
+            el('deleteBacklogBack').onclick=showBacklogList;
+            saveUi();
+        } catch(error){fail(error,showBacklogList);}
     }
 
     async function showMembership(id) {
@@ -197,8 +269,6 @@ window.ProjectPlanner = (() => {
     }
 
     async function sortPlannerNodes(nodes) {
-        // Clear the planner's parts-entry DOM before showing the shared forced-choice
-        // comparison screen; otherwise both screens remain visible together.
         clearDynamic();
         show(el('taskCompare'));
         const runId=++sortRunId;
