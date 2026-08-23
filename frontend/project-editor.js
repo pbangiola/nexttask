@@ -24,12 +24,22 @@ window.ProjectEditor = (() => {
     function clearUndo(){localStorage.removeItem(UNDO_KEY);}
     function flattenProjects(nodes,out=[]){for(const n of nodes||[]){if(n.node_type==='project'&&!['completed','cancelled'].includes(n.status))out.push(n);flattenProjects(n.children||[],out);}return out;}
 
+    function updateTopBackVisibility(){
+        const topBack=el('projectEditorBackTop');
+        if(!topBack)return;
+        topBack.classList.add('hidden');
+        const pageIsLong=document.documentElement.scrollHeight>window.innerHeight;
+        topBack.classList.toggle('hidden',!pageIsLong);
+    }
+
     async function backFromProjectEditor(){
         if(history.length)return open(history.pop(),{push:false});
         currentId=null;
         localStorage.setItem('nextTaskProjectPlannerUi',JSON.stringify({view:'projects-list'}));
         return window.ProjectPlanner?.open?.();
     }
+
+    window.addEventListener('resize',()=>requestAnimationFrame(updateTopBackVisibility));
 
     async function undoLast(){const entry=getUndo();if(!entry)return;try{if(entry.snapshot?.length)await restore(entry.snapshot);if(entry.deleteIds?.length){for(const id of entry.deleteIds)await removeNode(id,'subtree');}clearUndo();await open(entry.returnId||currentId,{push:false});}catch(error){alert(`Undo failed: ${error.message}`);}}
 
@@ -44,7 +54,7 @@ window.ProjectEditor = (() => {
             const projects=children.filter(c=>c.node_type==='project');
             const c=shell();
             c.innerHTML=`<h2>${esc(node.name)}</h2><p>${minutes(node.estimated_ms)} min estimated</p>
-                <button class="projectEditorBack">Back</button>
+                <button id="projectEditorBackTop" class="projectEditorBack hidden">Back</button>
                 <h3 id="projectEditorTasksHeading">Tasks</h3><div id="projectEditorTasks"></div>
                 <h3>Projects</h3><div id="projectEditorProjects"></div>
                 <div class="planner-choice-grid"><button id="projectEditorGroup">Group Selected</button><button id="projectEditorMoveSelected">Move Selected</button><button id="projectEditorAddTask">Add Task</button><button id="projectEditorAddProject">Add Subproject</button></div>
@@ -60,6 +70,7 @@ window.ProjectEditor = (() => {
             el('projectEditorAddProject').onclick=()=>showAddProject(node);
             if(el('projectEditorUndo'))el('projectEditorUndo').onclick=undoLast;
             document.querySelectorAll('.projectEditorBack').forEach(button=>button.onclick=backFromProjectEditor);
+            requestAnimationFrame(updateTopBackVisibility);
         }catch(error){console.error(error);const c=shell();c.innerHTML=`<h2>Project Editor</h2><p>${esc(error.message||'Could not open project.')}</p><button id="projectEditorErrorBack">Back</button>`;el('projectEditorErrorBack').onclick=()=>history.length?open(history.pop(),{push:false}):window.ProjectPlanner?.open?.();}
     }
 
