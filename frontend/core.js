@@ -104,25 +104,53 @@ function mergeWithChoices(left, right, runId) {
         hide(el('taskInput'));
         show(el('startOverBtn'));
 
-        function choose(side) {
-            if (runId !== sortRunId) { resolve([]); return; }
-            merged.push(side === 'left' ? left.shift() : right.shift());
-            next();
+        function finish(result) {
+            hide(compare);
+            resolve(result);
         }
 
-        function next() {
-            if (runId !== sortRunId) { hide(compare); resolve([]); return; }
+        function chooseMerge(side) {
+            if (runId !== sortRunId) { finish([]); return; }
+            merged.push(side === 'left' ? left.shift() : right.shift());
+            nextMergeComparison();
+        }
+
+        function nextMergeComparison() {
+            if (runId !== sortRunId) { finish([]); return; }
             if (!left.length || !right.length) {
-                hide(compare);
-                resolve([...merged, ...left, ...right]);
+                finish([...merged, ...left, ...right]);
                 return;
             }
             task1.textContent = left[0].name;
             task2.textContent = right[0].name;
-            task1.onclick = () => choose('left');
-            task2.onclick = () => choose('right');
+            task1.onclick = () => chooseMerge('left');
+            task2.onclick = () => chooseMerge('right');
         }
-        next();
+
+        // Before merging two already-sorted halves, compare the boundary items.
+        // If the last item in the left half belongs before the first item in the
+        // right half, every item in left is already before every item in right,
+        // so the two halves form one ordered run and can be concatenated.
+        function checkRunBoundary() {
+            if (runId !== sortRunId) { finish([]); return; }
+            if (!left.length || !right.length) { finish([...left, ...right]); return; }
+
+            const leftBoundary = left[left.length - 1];
+            const rightBoundary = right[0];
+            task1.textContent = leftBoundary.name;
+            task2.textContent = rightBoundary.name;
+
+            task1.onclick = () => {
+                if (runId !== sortRunId) { finish([]); return; }
+                finish([...left, ...right]);
+            };
+            task2.onclick = () => {
+                if (runId !== sortRunId) { finish([]); return; }
+                nextMergeComparison();
+            };
+        }
+
+        checkRunBoundary();
     });
 }
 
