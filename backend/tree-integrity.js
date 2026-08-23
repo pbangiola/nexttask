@@ -103,7 +103,11 @@ function auditRows(rows) {
         const canonicalProjectId = node.parent_id == null ? null : String(node.parent_id);
         const storedProjectId = node.project_id == null ? null : String(node.project_id);
         if (canonicalProjectId !== storedProjectId) {
-            issues.push({ type: 'project_id_mismatch', nodeId: node.id, parentId: canonicalProjectId, projectId: storedProjectId });
+            if (canonicalProjectId == null && storedProjectId != null) {
+                issues.push({ type: 'orphaned_project_reference', nodeId: node.id, formerProjectId: storedProjectId });
+            } else {
+                issues.push({ type: 'project_id_mismatch', nodeId: node.id, parentId: canonicalProjectId, projectId: storedProjectId });
+            }
         }
 
         if (node.node_type === 'project') {
@@ -141,12 +145,13 @@ const reconcileTransaction = db.transaction(userId => {
 
     let rows = getUserNodesStmt.all(uid);
 
-    // parent_id is canonical. project_id is compatibility metadata and can be
-    // repaired safely without changing hierarchy or deleting historical nodes.
+    // parent_id is canonical for live hierarchy. When parent_id is null but a
+    // legacy project_id remains, preserve project_id as historical evidence of
+    // a former relationship instead of erasing potentially reconstructable data.
     for (const node of rows) {
         const canonicalProjectId = node.parent_id == null ? null : String(node.parent_id);
         const storedProjectId = node.project_id == null ? null : String(node.project_id);
-        if (canonicalProjectId !== storedProjectId) {
+        if (canonicalProjectId != null && canonicalProjectId !== storedProjectId) {
             syncProjectIdStmt.run(Date.now(), uid, node.id);
             repairs.push({ type: 'sync_project_id', nodeId: node.id, projectId: canonicalProjectId });
         }
