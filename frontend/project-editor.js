@@ -24,6 +24,25 @@ window.ProjectEditor = (() => {
     function clearUndo(){localStorage.removeItem(UNDO_KEY);}
     function flattenProjects(nodes,out=[]){for(const n of nodes||[]){if(n.node_type==='project'&&!['completed','cancelled'].includes(n.status))out.push(n);flattenProjects(n.children||[],out);}return out;}
 
+    function positionProjectEditorNavigation(){
+        const controls=el('projectEditorNavigation');
+        const tasksHeading=el('projectEditorTasksHeading');
+        const container=el('dynamicContainer');
+        if(!controls||!tasksHeading||!container)return;
+        const pageIsLong=document.documentElement.scrollHeight>window.innerHeight;
+        if(pageIsLong)tasksHeading.before(controls);
+        else container.appendChild(controls);
+    }
+
+    async function backFromProjectEditor(){
+        if(history.length)return open(history.pop(),{push:false});
+        currentId=null;
+        localStorage.setItem('nextTaskProjectPlannerUi',JSON.stringify({view:'projects-list'}));
+        return window.ProjectPlanner?.open?.();
+    }
+
+    window.addEventListener('resize',()=>requestAnimationFrame(positionProjectEditorNavigation));
+
     async function undoLast(){const entry=getUndo();if(!entry)return;try{if(entry.snapshot?.length)await restore(entry.snapshot);if(entry.deleteIds?.length){for(const id of entry.deleteIds)await removeNode(id,'subtree');}clearUndo();await open(entry.returnId||currentId,{push:false});}catch(error){alert(`Undo failed: ${error.message}`);}}
 
     async function open(projectId,options={}){
@@ -37,11 +56,10 @@ window.ProjectEditor = (() => {
             const projects=children.filter(c=>c.node_type==='project');
             const c=shell();
             c.innerHTML=`<h2>${esc(node.name)}</h2><p>${minutes(node.estimated_ms)} min estimated</p>
-                <h3>Tasks</h3><div id="projectEditorTasks"></div>
+                <h3 id="projectEditorTasksHeading">Tasks</h3><div id="projectEditorTasks"></div>
                 <h3>Projects</h3><div id="projectEditorProjects"></div>
                 <div class="planner-choice-grid"><button id="projectEditorGroup">Group Selected</button><button id="projectEditorMoveSelected">Move Selected</button><button id="projectEditorAddTask">Add Task</button><button id="projectEditorAddProject">Add Subproject</button></div>
-                ${getUndo()?'<button id="projectEditorUndo">Undo Last Change</button>':''}
-                <button id="projectEditorBack">Back</button>`;
+                <div id="projectEditorNavigation">${getUndo()?'<button id="projectEditorUndo">Undo Last Change</button>':''}<button id="projectEditorBack">Back</button></div>`;
             renderRows(el('projectEditorTasks'),tasks,node,false);
             renderRows(el('projectEditorProjects'),projects,node,true);
             if(!tasks.length)el('projectEditorTasks').innerHTML='<p>No loose tasks at this level.</p>';
@@ -51,7 +69,8 @@ window.ProjectEditor = (() => {
             el('projectEditorAddTask').onclick=()=>showAddTask(node);
             el('projectEditorAddProject').onclick=()=>showAddProject(node);
             if(el('projectEditorUndo'))el('projectEditorUndo').onclick=undoLast;
-            el('projectEditorBack').onclick=async()=>{if(history.length)return open(history.pop(),{push:false});currentId=null;localStorage.setItem('nextTaskProjectPlannerUi',JSON.stringify({view:'projects-list'}));return window.ProjectPlanner?.open?.();};
+            el('projectEditorBack').onclick=backFromProjectEditor;
+            requestAnimationFrame(positionProjectEditorNavigation);
         }catch(error){console.error(error);const c=shell();c.innerHTML=`<h2>Project Editor</h2><p>${esc(error.message||'Could not open project.')}</p><button id="projectEditorErrorBack">Back</button>`;el('projectEditorErrorBack').onclick=()=>history.length?open(history.pop(),{push:false}):window.ProjectPlanner?.open?.();}
     }
 
