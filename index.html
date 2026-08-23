@@ -15,6 +15,21 @@
         #stopWorkingBtn { background-color: #ffcdd2; border: 1px solid #e53935; color: #b71c1c; font-weight: bold; border-radius: 4px; }
         #startOverBtn { background-color: #eceff1; border: 1px solid #90a4ae; color: #37474f; border-radius: 4px; }
 
+        /* Sorting UI: responsive sizing keeps timer and choices visually balanced. */
+        #sortTaskTimer {
+            font-size: clamp(18px, 3.2vw, 21.6px);
+            font-weight: bold;
+        }
+        #taskCompare #task1,
+        #taskCompare #task2 {
+            display: block;
+            width: min(100%, 620px);
+            font-size: clamp(20px, 3.6vw, 24px);
+            line-height: 1.2;
+            padding: 0.65em 0.9em;
+            text-align: left;
+        }
+
         /* Project Planner */
         .planner-choice-grid { display: flex; flex-direction: column; gap: 10px; margin: 18px 0; }
         .planner-choice-grid > button, .planner-list > button {
