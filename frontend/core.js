@@ -27,14 +27,25 @@ function createTask(name, values = {}) {
 
 //tasklist indexing functions
 //separate incomplete tasks from complete tasks
-function incompleteTasks() { 
-    sortedTasks.forEach(ensureTask); 
-    return sortedTasks.filter(task => !task.completed); 
+function incompleteTasks() {
+    sortedTasks.forEach(ensureTask);
+    return sortedTasks.filter(task => !task.completed);
+}
+function taskIsExecutable(task) {
+    if (!task || task.completed) return false;
+    if (task.status !== 'blocked') return true;
+    const blocker = task.blockedByTaskId
+        ? sortedTasks.find(candidate => candidate.id === task.blockedByTaskId)
+        : null;
+    if (blocker && !blocker.completed) return false;
+    task.status = 'pending';
+    task.blockedByTaskId = null;
+    return true;
 }
 //identify the first incomplete task in the taak list
-function firstIncompleteTask() { return incompleteTasks()[0] || null; }
+function firstIncompleteTask() { return incompleteTasks().find(taskIsExecutable) || null; }
 //identify the task the user is focused on now
-function currentTask() { return sortedTasks.find(task => task.id === activeTaskId && !task.completed) || firstIncompleteTask(); }
+function currentTask() { return sortedTasks.find(task => task.id === activeTaskId && taskIsExecutable(task)) || firstIncompleteTask(); }
 
 
 //Initialize task sorting
