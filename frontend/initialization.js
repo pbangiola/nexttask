@@ -183,7 +183,15 @@ function updateCapacityMessage() {
 function parseTaskEntryText(text) {
     const trimmed = String(text || '').trim();
     if (!trimmed) return [];
-    const pieces = trimmed.includes('\n') ? trimmed.split(/\r?\n/) : trimmed.split(',');
+
+    // Semicolons take precedence when present so users can enter task names
+    // that contain commas, e.g. "Call Smith, Jones & Co.; email Maria".
+    // Otherwise commas and line breaks are treated interchangeably as simple
+    // task separators.
+    const pieces = trimmed.includes(';')
+        ? trimmed.split(/\s*;\s*|\r?\n+/)
+        : trimmed.split(/\s*,\s*|\r?\n+/);
+
     return pieces
         .map(value => value.replace(/^\s*\d+[.)]\s*/, '').trim())
         .filter(Boolean);
