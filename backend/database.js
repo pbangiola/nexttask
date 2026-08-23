@@ -64,16 +64,12 @@ function addColumnIfMissing(tableName, columnName, definition) {
     }
 }
 
-// Additive task-node migration. Existing Task Sorter rows remain root task nodes.
-// project_id is retained unchanged for compatibility with older deployments;
-// parent_id is the canonical hierarchy relationship for new project data.
 addColumnIfMissing('tasks', 'user_id', 'TEXT');
 addColumnIfMissing('tasks', 'parent_id', 'TEXT REFERENCES tasks(id) ON DELETE SET NULL');
 addColumnIfMissing('tasks', 'project_id', 'TEXT');
 addColumnIfMissing('tasks', 'node_type', "TEXT NOT NULL DEFAULT 'task' CHECK(node_type IN ('task', 'project'))");
 addColumnIfMissing('tasks', 'independently_actionable', 'INTEGER NOT NULL DEFAULT 1 CHECK(independently_actionable IN (0, 1))');
 
-// Create indexes only after migrations have guaranteed the indexed columns exist.
 db.exec(`
     CREATE INDEX IF NOT EXISTS idx_tasks_session_position
         ON tasks(session_id, position);
@@ -140,6 +136,26 @@ const upsertTaskStmt = db.prepare(`
         updated_at = excluded.updated_at
 `);
 
+const completeFinishedProjectsStmt = db.prepare(`
+    UPDATE tasks AS parent
+    SET status = 'completed',
+        completed = COALESCE(completed, @now),
+        last_changed = NULL,
+        updated_at = @now
+    WHERE parent.session_id = @session_id
+      AND parent.node_type = 'project'
+      AND parent.status NOT IN ('completed', 'cancelled')
+      AND EXISTS (
+          SELECT 1 FROM tasks child
+          WHERE child.parent_id = parent.id
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM tasks child
+          WHERE child.parent_id = parent.id
+            AND child.status NOT IN ('completed', 'cancelled')
+      )
+`);
+
 function normalizeTask(sessionId, task, position) {
     const now = Date.now();
     const completedTime = task.completedTime ?? task.completedAt
@@ -176,6 +192,14 @@ function normalizeTask(sessionId, task, position) {
     };
 }
 
+function completeFinishedProjects(sessionId) {
+    const now = Date.now();
+    let changed = 0;
+    do {
+        changed = completeFinishedProjectsStmt.run({ session_id: sessionId, now }).changes;
+    } while (changed > 0);
+}
+
 const replaceTaskList = db.transaction((sessionId, tasks, session) => {
     ensureSessionStmt.run({
         id: sessionId,
@@ -189,6 +213,10 @@ const replaceTaskList = db.transaction((sessionId, tasks, session) => {
         if (!row.id || !row.name) throw new Error('Every task requires an id and name');
         upsertTaskStmt.run(row);
     });
+
+    // A project is complete exactly when it has children and none of those children
+    // remain open. Repeat so nested project completion cascades to its ancestors.
+    completeFinishedProjects(sessionId);
 });
 
 module.exports = {
