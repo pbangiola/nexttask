@@ -18,6 +18,12 @@ const syncProjectIdStmt = db.prepare(`
     WHERE user_id = ? AND id = ?;
 `);
 
+const updateProjectMetricsStmt = db.prepare(`
+    UPDATE tasks
+    SET estimated_ms = ?, elapsed_ms = ?, updated_at = ?
+    WHERE user_id = ? AND id = ? AND node_type = 'project';
+`);
+
 const completeProjectStmt = db.prepare(`
     UPDATE tasks
     SET status = 'completed', completed = ?, last_changed = NULL, updated_at = ?
@@ -79,6 +85,53 @@ function descendantIsOpen(nodeId, childrenByParent) {
         stack.push(...(childrenByParent.get(String(node.id)) || []));
     }
     return false;
+}
+
+function projectDepth(node, byId) {
+    let depth = 0;
+    let cursor = node;
+    const seen = new Set();
+    while (cursor?.parent_id != null && !seen.has(String(cursor.id))) {
+        seen.add(String(cursor.id));
+        depth += 1;
+        cursor = byId.get(String(cursor.parent_id));
+    }
+    return depth;
+}
+
+function rollupProjectMetrics(rows, uid, repairs) {
+    const { byId, childrenByParent } = indexNodes(rows);
+    const projects = rows
+        .filter(row => row.node_type === 'project')
+        .sort((a, b) => projectDepth(b, byId) - projectDepth(a, byId));
+    const totals = new Map();
+    const now = Date.now();
+
+    for (const project of projects) {
+        const children = childrenByParent.get(String(project.id)) || [];
+        if (!children.length) continue;
+
+        let estimatedMs = 0;
+        let elapsedMs = 0;
+
+        for (const child of children) {
+            if (child.node_type === 'project') {
+                const childTotals = totals.get(String(child.id));
+                estimatedMs += childTotals ? childTotals.estimatedMs : Number(child.estimated_ms || 0);
+                elapsedMs += childTotals ? childTotals.elapsedMs : Number(child.elapsed_ms || 0);
+            } else {
+                estimatedMs += Number(child.estimated_ms || 0);
+                elapsedMs += Number(child.elapsed_ms || 0);
+            }
+        }
+
+        totals.set(String(project.id), { estimatedMs, elapsedMs });
+
+        if (Number(project.estimated_ms || 0) !== estimatedMs || Number(project.elapsed_ms || 0) !== elapsedMs) {
+            updateProjectMetricsStmt.run(estimatedMs, elapsedMs, now, uid, project.id);
+            repairs.push({ type: 'rollup_project_metrics', nodeId: project.id, estimatedMs, elapsedMs });
+        }
+    }
 }
 
 function auditRows(rows) {
@@ -157,6 +210,12 @@ const reconcileTransaction = db.transaction(userId => {
         }
     }
 
+    // Project metrics are derived from direct children bottom-up. Child-project
+    // totals already contain their descendants, so the parent adds each child
+    // project once and never double-counts descendant tasks.
+    rows = getUserNodesStmt.all(uid);
+    rollupProjectMetrics(rows, uid, repairs);
+
     // Preserve every project node. Projects are completed in place only when
     // they have historical children and no open descendants. Repeat so nested
     // project completion can cascade upward without flattening the branch.
@@ -178,6 +237,8 @@ const reconcileTransaction = db.transaction(userId => {
         }
     }
 
+    rows = getUserNodesStmt.all(uid);
+    rollupProjectMetrics(rows, uid, repairs);
     rows = getUserNodesStmt.all(uid);
     return { repairs, audit: auditRows(rows) };
 });
