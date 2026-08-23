@@ -152,7 +152,6 @@ function prepareSortingDisplay(sortTask) {
     timerInterval = setInterval(renderSortingTimer, 1_000);
 }
 
-
 function showFocus(task){
     if (hasHardStop() && Date.now() >= hardStopAtMs) { handleHardStop(); return; }
     startHardStopWatch();
@@ -297,3 +296,40 @@ function showSequentialTiming(startIndex = 0) {
     saveLocal('timing-entry');
 }
 
+function showDashboard(){
+    hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic();const screen=document.createElement('div');screen.id='dashboardScreen';
+    const heading=document.createElement('h2');heading.textContent='Your Task List';screen.appendChild(heading);
+    const list=document.createElement('ol');incompleteTasks().forEach(task=>{const li=document.createElement('li');li.textContent=task.name;list.appendChild(li);});screen.appendChild(list);
+    const start=document.createElement('button');start.textContent='Get to Work';start.onclick=beginWork;
+    const exportButton=document.createElement('button');exportButton.textContent='Download Task List';exportButton.onclick=exportCsv;
+    screen.append(start,exportButton);container.appendChild(screen);saveLocal('dashboard');
+}
+
+function showCompletion(){
+    hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic();const screen=document.createElement('div');screen.id='completionScreen';
+    const heading=document.createElement('h2');heading.textContent='All Tasks Completed!';screen.appendChild(heading);
+    const exportButton=document.createElement('button');exportButton.textContent='Download Task List';exportButton.onclick=exportCsv;screen.appendChild(exportButton);
+    container.appendChild(screen);saveLocal('completion');
+}
+
+function showSessionEnded(){
+    hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic();const screen=document.createElement('div');screen.id='sessionEndedScreen';
+    const heading=document.createElement('h2');heading.textContent='Work Session Ended';screen.appendChild(heading);
+    if(endConstraint){const p=document.createElement('p');p.textContent=endConstraint;screen.appendChild(p);}
+    const list=document.createElement('ol');incompleteTasks().forEach(task=>{const li=document.createElement('li');li.textContent=task.name;list.appendChild(li);});screen.appendChild(list);
+    const exportButton=document.createElement('button');exportButton.textContent='Download Task List';exportButton.onclick=exportCsv;screen.appendChild(exportButton);
+    container.appendChild(screen);saveLocal('session-ended');
+}
+
+function updateCapacityMessage() {
+    let message = el('capacityMessage');
+    if (!message) {
+        message = document.createElement('p');
+        message.id = 'capacityMessage';
+        el('tasks')?.insertAdjacentElement('afterend', message);
+    }
+    if (!message) return;
+    const names = parseTaskEntryText(el('tasks')?.value || '');
+    const estimate = estimatedSortingTimeMs(names.length);
+    message.textContent = names.length ? `Estimated sorting time: ${formatDuration(estimate)}` : '';
+}
