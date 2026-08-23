@@ -1,6 +1,5 @@
 const express = require('express');
 const userStore = require('./user-store');
-const blockerStore = require('./blocker-store');
 
 const router = express.Router();
 function badRequest(res,error){const message=error?.message||'Invalid request';const notFound=message.startsWith('Task node not found');return res.status(notFound?404:400).json({error:message});}
@@ -14,7 +13,6 @@ router.get('/users/:userId/nodes/:nodeId',(req,res)=>{try{const node=userStore.g
 router.post('/users/:userId/nodes',(req,res)=>{try{const node=userStore.createNode(req.params.userId,req.body||{});res.status(201).json({node});}catch(error){return badRequest(res,error);}});
 router.put('/users/:userId/nodes/:nodeId',(req,res)=>{try{const node=userStore.updateNode(req.params.userId,req.params.nodeId,req.body||{});res.json({node});}catch(error){return badRequest(res,error);}});
 router.put('/users/:userId/nodes/:nodeId/parent',(req,res)=>{try{const result=userStore.reparentNode(req.params.userId,req.params.nodeId,req.body?.parentId??null,req.body?.position);res.json(result);}catch(error){return badRequest(res,error);}});
-router.post('/users/:userId/nodes/:nodeId/blocker',(req,res)=>{try{res.json(blockerStore.restructureBlockedTask(req.params.userId,req.params.nodeId,req.body?.blockerName));}catch(error){return badRequest(res,error);}});
 router.delete('/users/:userId/nodes/:nodeId',(req,res)=>{try{const mode=req.query.mode==='ungroup'?'ungroup':'subtree';res.json(userStore.deleteNode(req.params.userId,req.params.nodeId,mode));}catch(error){return badRequest(res,error);}});
 router.post('/users/:userId/nodes/undo',(req,res)=>{try{userStore.restoreSnapshot(req.params.userId,req.body?.snapshot);res.json({success:true});}catch(error){return badRequest(res,error);}});
 
