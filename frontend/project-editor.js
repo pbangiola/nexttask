@@ -29,7 +29,9 @@ window.ProjectEditor = (() => {
         const tasksHeading=el('projectEditorTasksHeading');
         const container=el('dynamicContainer');
         if(!controls||!tasksHeading||!container)return;
-        const pageIsLong=document.documentElement.scrollHeight>window.innerHeight;
+        const contentHeight=container.getBoundingClientRect().height;
+        const availableHeight=Math.max(0,window.innerHeight-container.getBoundingClientRect().top);
+        const pageIsLong=contentHeight>availableHeight;
         if(pageIsLong)tasksHeading.before(controls);
         else container.appendChild(controls);
     }
