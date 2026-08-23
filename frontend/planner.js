@@ -171,30 +171,42 @@ window.ProjectPlanner = (() => {
             view='backlog-delete';
             const items=openRootTasks(await roots());
             const c=clearShell();
-            c.innerHTML=`<h2>Delete Tasks</h2><p>Delete anything you no longer need.</p><div id="deleteBacklogList" class="planner-list"></div><button id="undoBacklogDelete">Undo Last Delete</button><button id="deleteBacklogBack">Back</button>`;
+            c.innerHTML=`<h2>Delete Tasks</h2><p>Select one or more tasks to delete.</p><div id="deleteBacklogList" class="planner-list"></div><button id="deleteSelectedBacklog">Delete Selected</button><button id="undoBacklogDelete">Undo Last Delete</button><button id="deleteBacklogBack">Back</button>`;
             const list=el('deleteBacklogList');
+            const bulkDelete=el('deleteSelectedBacklog');
+            bulkDelete.disabled=true;
             if(!items.length) list.innerHTML='<p>There are no uncategorized tasks to delete.</p>';
             items.forEach(item=>{
-                const row=document.createElement('div');
-                row.className='planner-project-row';
+                const row=document.createElement('label');
+                row.className='planner-check';
+                const checkbox=document.createElement('input');
+                checkbox.type='checkbox';
+                checkbox.className='backlogDeleteSelect';
+                checkbox.value=item.id;
                 const name=document.createElement('span');
                 name.textContent=item.name;
-                name.style.fontSize='16px';
-                name.style.color='inherit';
-                const button=document.createElement('button');
-                button.textContent='Delete';
-                button.onclick=async()=>{
-                    if(!confirm(`Delete “${item.name}”?`))return;
-                    button.disabled=true;
-                    try{
-                        const result=await deleteNode(item.id);
-                        backlogUndoSnapshot=result.undo || null;
-                        showBacklogDelete();
-                    }catch(error){fail(error,showBacklogDelete);}
+                checkbox.onchange=()=>{
+                    bulkDelete.disabled=!list.querySelector('.backlogDeleteSelect:checked');
                 };
-                row.append(name,button);
+                row.append(checkbox,name);
                 list.appendChild(row);
             });
+            bulkDelete.onclick=async()=>{
+                const selected=Array.from(list.querySelectorAll('.backlogDeleteSelect:checked'));
+                if(!selected.length)return;
+                const count=selected.length;
+                if(!confirm(`Delete ${count} selected task${count===1?'':'s'}?`))return;
+                bulkDelete.disabled=true;
+                try{
+                    const snapshot=[];
+                    for(const checkbox of selected){
+                        const result=await deleteNode(checkbox.value);
+                        if(Array.isArray(result.undo))snapshot.push(...result.undo);
+                    }
+                    backlogUndoSnapshot=snapshot.length?snapshot:null;
+                    showBacklogDelete();
+                }catch(error){fail(error,showBacklogDelete);}
+            };
             const undo=el('undoBacklogDelete');
             undo.disabled=!backlogUndoSnapshot;
             undo.onclick=async()=>{
