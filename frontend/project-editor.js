@@ -25,16 +25,16 @@ window.ProjectEditor = (() => {
     function flattenProjects(nodes,out=[]){for(const n of nodes||[]){if(n.node_type==='project'&&!['completed','cancelled'].includes(n.status))out.push(n);flattenProjects(n.children||[],out);}return out;}
 
     function positionProjectEditorNavigation(){
-        const controls=el('projectEditorNavigation');
-        const tasksHeading=el('projectEditorTasksHeading');
+        const topControls=el('projectEditorNavigationTop');
+        const bottomControls=el('projectEditorNavigationBottom');
         const container=el('dynamicContainer');
-        if(!controls||!tasksHeading||!container)return;
-        const controlsHeight=controls.getBoundingClientRect().height;
+        if(!topControls||!bottomControls||!container)return;
+        topControls.classList.add('hidden');
+        const controlsHeight=bottomControls.getBoundingClientRect().height;
         const contentHeight=container.scrollHeight;
         const availableHeight=Math.max(0,window.innerHeight-container.getBoundingClientRect().top);
         const pageIsLong=(contentHeight-controlsHeight)>availableHeight;
-        if(pageIsLong)tasksHeading.before(controls);
-        else container.appendChild(controls);
+        topControls.classList.toggle('hidden',!pageIsLong);
     }
 
     async function backFromProjectEditor(){
@@ -58,11 +58,13 @@ window.ProjectEditor = (() => {
             const tasks=children.filter(c=>c.node_type!=='project');
             const projects=children.filter(c=>c.node_type==='project');
             const c=shell();
+            const navigationButtons=()=>`${getUndo()?'<button class="projectEditorUndo">Undo Last Change</button>':''}<button class="projectEditorBack">Back</button>`;
             c.innerHTML=`<h2>${esc(node.name)}</h2><p>${minutes(node.estimated_ms)} min estimated</p>
+                <div id="projectEditorNavigationTop" class="hidden">${navigationButtons()}</div>
                 <h3 id="projectEditorTasksHeading">Tasks</h3><div id="projectEditorTasks"></div>
                 <h3>Projects</h3><div id="projectEditorProjects"></div>
                 <div class="planner-choice-grid"><button id="projectEditorGroup">Group Selected</button><button id="projectEditorMoveSelected">Move Selected</button><button id="projectEditorAddTask">Add Task</button><button id="projectEditorAddProject">Add Subproject</button></div>
-                <div id="projectEditorNavigation">${getUndo()?'<button id="projectEditorUndo">Undo Last Change</button>':''}<button id="projectEditorBack">Back</button></div>`;
+                <div id="projectEditorNavigationBottom">${navigationButtons()}</div>`;
             renderRows(el('projectEditorTasks'),tasks,node,false);
             renderRows(el('projectEditorProjects'),projects,node,true);
             if(!tasks.length)el('projectEditorTasks').innerHTML='<p>No loose tasks at this level.</p>';
@@ -71,8 +73,8 @@ window.ProjectEditor = (() => {
             el('projectEditorMoveSelected').onclick=()=>showMoveSelected(node);
             el('projectEditorAddTask').onclick=()=>showAddTask(node);
             el('projectEditorAddProject').onclick=()=>showAddProject(node);
-            if(el('projectEditorUndo'))el('projectEditorUndo').onclick=undoLast;
-            el('projectEditorBack').onclick=backFromProjectEditor;
+            document.querySelectorAll('.projectEditorUndo').forEach(button=>button.onclick=undoLast);
+            document.querySelectorAll('.projectEditorBack').forEach(button=>button.onclick=backFromProjectEditor);
             requestAnimationFrame(positionProjectEditorNavigation);
         }catch(error){console.error(error);const c=shell();c.innerHTML=`<h2>Project Editor</h2><p>${esc(error.message||'Could not open project.')}</p><button id="projectEditorErrorBack">Back</button>`;el('projectEditorErrorBack').onclick=()=>history.length?open(history.pop(),{push:false}):window.ProjectPlanner?.open?.();}
     }
