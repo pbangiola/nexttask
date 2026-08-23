@@ -168,7 +168,7 @@ function showFocus(task){
 function showBlockedFlow(blockedTask){
     hideStaticScreens(); hide(el('stopWorkingBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='blockedTaskScreen';
     const heading=document.createElement('h2'); heading.textContent=`What is blocking “${blockedTask.name}”?`; const input=document.createElement('input'); input.placeholder='Blocking task';
-    const confirm=document.createElement('button'); confirm.textContent='Add Blocker and Requeue Both'; confirm.onclick=()=>{const name=input.value.trim();if(!name){alert('Enter the blocking task.');return;}const blocker=createTask(name);const blockedIndex=sortedTasks.findIndex(task=>task.id===blockedTask.id);if(blockedIndex>=0)sortedTasks.splice(blockedIndex,1);blockedTask.status='blocked';blockedTask.blockedByTaskId=blocker.id;blockedTask.lastChanged=null;sortedTasks.push(blocker,blockedTask);activeTaskId=firstIncompleteTask()?.id||null;save('dashboard');showDashboard();};
+    const confirm=document.createElement('button'); confirm.textContent='Add Blocker and Requeue Both'; confirm.onclick=()=>{const name=input.value.trim();if(!name){alert('Enter the blocking task.');return;}const blocker=createTask(name);const blockedIndex=sortedTasks.findIndex(task=>task.id===blockedTask.id);if(blockedIndex>=0)sortedTasks.splice(blockedIndex,1);blockedTask.status='pending';blockedTask.blockedByTaskId=null;blockedTask.lastChanged=null;sortedTasks.push(blocker,blockedTask);activeTaskId=firstIncompleteTask()?.id||null;save('dashboard');showDashboard();};
     const cancel=document.createElement('button'); cancel.textContent='Cancel and Continue Working'; cancel.onclick=()=>showFocus(blockedTask);
     screen.append(heading,input,confirm,cancel); container.appendChild(screen); saveLocal('focus');
 }
@@ -266,19 +266,10 @@ function showSequentialTiming(startIndex = 0) {
 
         allocationTimer.textContent = formatDuration(remainingMs);
 
-        const maxWholeMinutes = Math.min(MAX_TASK_MINUTES, Math.floor(remainingMs / 60_000));
-        if (maxWholeMinutes < 1) {
-            input.max = '0';
-            input.placeholder = 'Less than 1 minute remains';
-            input.disabled = true;
-            next.disabled = true;
-            return;
-        }
-
-        input.disabled = false;
-        next.disabled = false;
-        input.max = String(maxWholeMinutes);
-        input.placeholder = `1-${maxWholeMinutes} minutes`;
+        const maxWholeMinutes = Math.min(MAX_TASK_MINUTES, Math.floor(remainingMs / 60000));
+        input.max = String(Math.max(1, maxWholeMinutes));
+        input.placeholder = `1-${Math.max(1, maxWholeMinutes)} minutes`;
+        next.disabled = maxWholeMinutes < 1;
     }
 
     next.onclick = () => {
@@ -286,16 +277,14 @@ function showSequentialTiming(startIndex = 0) {
         const remainingMs = remainingPlanningTimeMs();
         const maxWholeMinutes = remainingMs === null
             ? MAX_TASK_MINUTES
-            : Math.min(MAX_TASK_MINUTES, Math.floor(remainingMs / 60_000));
+            : Math.min(MAX_TASK_MINUTES, Math.floor(remainingMs / 60000));
 
         if (!Number.isFinite(minutes) || minutes < 1 || minutes > maxWholeMinutes) {
             alert(`Enter a number from 1 to ${Math.max(1, maxWholeMinutes)}.`);
-            updatePlanningTimer();
             return;
         }
 
-        task.estimatedTimeMs = minutes * 60_000;
-        clearInterval(timerInterval);
+        task.estimatedTimeMs = minutes * 60000;
         saveLocal('timing-entry');
         showSequentialTiming(index + 1);
     };
@@ -304,57 +293,7 @@ function showSequentialTiming(startIndex = 0) {
     container.appendChild(screen);
 
     updatePlanningTimer();
-    timerInterval = setInterval(updatePlanningTimer, 1_000);
+    timerInterval = setInterval(updatePlanningTimer, 1000);
     saveLocal('timing-entry');
-}
-
-function showCompletion(){clearInterval(timerInterval);hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic();const screen=document.createElement('div');screen.id='completionScreen';const heading=document.createElement('h2');heading.textContent='All Done!';const varianceMs=sortedTasks.filter(task=>ensureTask(task).completed).reduce((sum,task)=>sum+task.estimatedTimeMs-task.actualTimeMs,0);const remaining=document.createElement('p');remaining.textContent=`Time Remaining: ${varianceMs<0?'-':''}${formatDuration(varianceMs,true)}`;remaining.style.color=varianceMs>=0?'green':'red';const title=document.createElement('h3');title.textContent='How Each Task Went:';const list=document.createElement('ul');sortedTasks.filter(task=>task.completed).forEach(task=>{const item=document.createElement('li');const actualMin=Math.round(task.actualTimeMs/60000);const estimateMin=Math.round(task.estimatedTimeMs/60000);const difference=estimateMin-actualMin;const comparison=difference>0?`${difference} minute${difference===1?'':'s'} ahead of schedule`:difference<0?`${Math.abs(difference)} minute${Math.abs(difference)===1?'':'s'} behind schedule`:'right on schedule';item.textContent=`${task.name} — finished in ${actualMin} minute${actualMin===1?'':'s'}, ${comparison}`;list.appendChild(item);});screen.append(heading,remaining,title,list);container.appendChild(screen);save('completion');}
-
-function showDashboard() {
-    hideStaticScreens(); hide(el('stopWorkingBtn')); show(el('startOverBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='dashboardScreen';
-    const heading=document.createElement('h2'); heading.textContent='Your Task List'; screen.appendChild(heading);
-    const list=document.createElement('ol'); sortedTasks.forEach(task=>{ ensureTask(task); const item=document.createElement('li'); const estimate=task.estimatedTimeMs?` — ${Math.round(task.estimatedTimeMs/60000)} min`:''; const state=task.completed?' ✓':task.status==='blocked'?' — blocked':''; item.textContent=`${task.name}${estimate}${state}`; list.appendChild(item); }); screen.appendChild(list);
-    const capacity=document.createElement('p'); capacity.textContent=`Allocated: ${Math.round(allocatedTimeMs()/60000)} minutes`+(totalAvailableTimeMs?` of ${Math.round(totalAvailableTimeMs/60000)} available`:''); screen.appendChild(capacity);
-    const work=document.createElement('button'); work.textContent='Get to Work'; work.onclick=beginWork; screen.appendChild(work);
-    const exportButton=document.createElement('button'); exportButton.textContent='Download Task List'; exportButton.onclick=exportCsv; screen.appendChild(exportButton);
-    container.appendChild(screen); save('dashboard');
-}
-
-function showSessionEnded() {
-    clearInterval(timerInterval);
-    clearInterval(hardStopInterval);
-    hardStopInterval = null;
-    hideStaticScreens();
-    hide(el('stopWorkingBtn'));
-    show(el('startOverBtn'));
-
-    const container = clearDynamic();
-    const screen = document.createElement('div');
-    screen.id = 'sessionEndedScreen';
-
-    const heading = document.createElement('h2');
-    heading.textContent = 'Session Ended';
-
-    const message = document.createElement('p');
-    message.textContent = 'Your available time is up. The current task was saved without being marked complete.';
-
-    const listButton = document.createElement('button');
-    listButton.textContent = 'View Saved Task List';
-    listButton.onclick = showDashboard;
-
-    const resumeButton = document.createElement('button');
-    resumeButton.textContent = 'Start Another Session';
-    resumeButton.onclick = () => {
-        hardStopHandled = false;
-        sessionStartedAtMs = 0;
-        hardStopAtMs = 0;
-        totalAvailableTimeMs = 0;
-        saveLocal('time-constraint');
-        showTimeConstraint();
-    };
-
-    screen.append(heading, message, listButton, resumeButton);
-    container.appendChild(screen);
-    saveLocal('session-ended');
 }
 
