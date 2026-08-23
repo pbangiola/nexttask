@@ -311,44 +311,4 @@
         });
         return payload;
     };
-
-    window.showBlockedFlow = function showStructuralBlockedFlow(blockedTask) {
-        hideStaticScreens();
-        hide(el('stopWorkingBtn'));
-        const container = clearDynamic();
-        const screen = document.createElement('div');
-        screen.id = 'blockedTaskScreen';
-
-        const heading = document.createElement('h2');
-        heading.textContent = `What is blocking “${blockedTask.name}”?`;
-        const input = document.createElement('input');
-        input.placeholder = 'Missing prerequisite';
-        const confirm = document.createElement('button');
-        confirm.textContent = 'Add Blocker and Requeue';
-        confirm.onclick = async () => {
-            const blockerName = input.value.trim();
-            if (!blockerName) return alert('Enter the missing prerequisite.');
-            confirm.disabled = true;
-            try {
-                const response = await fetch(
-                    `${API_BASE_URL}/api/users/${encodeURIComponent(userId)}/nodes/${encodeURIComponent(blockedTask.id)}/blocker`,
-                    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blockerName }) }
-                );
-                const result = await response.json();
-                if (!response.ok) throw new Error(result?.error || `Blocked update failed (${response.status})`);
-                await loadFlattenedBacklog(false);
-            } catch (error) {
-                console.error(error);
-                alert(error.message || 'The blocker could not be added.');
-                confirm.disabled = false;
-            }
-        };
-
-        const cancel = document.createElement('button');
-        cancel.textContent = 'Cancel and Continue Working';
-        cancel.onclick = () => showFocus(blockedTask);
-        screen.append(heading, input, confirm, cancel);
-        container.appendChild(screen);
-        saveLocal('focus');
-    };
 })();
