@@ -30,11 +30,13 @@ window.ProjectEditor = (() => {
         const container=el('dynamicContainer');
         if(!topControls||!bottomControls||!container)return;
         topControls.classList.add('hidden');
+        bottomControls.classList.remove('hidden');
         const controlsHeight=bottomControls.getBoundingClientRect().height;
         const contentHeight=container.scrollHeight;
         const availableHeight=Math.max(0,window.innerHeight-container.getBoundingClientRect().top);
         const pageIsLong=(contentHeight-controlsHeight)>availableHeight;
         topControls.classList.toggle('hidden',!pageIsLong);
+        bottomControls.classList.toggle('hidden',pageIsLong);
     }
 
     async function backFromProjectEditor(){
