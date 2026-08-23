@@ -13,7 +13,6 @@ function ensureTask(task) {
     task.started = task.started ?? null;
     task.completedTime = task.completedTime ?? null;
     task.lastChanged = task.lastChanged ?? null;
-    task.blockedByTaskId = task.blockedByTaskId ?? null;
     return task;
 }
 
@@ -22,7 +21,7 @@ function createTask(name, values = {}) {
     return ensureTask({ id: values.id, name, estimatedTimeMs: values.estimatedTimeMs,
         actualTimeMs: values.actualTimeMs, completed: values.completed, status: values.status,
         created: values.created, started: values.started, completedTime: values.completedTime,
-        lastChanged: values.lastChanged, blockedByTaskId: values.blockedByTaskId });
+        lastChanged: values.lastChanged });
 }
 
 //tasklist indexing functions
