@@ -127,30 +127,40 @@ function mergeWithChoices(left, right, runId) {
             task2.onclick = () => chooseMerge('right');
         }
 
-        // Before merging two already-sorted halves, compare the boundary items.
-        // If the last item in the left half belongs before the first item in the
-        // right half, every item in left is already before every item in right,
-        // so the two halves form one ordered run and can be concatenated.
-        function checkRunBoundary() {
-            if (runId !== sortRunId) { finish([]); return; }
-            if (!left.length || !right.length) { finish([...left, ...right]); return; }
-
-            const leftBoundary = left[left.length - 1];
-            const rightBoundary = right[0];
-            task1.textContent = leftBoundary.name;
-            task2.textContent = rightBoundary.name;
-
-            task1.onclick = () => {
-                if (runId !== sortRunId) { finish([]); return; }
-                finish([...left, ...right]);
-            };
-            task2.onclick = () => {
-                if (runId !== sortRunId) { finish([]); return; }
-                nextMergeComparison();
-            };
+        // For short runs, the shortcut comparisons cost more than they save and
+        // can make the interaction feel odd. Merge normally if either side has
+        // three or fewer items.
+        if (left.length <= 3 || right.length <= 3) {
+            nextMergeComparison();
+            return;
         }
 
-        checkRunBoundary();
+        // Long-run shortcut 1: compare first(left) with last(right). If the user
+        // says last(right) comes first, every item in right must come before every
+        // item in left, so concatenate right + left.
+        function checkRightEntirelyBeforeLeft() {
+            if (runId !== sortRunId) { finish([]); return; }
+            task1.textContent = left[0].name;
+            task2.textContent = right[right.length - 1].name;
+
+            task1.onclick = () => checkLeftEntirelyBeforeRight();
+            task2.onclick = () => finish([...right, ...left]);
+        }
+
+        // Long-run shortcut 2: compare first(right) with last(left). If the user
+        // says last(left) comes first, every item in left must come before every
+        // item in right, so concatenate left + right. Otherwise the runs overlap
+        // and we fall back to the normal merge.
+        function checkLeftEntirelyBeforeRight() {
+            if (runId !== sortRunId) { finish([]); return; }
+            task1.textContent = right[0].name;
+            task2.textContent = left[left.length - 1].name;
+
+            task1.onclick = () => nextMergeComparison();
+            task2.onclick = () => finish([...left, ...right]);
+        }
+
+        checkRightEntirelyBeforeLeft();
     });
 }
 
