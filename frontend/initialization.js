@@ -3,7 +3,7 @@
 //load and set global variables
 
 const API_BASE_URL = 'https://nexttask-production.up.railway.app';
-const MAX_TASK_MINUTES = 60;
+const DECOMPOSITION_PROMPT_MINUTES = 20;
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 const LOCAL_STATE_KEY = 'taskSorterSession_fallback';
 
@@ -180,13 +180,79 @@ function updateCapacityMessage() {
     message.textContent = `Estimated capacity: ${Math.round(estimated/60000)} / ${Math.round(totalAvailableTimeMs/60000)} minutes.`;
     message.style.color = estimated > totalAvailableTimeMs ? '#d32f2f' : '#2e7d32';
 }
-function parseTaskEntryText(text) {
+function parseDurationMs(value, allowBareNumber = false) {
+    const text = String(value || '').trim().toLowerCase();
+    if (!text) return null;
+
+    if (allowBareNumber && /^\d+(?:\.\d+)?$/.test(text)) {
+        const minutes = Number(text);
+        return minutes > 0 ? Math.round(minutes * 60_000) : null;
+    }
+
+    const compact = text.replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+    const fullMatch = compact.match(/^(?:(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?(?:\s*(\d+(?:\.\d+)?)\s*(?:m|min|mins|minute|minutes))?$/);
+    if (!fullMatch || (!fullMatch[1] && !fullMatch[2])) return null;
+
+    const hours = Number(fullMatch[1] || 0);
+    const minutes = Number(fullMatch[2] || 0);
+    const totalMinutes = (hours * 60) + minutes;
+    return totalMinutes > 0 ? Math.round(totalMinutes * 60_000) : null;
+}
+
+function parseTimedTaskChunk(chunk) {
+    const clean = String(chunk || '').replace(/^\s*\d+[.)]\s*/, '').trim();
+    if (!clean) return null;
+
+    const commaMatch = clean.match(/^(.*?),\s*(.+)$/);
+    if (commaMatch) {
+        const durationMs = parseDurationMs(commaMatch[2], true);
+        if (durationMs) return { name: commaMatch[1].trim(), estimatedTimeMs: durationMs };
+    }
+
+    const suffixMatch = clean.match(/^(.*?)\s+((?:(?:\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours)\s*)?(?:\d+(?:\.\d+)?)\s*(?:m|min|mins|minute|minutes))\s*$/i);
+    if (suffixMatch) {
+        const durationMs = parseDurationMs(suffixMatch[2]);
+        if (durationMs) return { name: suffixMatch[1].trim(), estimatedTimeMs: durationMs };
+    }
+
+    return null;
+}
+
+function parseTimedTaskEntries(text) {
     const trimmed = String(text || '').trim();
-    if (!trimmed) return [];
-    const pieces = trimmed.includes('\n') ? trimmed.split(/\r?\n/) : trimmed.split(',');
-    return pieces
-        .map(value => value.replace(/^\s*\d+[.)]\s*/, '').trim())
-        .filter(Boolean);
+    if (!trimmed) return { entries: [], invalid: [] };
+
+    let chunks = trimmed.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+
+    // Also accept a compact comma list such as:
+    // "Email Sam, 5m, grade papers, 30m".
+    if (chunks.length === 1) {
+        const tokens = chunks[0].split(',').map(value => value.trim()).filter(Boolean);
+        if (tokens.length >= 2 && tokens.length % 2 === 0) {
+            const paired = [];
+            let allPairsTimed = true;
+            for (let i = 0; i < tokens.length; i += 2) {
+                const durationMs = parseDurationMs(tokens[i + 1], true);
+                if (!durationMs) { allPairsTimed = false; break; }
+                paired.push({ name: tokens[i], estimatedTimeMs: durationMs });
+            }
+            if (allPairsTimed) return { entries: paired.filter(entry => entry.name), invalid: [] };
+        }
+    }
+
+    const entries = [];
+    const invalid = [];
+    chunks.forEach(chunk => {
+        const parsed = parseTimedTaskChunk(chunk);
+        if (parsed?.name) entries.push(parsed);
+        else invalid.push(chunk);
+    });
+    return { entries, invalid };
+}
+
+function parseTaskEntryText(text) {
+    const parsed = parseTimedTaskEntries(text);
+    return parsed.entries.map(entry => entry.name);
 }
 function parsePlainTaskText(text) {
     return [...new Set(parseTaskEntryText(text))];
