@@ -107,14 +107,12 @@ function showStartOverPrompt() {
 }
 
 function showTimingGateway() {
-    hideStaticScreens(); hide(el('startOverBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='timingGatewayScreen';
-    const heading=document.createElement('h2'); heading.textContent='Do you want to set timings now?';
-    const yes=document.createElement('button'); yes.textContent='Yes'; yes.onclick=()=>showSequentialTiming(0);
-    const no=document.createElement('button'); no.textContent='No'; no.onclick=showDashboard;
-    screen.append(heading,yes,no); container.appendChild(screen); saveLocal('timing-gateway');
+    // Kept only for restoring older saved sessions/imports. New task lists
+    // require estimates at entry, so there is no now/later timing choice.
+    showSequentialTiming(0);
 }
 
-function showSingleTaskEstimate(task){ hideStaticScreens(); hide(el('startOverBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='deadlinePage'; const heading=document.createElement('h2'); heading.textContent=`Set a time for: ${task.name}`; const input=document.createElement('input'); input.type='number'; input.min='1'; input.max=String(MAX_TASK_MINUTES); const start=document.createElement('button'); start.textContent='Start Task'; start.onclick=()=>{const minutes=Number.parseInt(input.value,10);if(!Number.isFinite(minutes)||minutes<1||minutes>MAX_TASK_MINUTES){alert(`Enter a number from 1 to ${MAX_TASK_MINUTES}.`);return;}task.estimatedTimeMs=minutes*60000;showFocus(task);}; screen.append(heading,input,start); container.appendChild(screen); }
+function showSingleTaskEstimate(task){ hideStaticScreens(); hide(el('startOverBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='deadlinePage'; const heading=document.createElement('h2'); heading.textContent=`Set a time for: ${task.name}`; const input=document.createElement('input'); input.type='number'; input.min='1'; input.placeholder='Minutes'; const start=document.createElement('button'); start.textContent='Start Task'; start.onclick=()=>{const minutes=Number.parseInt(input.value,10);if(!Number.isFinite(minutes)||minutes<1){alert('Enter a positive number of minutes.');return;}if(minutes>DECOMPOSITION_PROMPT_MINUTES&&!confirm(`“${task.name}” is estimated at ${minutes} minutes. Tasks over 20 minutes may be easier to manage if you split them. Choose OK to keep it whole.`))return;task.estimatedTimeMs=minutes*60000;showFocus(task);}; screen.append(heading,input,start); container.appendChild(screen); }
 
 function prepareSortingDisplay(sortTask) {
     const compare = el('taskCompare');
@@ -175,8 +173,8 @@ function showBlockedFlow(blockedTask){
 
 function showAddTask(activeTask){
     hideStaticScreens(); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='addTaskPage';
-    const heading=document.createElement('h2'); heading.textContent='Add a Task'; const input=document.createElement('input'); input.placeholder='Task name';
-    const choose=document.createElement('button'); choose.textContent='Choose Priority'; choose.onclick=()=>{const name=input.value.trim();if(!name){alert('Enter a task name.');return;}showTaskPlacement(createTask(name),activeTask);};
+    const heading=document.createElement('h2'); heading.textContent='Add a Task'; const input=document.createElement('input'); input.placeholder='Task and time, e.g. Call Sam, 10m';
+    const choose=document.createElement('button'); choose.textContent='Choose Priority'; choose.onclick=()=>{const parsed=parseTimedTaskEntries(input.value);if(parsed.invalid.length||parsed.entries.length!==1){alert('Enter one task with a time, for example “Call Sam, 10m” or “Call Sam 10m”.');return;}const entry=parsed.entries[0];const minutes=entry.estimatedTimeMs/60000;if(minutes>DECOMPOSITION_PROMPT_MINUTES&&!confirm(`“${entry.name}” is estimated at ${Math.round(minutes)} minutes. Tasks over 20 minutes may be easier to manage if you split them. Choose OK to keep it whole.`))return;showTaskPlacement(createTask(entry.name,{estimatedTimeMs:entry.estimatedTimeMs}),activeTask);};
     const cancel=document.createElement('button'); cancel.textContent='Cancel'; cancel.onclick=()=>showFocus(activeTask); screen.append(heading,input,choose,cancel); container.appendChild(screen);
 }
 
@@ -251,8 +249,8 @@ function showSequentialTiming(startIndex = 0) {
 
         if (remainingMs === null) {
             allocationTimer.textContent = 'No overall time limit';
-            input.max = String(MAX_TASK_MINUTES);
-            input.placeholder = `1-${MAX_TASK_MINUTES} minutes`;
+            input.removeAttribute('max');
+            input.placeholder = 'Minutes';
             next.disabled = false;
             return;
         }
@@ -266,7 +264,7 @@ function showSequentialTiming(startIndex = 0) {
 
         allocationTimer.textContent = formatDuration(remainingMs);
 
-        const maxWholeMinutes = Math.min(MAX_TASK_MINUTES, Math.floor(remainingMs / 60_000));
+        const maxWholeMinutes = Math.floor(remainingMs / 60_000);
         if (maxWholeMinutes < 1) {
             input.max = '0';
             input.placeholder = 'Less than 1 minute remains';
@@ -285,11 +283,11 @@ function showSequentialTiming(startIndex = 0) {
         const minutes = Number.parseInt(input.value, 10);
         const remainingMs = remainingPlanningTimeMs();
         const maxWholeMinutes = remainingMs === null
-            ? MAX_TASK_MINUTES
-            : Math.min(MAX_TASK_MINUTES, Math.floor(remainingMs / 60_000));
+            ? Number.POSITIVE_INFINITY
+            : Math.floor(remainingMs / 60_000);
 
         if (!Number.isFinite(minutes) || minutes < 1 || minutes > maxWholeMinutes) {
-            alert(`Enter a number from 1 to ${Math.max(1, maxWholeMinutes)}.`);
+            alert(remainingMs === null ? 'Enter a positive number of minutes.' : `Enter a number from 1 to ${Math.max(1, maxWholeMinutes)}.`);
             updatePlanningTimer();
             return;
         }
