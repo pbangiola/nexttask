@@ -44,14 +44,14 @@
                 node.node_type === 'project' && isOpen(node)
             );
             const tree = treeResponse.nodes || [];
-            const rows = Array.from(list.querySelectorAll('.planner-project-row'));
+            const rows = Array.from(list.querySelectorAll('.planner-project-row, .planner-project-card'));
 
             roots.forEach((root, index) => {
                 const full = findNode(tree, root.id);
                 if (!full || !hasRemainingChildren(full)) rows[index]?.remove();
             });
 
-            const visibleRows = list.querySelectorAll('.planner-project-row').length;
+            const visibleRows = list.querySelectorAll('.planner-project-row, .planner-project-card').length;
             if (!visibleRows) list.innerHTML = '<p>No projects with remaining work.</p>';
 
             const sortButton = el('sortProjects');
