@@ -13,6 +13,7 @@ function ensureTask(task) {
     task.started = task.started ?? null;
     task.completedTime = task.completedTime ?? null;
     task.lastChanged = task.lastChanged ?? null;
+    task.blockedByTaskId = task.blockedByTaskId ?? null;
     return task;
 }
 
@@ -21,7 +22,7 @@ function createTask(name, values = {}) {
     return ensureTask({ id: values.id, name, estimatedTimeMs: values.estimatedTimeMs,
         actualTimeMs: values.actualTimeMs, completed: values.completed, status: values.status,
         created: values.created, started: values.started, completedTime: values.completedTime,
-        lastChanged: values.lastChanged });
+        lastChanged: values.lastChanged, blockedByTaskId: values.blockedByTaskId });
 }
 
 //tasklist indexing functions
@@ -37,50 +38,7 @@ function currentTask() { return sortedTasks.find(task => task.id === activeTaskI
 
 
 //Initialize task sorting
-async function startSorting() {
-    const enteredNames = parseTaskEntryText(el('tasks').value);
-    const names = resolveDuplicateTaskNames(enteredNames);
-    if (!names.length) { alert('Please enter at least one task.'); return; }
-
-    currentSortNames = [...names];
-    const workTasks = names.map(name => createTask(name));
-    const sortStartedAtMs = Date.now();
-    const estimatedMs = estimatedSortingTimeMs(names.length);
-    const sortTask = createTask('Sort Tasks', {
-        estimatedTimeMs: estimatedMs,
-        actualTimeMs: 0,
-        completed: false,
-        status: 'active',
-        created: sortStartedAtMs,
-        started: sortStartedAtMs,
-        lastChanged: sortStartedAtMs
-    });
-
-    sortedTasks = [sortTask, ...workTasks];
-    activeTaskId = sortTask.id;
-    sortStartedAt = sortStartedAtMs;
-    const runId = ++sortRunId;
-
-    hide(el('taskInput'));
-    show(el('startOverBtn'));
-    prepareSortingDisplay(sortTask);
-    save('sorting');
-
-    let sortedWorkTasks = workTasks;
-    if (!el('skipSortCheckbox').checked) {
-        sortedWorkTasks = await interactiveMergeSort(workTasks, runId);
-        if (runId !== sortRunId) return;
-    }
-
-    const finishedAtMs = Date.now();
-    clearInterval(timerInterval);
-    completeTask(sortTask, finishedAtMs);
-    sortedTasks = [sortTask, ...sortedWorkTasks];
-    activeTaskId = firstIncompleteTask()?.id || null;
-    hide(el('taskCompare'));
-    save('timing-gateway');
-    showTimingGateway();
-}
+async function startSorting(){const parsed=parseTimedTaskEntries(el('tasks').value);if(parsed.invalid.length){alert('Every task needs a time estimate. Try “Email Sam, 10m” or “Write report, 1h 30m”.\n\nCould not read: '+parsed.invalid.join(' | '));return;}if(!parsed.entries.length){alert('Please enter at least one task with a time estimate.');return;}const names=resolveDuplicateTaskNames(parsed.entries.map(e=>e.name));if(!names.length)return;const remaining=[...parsed.entries],workTasks=names.map(name=>{const base=name.replace(/ again(?: \d+)?$/i,'');let i=remaining.findIndex(e=>duplicateKey(e.name)===duplicateKey(base));if(i<0)i=0;const [entry]=remaining.splice(i,1);return createTask(name,{estimatedTimeMs:entry?.estimatedTimeMs||0});});for(const task of workTasks){const minutes=task.estimatedTimeMs/60000;if(minutes>DECOMPOSITION_PROMPT_MINUTES&&!confirm(`“${task.name}” is estimated at ${Math.round(minutes)} minutes.\n\nTasks over 20 minutes may actually be small projects. Consider splitting it into smaller, concrete tasks.\n\nChoose OK to keep it as one task, or Cancel to go back and split it.`))return;}currentSortNames=workTasks.map(t=>t.name);const started=Date.now(),sortTask=createTask('Sort Tasks',{estimatedTimeMs:estimatedSortingTimeMs(workTasks.length),status:'active',created:started,started,lastChanged:started});sortedTasks=[sortTask,...workTasks];activeTaskId=sortTask.id;sortStartedAt=started;const runId=++sortRunId;hide(el('taskInput'));show(el('startOverBtn'));prepareSortingDisplay(sortTask);save('sorting');let sorted=workTasks;if(!el('skipSortCheckbox').checked){sorted=await interactiveMergeSort(workTasks,runId);if(runId!==sortRunId)return;}clearInterval(timerInterval);completeTask(sortTask,Date.now());sortedTasks=[sortTask,...sorted];activeTaskId=firstIncompleteTask()?.id||null;hide(el('taskCompare'));save('dashboard');showDashboard();}
 
 //core merge sort algorithm step 1
 async function interactiveMergeSort(items, runId) {
@@ -189,7 +147,7 @@ function init(){
 
     if (restored.view==='focus'&&active?.lastChanged!==null) showFocus(active);
     else if (restored.view==='timing-entry') showSequentialTiming(0);
-    else if (restored.view==='timing-gateway') showTimingGateway();
+    else if (restored.view==='timing-gateway') showSequentialTiming(0);
     else if (restored.view==='completion') showCompletion();
     else if (restored.view==='session-ended') showSessionEnded();
     else if (restored.view==='stop-checklist') showStopChecklist();

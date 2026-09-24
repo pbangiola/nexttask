@@ -31,6 +31,7 @@
         task.nodeType = row.node_type || 'task';
         task.nodePosition = Number(row.position || 0);
         task.priorityRootId = rootId || row.id;
+        task.projectPath = displayName.includes(': ') ? displayName.split(': ').slice(0,-1).join(' › ') : '';
         return task;
     }
 
@@ -114,6 +115,7 @@
     }
 
     function startNodes(nodes) {
+        const root=nodes?.length===1?nodes[0]:null; window.currentWorkProjectContext=root?{id:root.id,name:root.name,estimatedMs:leafStats(root).ms,startedAtMs:Date.now(),deadlineAtMs:Number(root.deadline_at||root.due_at||root.deadline||0)}:null;
         sortedTasks = flattenTree(nodes);
         activeTaskId = firstIncompleteTask()?.id || null;
         if (!sortedTasks.length) {
@@ -133,6 +135,7 @@
 
         try {
             const tree = await loadTree();
+            window.currentWorkProjectContext=null;
             sortedTasks = flattenTree(tree);
             activeTaskId = firstIncompleteTask()?.id || null;
 

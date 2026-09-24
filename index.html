@@ -44,6 +44,7 @@
         .planner-project-row { padding: 12px 0; border-bottom: 1px solid #ddd; }
         .planner-project-link { padding: 0; margin: 0 0 4px; border: 0; background: none; color: #1565c0; text-decoration: underline; font-size: 16px; font-weight: bold; }
         .planner-project-row span { display: block; color: #666; font-size: 13px; }
+        .planner-project-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:14px 0}.planner-project-card{border:1px solid #b7d7bb;border-radius:8px;padding:14px;background:#f7fbf7;display:flex;flex-direction:column;gap:8px;min-height:120px}.planner-project-card-link{border:0;background:none;padding:0;margin:0;text-align:left;font-size:18px;font-weight:bold;color:#1565c0}.planner-project-card span{color:#666;font-size:13px}.planner-project-delete{margin-top:auto;align-self:flex-start}.project-work-toolbar{position:sticky;top:0;z-index:5;padding:8px 10px;margin:0 0 12px;border:1px solid #cfd8dc;border-radius:6px;background:#fff;font-size:13px;font-weight:bold}.project-list-header{list-style:none;margin:10px 0 4px -20px;font-weight:bold;color:#455a64}
         .planner-callout { padding: 14px; background: #fff8e1; border: 1px solid #ffcc80; border-radius: 6px; }
         .planner-insert { display: block; margin: 7px 0; padding: 5px 8px; font-size: 12px; }
         .planner-order-row { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
@@ -60,8 +61,8 @@
     </div>
     <div id="workChoiceStep" class="hidden">
         <h2>What do you want to do?</h2>
-        <button id="createNewListBtn">Create a New Task List</button>
-        <button id="resumeExistingListBtn">Resume Existing List</button>
+        <button id="createNewListBtn">Create</button>
+        <button id="resumeExistingListBtn">Resume</button>
     </div>
     <div id="timeConstraintInput" class="hidden">
         <h2>Set Up Your Time</h2>
@@ -73,7 +74,7 @@
     </div>
     <div id="taskInput" class="hidden">
         <h2>Enter Your Tasks</h2>
-        <textarea id="tasks" rows="10" cols="40" placeholder="Enter one task per line or separate tasks with commas"></textarea>
+        <textarea id="tasks" rows="10" cols="40" placeholder="Enter each task with a time, e.g. &quot;Email Sam, 10m&quot; or &quot;Email Sam 10m&quot;"></textarea>
         <div class="checkbox-container">
             <label style="display: flex; align-items: center; gap: 8px;">
                 <input type="checkbox" id="skipSortCheckbox" style="width: auto;"> Skip sorting (use current order)

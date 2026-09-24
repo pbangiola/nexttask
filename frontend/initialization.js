@@ -3,7 +3,7 @@
 //load and set global variables
 
 const API_BASE_URL = 'https://nexttask-production.up.railway.app';
-const MAX_TASK_MINUTES = 60;
+const DECOMPOSITION_PROMPT_MINUTES = 20;
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 const LOCAL_STATE_KEY = 'taskSorterSession_fallback';
 
@@ -180,25 +180,11 @@ function updateCapacityMessage() {
     message.textContent = `Estimated capacity: ${Math.round(estimated/60000)} / ${Math.round(totalAvailableTimeMs/60000)} minutes.`;
     message.style.color = estimated > totalAvailableTimeMs ? '#d32f2f' : '#2e7d32';
 }
-function parseTaskEntryText(text) {
-    const trimmed = String(text || '').trim();
-    if (!trimmed) return [];
-
-    // Semicolons take precedence when present so users can enter task names
-    // that contain commas, e.g. "Call Smith, Jones & Co.; email Maria".
-    // Otherwise commas and line breaks are treated interchangeably as simple
-    // task separators.
-    const pieces = trimmed.includes(';')
-        ? trimmed.split(/\s*;\s*|\r?\n+/)
-        : trimmed.split(/\s*,\s*|\r?\n+/);
-
-    return pieces
-        .map(value => value.replace(/^\s*\d+[.)]\s*/, '').trim())
-        .filter(Boolean);
-}
-function parsePlainTaskText(text) {
-    return [...new Set(parseTaskEntryText(text))];
-}
+function parseDurationMs(value,allowBareNumber=false){const text=String(value||'').trim().toLowerCase();if(!text)return null;if(allowBareNumber&&/^\d+(?:\.\d+)?$/.test(text)){const m=Number(text);return m>0?Math.round(m*60000):null;}const compact=text.replace(/,/g,' ').replace(/\s+/g,' ').trim(),match=compact.match(/^(?:(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?(?:\s*(\d+(?:\.\d+)?)\s*(?:m|min|mins|minute|minutes))?$/);if(!match||(!match[1]&&!match[2]))return null;const mins=Number(match[1]||0)*60+Number(match[2]||0);return mins>0?Math.round(mins*60000):null;}
+function parseTimedTaskChunk(chunk){const clean=String(chunk||'').replace(/^\s*\d+[.)]\s*/,'').trim();if(!clean)return null;const comma=clean.match(/^(.*?),\s*(.+)$/);if(comma){const ms=parseDurationMs(comma[2],true);if(ms)return{name:comma[1].trim(),estimatedTimeMs:ms};}const suffix=clean.match(/^(.*?)\s+((?:(?:\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours)\s*)?(?:\d+(?:\.\d+)?)\s*(?:m|min|mins|minute|minutes))\s*$/i);if(suffix){const ms=parseDurationMs(suffix[2]);if(ms)return{name:suffix[1].trim(),estimatedTimeMs:ms};}return null;}
+function parseTimedTaskEntries(text){const trimmed=String(text||'').trim();if(!trimmed)return{entries:[],invalid:[]};let chunks=trimmed.split(/\r?\n/).map(v=>v.trim()).filter(Boolean);if(chunks.length===1){const tokens=chunks[0].split(',').map(v=>v.trim()).filter(Boolean);if(tokens.length>=2&&tokens.length%2===0){const paired=[];let ok=true;for(let i=0;i<tokens.length;i+=2){const ms=parseDurationMs(tokens[i+1],true);if(!ms){ok=false;break;}paired.push({name:tokens[i],estimatedTimeMs:ms});}if(ok)return{entries:paired.filter(e=>e.name),invalid:[]};}}const entries=[],invalid=[];chunks.forEach(c=>{const p=parseTimedTaskChunk(c);p?.name?entries.push(p):invalid.push(c);});return{entries,invalid};}
+function parseTaskEntryText(text){return parseTimedTaskEntries(text).entries.map(e=>e.name);}
+function parsePlainTaskText(text){return [...new Set(parseTaskEntryText(text))];}
 
 
 function parseCsv(text) {

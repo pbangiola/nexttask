@@ -156,7 +156,7 @@ function showFocus(task){
     if (hasHardStop() && Date.now() >= hardStopAtMs) { handleHardStop(); return; }
     startHardStopWatch();
     ensureTask(task); hideStaticScreens(); hide(el('startOverBtn')); show(el('stopWorkingBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='focusScreen'; if(task.lastChanged===null) startTaskClock(task);
-    const heading=document.createElement('h2'); heading.textContent=`Current Task: ${task.name}`; const timer=document.createElement('p'); timer.id='timer'; timer.style.fontSize='24px'; timer.style.fontWeight='bold';
+    appendProjectToolbar(screen); const heading=document.createElement('h2'); heading.textContent=`Current Task: ${task.name}`; const timer=document.createElement('p'); timer.id='timer'; timer.style.fontSize='24px'; timer.style.fontWeight='bold';
     function renderTimer(){checkpointTask(task);const remaining=task.estimatedTimeMs-task.actualTimeMs;timer.style.color=remaining>=0?'green':'red';timer.textContent=remaining>=0?`${formatDuration(remaining)} remaining`:`${formatDuration(remaining)} overdue`;saveLocal('focus');}
     const done=document.createElement('button'); done.textContent='Done, Next!'; done.onclick=()=>{done.disabled=true;clearInterval(timerInterval);completeTask(task);activeTaskId=firstIncompleteTask()?.id||null;save('dashboard');beginWork();};
     const blocked=document.createElement('button'); blocked.textContent='Blocked'; blocked.onclick=()=>{clearInterval(timerInterval);pauseTaskClock(task);showBlockedFlow(task);};
@@ -167,15 +167,15 @@ function showFocus(task){
 function showBlockedFlow(blockedTask){
     hideStaticScreens(); hide(el('stopWorkingBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='blockedTaskScreen';
     const heading=document.createElement('h2'); heading.textContent=`What is blocking “${blockedTask.name}”?`; const input=document.createElement('input'); input.placeholder='Blocking task';
-    const confirm=document.createElement('button'); confirm.textContent='Add Blocker and Requeue Both'; confirm.onclick=()=>{const name=input.value.trim();if(!name){alert('Enter the blocking task.');return;}const blocker=createTask(name);const blockedIndex=sortedTasks.findIndex(task=>task.id===blockedTask.id);if(blockedIndex>=0)sortedTasks.splice(blockedIndex,1);blockedTask.status='pending';blockedTask.blockedByTaskId=null;blockedTask.lastChanged=null;sortedTasks.push(blocker,blockedTask);activeTaskId=firstIncompleteTask()?.id||null;save('dashboard');showDashboard();};
+    const confirm=document.createElement('button'); confirm.textContent='Add Blocker and Requeue Both'; confirm.onclick=()=>{const name=input.value.trim();if(!name){alert('Enter the blocking task.');return;}const blocker=createTask(name);const blockedIndex=sortedTasks.findIndex(task=>task.id===blockedTask.id);if(blockedIndex>=0)sortedTasks.splice(blockedIndex,1);blockedTask.status='blocked';blockedTask.blockedByTaskId=blocker.id;blockedTask.lastChanged=null;sortedTasks.push(blocker,blockedTask);activeTaskId=firstIncompleteTask()?.id||null;save('dashboard');showDashboard();};
     const cancel=document.createElement('button'); cancel.textContent='Cancel and Continue Working'; cancel.onclick=()=>showFocus(blockedTask);
     screen.append(heading,input,confirm,cancel); container.appendChild(screen); saveLocal('focus');
 }
 
 function showAddTask(activeTask){
     hideStaticScreens(); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='addTaskPage';
-    const heading=document.createElement('h2'); heading.textContent='Add a Task'; const input=document.createElement('input'); input.placeholder='Task name';
-    const choose=document.createElement('button'); choose.textContent='Choose Priority'; choose.onclick=()=>{const name=input.value.trim();if(!name){alert('Enter a task name.');return;}showTaskPlacement(createTask(name),activeTask);};
+    const heading=document.createElement('h2'); heading.textContent='Add a Task'; const input=document.createElement('input'); input.placeholder='Task and time, e.g. Call Sam, 10m';
+    const choose=document.createElement('button'); choose.textContent='Choose Priority'; choose.onclick=()=>{const parsed=parseTimedTaskEntries(input.value);if(parsed.invalid.length||parsed.entries.length!==1){alert('Enter one task with a time, for example “Call Sam, 10m”.');return;}const entry=parsed.entries[0],minutes=entry.estimatedTimeMs/60000;if(minutes>DECOMPOSITION_PROMPT_MINUTES&&!confirm(`“${entry.name}” is estimated at ${Math.round(minutes)} minutes. Tasks over 20 minutes may be easier to manage if you split them. Choose OK to keep it whole.`))return;showTaskPlacement(createTask(entry.name,{estimatedTimeMs:entry.estimatedTimeMs}),activeTask);};
     const cancel=document.createElement('button'); cancel.textContent='Cancel'; cancel.onclick=()=>showFocus(activeTask); screen.append(heading,input,choose,cancel); container.appendChild(screen);
 }
 
@@ -250,8 +250,7 @@ function showSequentialTiming(startIndex = 0) {
 
         if (remainingMs === null) {
             allocationTimer.textContent = 'No overall time limit';
-            input.max = String(MAX_TASK_MINUTES);
-            input.placeholder = `1-${MAX_TASK_MINUTES} minutes`;
+            input.removeAttribute('max'); input.placeholder = 'Minutes';
             next.disabled = false;
             return;
         }
@@ -265,7 +264,7 @@ function showSequentialTiming(startIndex = 0) {
 
         allocationTimer.textContent = formatDuration(remainingMs);
 
-        const maxWholeMinutes = Math.min(MAX_TASK_MINUTES, Math.floor(remainingMs / 60000));
+        const maxWholeMinutes = Math.floor(remainingMs / 60000);
         input.max = String(Math.max(1, maxWholeMinutes));
         input.placeholder = `1-${Math.max(1, maxWholeMinutes)} minutes`;
         next.disabled = maxWholeMinutes < 1;
@@ -274,9 +273,7 @@ function showSequentialTiming(startIndex = 0) {
     next.onclick = () => {
         const minutes = Number.parseInt(input.value, 10);
         const remainingMs = remainingPlanningTimeMs();
-        const maxWholeMinutes = remainingMs === null
-            ? MAX_TASK_MINUTES
-            : Math.min(MAX_TASK_MINUTES, Math.floor(remainingMs / 60000));
+        const maxWholeMinutes = remainingMs === null ? Number.POSITIVE_INFINITY : Math.floor(remainingMs / 60000);
 
         if (!Number.isFinite(minutes) || minutes < 1 || minutes > maxWholeMinutes) {
             alert(`Enter a number from 1 to ${Math.max(1, maxWholeMinutes)}.`);
@@ -296,14 +293,8 @@ function showSequentialTiming(startIndex = 0) {
     saveLocal('timing-entry');
 }
 
-function showDashboard(){
-    hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic();const screen=document.createElement('div');screen.id='dashboardScreen';
-    const heading=document.createElement('h2');heading.textContent='Your Task List';screen.appendChild(heading);
-    const list=document.createElement('ol');incompleteTasks().forEach(task=>{const li=document.createElement('li');li.textContent=task.name;list.appendChild(li);});screen.appendChild(list);
-    const start=document.createElement('button');start.textContent='Get to Work';start.onclick=beginWork;
-    const exportButton=document.createElement('button');exportButton.textContent='Download Task List';exportButton.onclick=exportCsv;
-    screen.append(start,exportButton);container.appendChild(screen);saveLocal('dashboard');
-}
+function appendProjectToolbar(screen){const ctx=window.currentWorkProjectContext;if(!ctx||!screen)return;const bar=document.createElement('div');bar.className='project-work-toolbar';const elapsed=Math.max(0,Date.now()-Number(ctx.startedAtMs||Date.now())),remaining=Math.max(0,Number(ctx.estimatedMs||0)-elapsed),deadline=Number(ctx.deadlineAtMs||0),deadlineText=deadline?formatDuration(deadline-Date.now(),true)+(deadline>=Date.now()?' until deadline':' past deadline'):'No project deadline';bar.textContent=`${ctx.name} • elapsed ${formatDuration(elapsed,true)} • remaining ${formatDuration(remaining,true)} • ${deadlineText} • ${new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}`;screen.appendChild(bar);}
+function showDashboard(){hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic(),screen=document.createElement('div');screen.id='dashboardScreen';const heading=document.createElement('h2');heading.textContent='Your Task List';screen.appendChild(heading);appendProjectToolbar(screen);const list=document.createElement('ol');let lastPath=null;sortedTasks.forEach(task=>{ensureTask(task);if(task.projectPath&&task.projectPath!==lastPath){const h=document.createElement('li');h.className='project-list-header';h.textContent=task.projectPath;list.appendChild(h);lastPath=task.projectPath;}const item=document.createElement('li'),estimate=task.estimatedTimeMs?` — ${Math.round(task.estimatedTimeMs/60000)} min`:'',state=task.completed?' ✓':task.status==='blocked'?' — blocked':'';item.textContent=`${task.name}${estimate}${state}`;list.appendChild(item);});screen.appendChild(list);const capacity=document.createElement('p');capacity.textContent=`Allocated: ${Math.round(allocatedTimeMs()/60000)} minutes`+(totalAvailableTimeMs?` of ${Math.round(totalAvailableTimeMs/60000)} available`:'');screen.appendChild(capacity);const b=document.createElement('button');b.textContent='Get to Work';b.onclick=beginWork;const ex=document.createElement('button');ex.textContent='Download Task List';ex.onclick=exportCsv;screen.append(b,ex);container.appendChild(screen);save('dashboard');}
 
 function showCompletion(){
     hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic();const screen=document.createElement('div');screen.id='completionScreen';
