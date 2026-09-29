@@ -50,6 +50,19 @@ const setNodeParentStmt = db.prepare(`UPDATE tasks SET parent_id=?,project_id=?,
 const setNodeStatusStmt = db.prepare(`UPDATE tasks SET status=?,updated_at=? WHERE user_id=? AND id=?;`);
 const restoreNodeStmt = db.prepare(`UPDATE tasks SET parent_id=@parent_id,project_id=@project_id,position=@position,status=@status,node_type=@node_type,independently_actionable=@independently_actionable,updated_at=@updated_at WHERE user_id=@user_id AND id=@id;`);
 const subtreeStmt = db.prepare(`WITH RECURSIVE subtree(id) AS (SELECT id FROM tasks WHERE user_id=? AND id=? UNION ALL SELECT t.id FROM tasks t JOIN subtree s ON t.parent_id=s.id WHERE t.user_id=?) SELECT t.* FROM tasks t JOIN subtree s ON t.id=s.id;`);
+const completeFinishedProjectsStmt = db.prepare(`
+    UPDATE tasks AS parent
+    SET status='completed', completed=COALESCE(completed,@now), last_changed=NULL, updated_at=@now
+    WHERE parent.user_id=@user_id
+      AND parent.node_type='project'
+      AND parent.status NOT IN ('completed','cancelled')
+      AND NOT EXISTS (
+          SELECT 1 FROM tasks child
+          WHERE child.user_id=parent.user_id
+            AND child.parent_id=parent.id
+            AND child.status NOT IN ('completed','cancelled')
+      );
+`);
 
 function normalizeNodeType(value){return value==='project'?'project':'task';}
 function normalizeActionable(value){return value===false||value===0?0:1;}
@@ -59,6 +72,7 @@ function assertValidParent(userId,nodeId,parentId){if(parentId==null||parentId==
 function nextSiblingPosition(userId,parentId){return Number(maxSiblingPositionStmt.get(String(userId),parentId??null).max_position||0)+1;}
 function buildTree(rows){const byId=new Map(rows.map(r=>[r.id,{...r,children:[]}]));const roots=[];for(const n of byId.values()){const p=n.parent_id?byId.get(n.parent_id):null;if(p)p.children.push(n);else roots.push(n);}const sort=nodes=>{nodes.sort((a,b)=>(a.position-b.position)||(a.created-b.created));nodes.forEach(n=>sort(n.children));};sort(roots);return roots;}
 function snapshotRows(rows){return rows.map(r=>({id:r.id,parent_id:r.parent_id,project_id:r.project_id,position:r.position,status:r.status,node_type:r.node_type,independently_actionable:r.independently_actionable}));}
+function completeFinishedProjects(userId){const uid=String(userId),now=Date.now();let changed=0;do{changed=completeFinishedProjectsStmt.run({user_id:uid,now}).changes;}while(changed>0);}
 
 const prependOpenTasksTransaction=db.transaction((userId,taskIds)=>{const uid=String(userId),now=Date.now();const requested=[...new Set((taskIds||[]).map(id=>String(id||'').trim()).filter(Boolean))];requested.forEach(id=>attachTaskStmt.run(uid,now,id));const open=requested.filter(id=>Boolean(getOpenTaskByIdStmt.get(uid,id)));const set=new Set(open);const older=getOpenTasksStmt.all(uid).map(t=>t.id).filter(id=>!set.has(id));[...open,...older].forEach((id,i)=>updateTaskPositionStmt.run(i+1,now,uid,id));return open.length+older.length;});
 const reparentTransaction=db.transaction((userId,nodeId,parentId,position)=>{const node=requireNode(userId,nodeId);const pid=assertValidParent(userId,node.id,parentId);const pos=Number(position)>0?Number(position):nextSiblingPosition(userId,pid);const before=snapshotRows([node]);setNodeParentStmt.run(pid,pid,pos,Date.now(),String(userId),node.id);return {node:getNodeStmt.get(String(userId),node.id),undo:before};});
@@ -72,10 +86,10 @@ module.exports={
  prependOpenTasks(userId,taskIds){this.ensureUser(userId);return prependOpenTasksTransaction(String(userId),Array.isArray(taskIds)?taskIds:[]);},
  getOpenTasks(userId){this.ensureUser(userId);return getOpenTasksStmt.all(String(userId));},
  importOpenTasksIntoSession(userId,sessionId){this.ensureUser(userId);const sid=ensureSession(sessionId);moveOpenTasksToSessionStmt.run(sid,Date.now(),String(userId));return getOpenTasksStmt.all(String(userId));},
- getRootNodes(userId){this.ensureUser(userId);return getRootNodesStmt.all(String(userId));},
- getChildren(userId,parentId){this.ensureUser(userId);requireNode(userId,parentId);return getChildrenStmt.all(String(userId),String(parentId));},
+ getRootNodes(userId){this.ensureUser(userId);completeFinishedProjects(userId);return getRootNodesStmt.all(String(userId));},
+ getChildren(userId,parentId){this.ensureUser(userId);completeFinishedProjects(userId);requireNode(userId,parentId);return getChildrenStmt.all(String(userId),String(parentId));},
  getNode(userId,nodeId){this.ensureUser(userId);return requireNode(userId,nodeId);},
- getTree(userId){this.ensureUser(userId);return buildTree(getAllUserNodesStmt.all(String(userId)));},
+ getTree(userId){this.ensureUser(userId);completeFinishedProjects(userId);return buildTree(getAllUserNodesStmt.all(String(userId)).filter(row=>!['completed','cancelled'].includes(row.status)));},
  createNode(userId,input={}){this.ensureUser(userId);const id=String(input.id||'').trim(),name=String(input.name||'').trim();if(!id||!name)throw new Error('id and name are required');if(getNodeStmt.get(String(userId),id))throw new Error(`Task node already exists: ${id}`);const parentId=assertValidParent(userId,id,input.parentId??input.parent_id??null);const now=Date.now(),position=Number(input.position)>0?Number(input.position):nextSiblingPosition(userId,parentId),sid=ensureSession(input.sessionId||input.session_id||`planner:${userId}`);insertNodeStmt.run({id,session_id:sid,user_id:String(userId),parent_id:parentId,project_id:parentId,node_type:normalizeNodeType(input.nodeType??input.node_type),independently_actionable:normalizeActionable(input.independentlyActionable??input.independently_actionable),name,status:'pending',estimated_ms:Math.max(0,Number(input.estimatedTimeMs??input.estimated_ms??0)),elapsed_ms:0,position,blocked_by_task_id:null,created:Number(input.created||now),started:null,completed:null,last_changed:input.lastChanged??now,updated_at:now});return getNodeStmt.get(String(userId),id);},
  updateNode(userId,nodeId,input={}){this.ensureUser(userId);const current=requireNode(userId,nodeId);const parentId=input.parentId!==undefined||input.parent_id!==undefined?assertValidParent(userId,nodeId,input.parentId??input.parent_id):current.parent_id;updateNodeStmt.run({id:current.id,user_id:String(userId),parent_id:parentId,project_id:parentId,node_type:normalizeNodeType(input.nodeType??input.node_type??current.node_type),independently_actionable:normalizeActionable(input.independentlyActionable??input.independently_actionable??current.independently_actionable),name:String(input.name??current.name).trim(),estimated_ms:Math.max(0,Number(input.estimatedTimeMs??input.estimated_ms??current.estimated_ms)),position:Number(input.position??current.position),updated_at:Date.now()});return requireNode(userId,nodeId);},
  reparentNode(userId,nodeId,parentId,position){this.ensureUser(userId);return reparentTransaction(String(userId),String(nodeId),parentId,position);},
