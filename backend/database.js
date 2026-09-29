@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 
 const dataDir = process.env.RAILWAY_VOLUME_MOUNT_PATH || __dirname;
-const dbPath = path.join(dataDir, 'task_sorter.db');
+const dbPath = path.join(dataDir, 'task_sorter_sso.db');
 const db = new Database(dbPath);
 db.pragma('foreign_keys = ON');
 
