@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 
 const dataDir = process.env.RAILWAY_VOLUME_MOUNT_PATH || __dirname;
-const dbPath = path.join(dataDir, 'task_sorter_sso.db');
+const dbPath = path.join(dataDir, 'task_sorter.db');
 const db = new Database(dbPath);
 db.pragma('foreign_keys = ON');
 
@@ -11,6 +11,11 @@ const TASK_SCHEMA_VERSION = 2;
 db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS data_migrations (
+        name TEXT PRIMARY KEY,
         applied_at INTEGER NOT NULL
     );
 
@@ -51,6 +56,37 @@ db.exec(`
 
 for (const table of ['completed_tasks', 'task_queue']) {
     db.exec(`DROP TABLE IF EXISTS ${table};`);
+}
+
+const SSO_RESET_MIGRATION = '2026-09-29-clerk-fresh-start';
+
+const resetForClerkSso = db.transaction(() => {
+    const alreadyApplied = db.prepare(
+        'SELECT 1 FROM data_migrations WHERE name = ?'
+    ).get(SSO_RESET_MIGRATION);
+
+    if (alreadyApplied) return false;
+
+    // Explicitly clear all legacy application data once. The migration marker
+    // lives on the persistent Railway volume, so normal redeploys/restarts do
+    // not repeat this destructive operation.
+    db.prepare('DELETE FROM tasks').run();
+    db.prepare('DELETE FROM sessions').run();
+
+    const usersExists = db.prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users'"
+    ).get();
+    if (usersExists) db.prepare('DELETE FROM users').run();
+
+    db.prepare(
+        'INSERT INTO data_migrations (name, applied_at) VALUES (?, ?)'
+    ).run(SSO_RESET_MIGRATION, Date.now());
+
+    return true;
+});
+
+if (resetForClerkSso()) {
+    console.log(`Applied one-time data reset: ${SSO_RESET_MIGRATION}`);
 }
 
 function getColumns(tableName) {
