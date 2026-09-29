@@ -60,32 +60,50 @@ for (const table of ['completed_tasks', 'task_queue']) {
 
 const SSO_RESET_MIGRATION = '2026-09-29-clerk-fresh-start';
 
-const resetForClerkSso = db.transaction(() => {
+function tableExists(name) {
+    return Boolean(db.prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
+    ).get(name));
+}
+
+function applyClerkFreshStartOnce() {
     const alreadyApplied = db.prepare(
         'SELECT 1 FROM data_migrations WHERE name = ?'
     ).get(SSO_RESET_MIGRATION);
-
     if (alreadyApplied) return false;
 
-    // Explicitly clear all legacy application data once. The migration marker
-    // lives on the persistent Railway volume, so normal redeploys/restarts do
-    // not repeat this destructive operation.
-    db.prepare('DELETE FROM tasks').run();
-    db.prepare('DELETE FROM sessions').run();
+    // This is an intentional one-time destructive migration. Older deployments
+    // may contain tables with foreign keys into legacy user/project schemas.
+    // Disable FK enforcement while clearing them so stale relationships cannot
+    // prevent the reset itself. The marker is written only after the reset
+    // succeeds, making ordinary future deploys/restarts non-destructive.
+    db.pragma('foreign_keys = OFF');
+    try {
+        const reset = db.transaction(() => {
+            for (const table of ['projects', 'project_tasks', 'task_queue', 'completed_tasks']) {
+                if (tableExists(table)) db.exec(`DROP TABLE "${table}";`);
+            }
+            if (tableExists('tasks')) db.exec('DELETE FROM tasks;');
+            if (tableExists('sessions')) db.exec('DELETE FROM sessions;');
+            if (tableExists('users')) db.exec('DELETE FROM users;');
 
-    const usersExists = db.prepare(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users'"
-    ).get();
-    if (usersExists) db.prepare('DELETE FROM users').run();
+            db.prepare(
+                'INSERT INTO data_migrations (name, applied_at) VALUES (?, ?)'
+            ).run(SSO_RESET_MIGRATION, Date.now());
+        });
+        reset();
+    } finally {
+        db.pragma('foreign_keys = ON');
+    }
 
-    db.prepare(
-        'INSERT INTO data_migrations (name, applied_at) VALUES (?, ?)'
-    ).run(SSO_RESET_MIGRATION, Date.now());
-
+    const violations = db.pragma('foreign_key_check');
+    if (violations.length) {
+        throw new Error(`Foreign key violations remain after SSO reset: ${JSON.stringify(violations)}`);
+    }
     return true;
-});
+}
 
-if (resetForClerkSso()) {
+if (applyClerkFreshStartOnce()) {
     console.log(`Applied one-time data reset: ${SSO_RESET_MIGRATION}`);
 }
 
