@@ -76,7 +76,11 @@
             if (!clerk.isSignedIn || !clerk.user?.id || !clerk.session) {
                 const signIn = document.getElementById('signIn');
                 signIn?.classList.remove('hidden');
-                clerk.mountSignIn(signIn);
+                const appUrl = new URL('.', window.location.href).href;
+                clerk.mountSignIn(signIn, {
+                    forceRedirectUrl: appUrl,
+                    signUpForceRedirectUrl: appUrl
+                });
                 return;
             }
 
