@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Task Sorter application with a static frontend and persistent Node/SQLite backend.",
   "main": "backend/server.js",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "start": "node backend/server.js",
     "dev": "node --watch backend/server.js"
