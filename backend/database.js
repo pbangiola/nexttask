@@ -199,10 +199,6 @@ const completeFinishedProjectsStmt = db.prepare(`
     WHERE parent.session_id = @session_id
       AND parent.node_type = 'project'
       AND parent.status NOT IN ('completed', 'cancelled')
-      AND EXISTS (
-          SELECT 1 FROM tasks child
-          WHERE child.parent_id = parent.id
-      )
       AND NOT EXISTS (
           SELECT 1 FROM tasks child
           WHERE child.parent_id = parent.id
@@ -268,8 +264,8 @@ const replaceTaskList = db.transaction((sessionId, tasks, session) => {
         upsertTaskStmt.run(row);
     });
 
-    // A project is complete exactly when it has children and none of those children
-    // remain open. Repeat so nested project completion cascades to its ancestors.
+    // A project is complete when it has no open children. This intentionally
+    // includes zero-child projects. Repeat so nested completion cascades upward.
     completeFinishedProjects(sessionId);
 });
 
