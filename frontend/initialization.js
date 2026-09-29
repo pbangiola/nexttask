@@ -7,10 +7,11 @@ const DECOMPOSITION_PROMPT_MINUTES = 20;
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 const LOCAL_STATE_KEY = 'taskSorterSession_fallback';
 
-let sessionId = localStorage.getItem('taskSorterSessionId') || createId('session');
-let userId = localStorage.getItem('taskSorterUserId') || createId('user');
-localStorage.setItem('taskSorterSessionId', sessionId);
-localStorage.setItem('taskSorterUserId', userId);
+// Authentication bootstraps these values from Clerk before application scripts load.
+// A user's Clerk ID is also the single active-session ID for this fresh-start MVP.
+let userId = String(window.taskSorterAuth?.userId || '');
+let sessionId = userId;
+if (!userId) throw new Error('Task Sorter requires an authenticated Clerk user.');
 
 let sortedTasks = [];
 let activeTaskId = null;
