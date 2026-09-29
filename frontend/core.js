@@ -39,33 +39,52 @@ function currentTask() { return sortedTasks.find(task => task.id === activeTaskI
 
 //Initialize task sorting
 async function startSorting() {
-    const parsed = parseTimedTaskEntries(el('tasks').value);
-    if (parsed.invalid.length) {
-        alert(
-            'Every task needs a time estimate. Try formats like "Email Sam, 10m", "Email Sam 10m", or "Write report, 1h 30m".\n\n' +
-            'Could not read: ' + parsed.invalid.join(' | ')
-        );
+    const rawText = el('tasks').value;
+    const timed = parseTimedTaskEntries(rawText);
+    let workTasks;
+
+    if (!timed.invalid.length && timed.entries.length) {
+        const names = resolveDuplicateTaskNames(timed.entries.map(entry => entry.name));
+        if (!names.length) return;
+
+        const remainingEntries = [...timed.entries];
+        workTasks = names.map(name => {
+            const baseName = name.replace(/ again(?: \d+)?$/i, '');
+            let entryIndex = remainingEntries.findIndex(entry => duplicateKey(entry.name) === duplicateKey(baseName));
+            if (entryIndex < 0) entryIndex = 0;
+            const [entry] = remainingEntries.splice(entryIndex, 1);
+            return createTask(name, { estimatedTimeMs: entry?.estimatedTimeMs || 0 });
+        });
+    } else {
+        const names = resolveDuplicateTaskNames(parseTaskEntryText(rawText));
+        if (!names.length) {
+            alert('Please enter at least one task.');
+            return;
+        }
+        workTasks = names.map(name => createTask(name));
+    }
+
+    currentSortNames = workTasks.map(task => task.name);
+
+    // Untimed input is deliberate: collect estimates one task at a time before
+    // sorting. This keeps mobile entry terse while still requiring every task
+    // to have an estimate before work begins.
+    if (workTasks.some(task => task.estimatedTimeMs <= 0)) {
+        sortedTasks = workTasks;
+        activeTaskId = workTasks[0]?.id || null;
+        timingEntryNextStep = 'sort-new-list';
+        hide(el('taskInput'));
+        show(el('startOverBtn'));
+        saveLocal('timing-entry');
+        showSequentialTiming(0);
         return;
     }
 
-    if (!parsed.entries.length) {
-        alert('Please enter at least one task with a time estimate.');
-        return;
-    }
+    await sortPreparedTaskList(workTasks);
+}
 
-    const names = resolveDuplicateTaskNames(parsed.entries.map(entry => entry.name));
-    if (!names.length) return;
-
-    // Preserve the estimate that belongs to each occurrence even when the
-    // duplicate-name review renames or removes an entry.
-    const remainingEntries = [...parsed.entries];
-    const workTasks = names.map(name => {
-        const baseName = name.replace(/ again(?: \d+)?$/i, '');
-        let entryIndex = remainingEntries.findIndex(entry => duplicateKey(entry.name) === duplicateKey(baseName));
-        if (entryIndex < 0) entryIndex = 0;
-        const [entry] = remainingEntries.splice(entryIndex, 1);
-        return createTask(name, { estimatedTimeMs: entry?.estimatedTimeMs || 0 });
-    });
+async function sortPreparedTaskList(workTasks = sortedTasks) {
+    timingEntryNextStep = null;
 
     for (const task of workTasks) {
         const minutes = task.estimatedTimeMs / 60_000;
@@ -75,7 +94,11 @@ async function startSorting() {
                 'Tasks over 20 minutes may actually be small projects. Consider splitting it into smaller, concrete tasks.\n\n' +
                 'Choose OK to keep it as one task, or Cancel to go back and split it.'
             );
-            if (!keepWhole) return;
+            if (!keepWhole) {
+                el('tasks').value = workTasks.map(item => item.name).join('\n');
+                showTaskInput();
+                return;
+            }
         }
     }
 

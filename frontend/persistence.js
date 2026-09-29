@@ -34,6 +34,7 @@ function restoreLocalState() {
         hardStopAtMs = Math.max(0, Number(state.hardStopAtMs || 0));
         endConstraint = String(state.endConstraint || '');
         hardStopHandled = state.view === 'session-ended';
+        timingEntryNextStep = state.timingEntryNextStep || null;
         return state;
     }
     catch (error) { console.warn('Local session could not be restored:', error); return false; }
@@ -47,6 +48,7 @@ function localSnapshot(view) {
         sessionStartedAtMs,
         hardStopAtMs,
         endConstraint,
+        timingEntryNextStep,
         view,
         updatedAt: Date.now()
     };

@@ -202,6 +202,11 @@ function showSequentialTiming(startIndex = 0) {
     const pending = incompleteTasks();
     const index = pending.findIndex((task, i) => i >= startIndex && task.estimatedTimeMs <= 0);
     if (index === -1) {
+        if (timingEntryNextStep === 'sort-new-list') {
+            const tasksToSort = [...incompleteTasks()];
+            sortPreparedTaskList(tasksToSort);
+            return;
+        }
         showDashboard();
         return;
     }
