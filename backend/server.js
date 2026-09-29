@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const { clerkMiddleware, getAuth } = require('@clerk/express');
 const db = require('./database');
 const userStore = require('./user-store');
 const userRoutes = require('./user-routes');
@@ -32,11 +33,35 @@ app.use(cors({
         return callback(new Error(`CORS blocked request from ${origin}`));
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type']
+    allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, './')));
+
+app.get('/api/config', (req, res) => {
+    const publishableKey = process.env.CLERK_PUBLISHABLE_KEY;
+    if (!publishableKey) return res.status(500).json({ error: 'Clerk publishable key is not configured' });
+    return res.json({ clerkPublishableKey: publishableKey });
+});
+
+app.use(clerkMiddleware());
+
+function requireClerkUser(req, res, next) {
+    const auth = getAuth(req);
+    if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ error: 'Unauthorized' });
+    req.clerkUserId = auth.userId;
+    return next();
+}
+
+function requireOwnSession(req, res, next) {
+    if (String(req.params.id) !== String(req.clerkUserId)) {
+        return res.status(403).json({ error: 'Session does not belong to authenticated user' });
+    }
+    return next();
+}
+
+app.use('/api/users', requireClerkUser);
 app.use('/api', userRoutes);
 
 app.get('/api/health', (req, res) => {
@@ -60,12 +85,12 @@ app.get('/api/health', (req, res) => {
     }
 });
 
-app.get('/api/session/:id', (req, res) => {
+app.get('/api/session/:id', requireClerkUser, requireOwnSession, (req, res) => {
     try { res.json(db.getSession(req.params.id)); }
     catch (error) { res.status(500).json({ error: 'Failed to retrieve session', detail: error.message }); }
 });
 
-app.get('/api/session/:id/tasks', (req, res) => {
+app.get('/api/session/:id/tasks', requireClerkUser, requireOwnSession, (req, res) => {
     try {
         const incompleteOnly = req.query.incomplete === '1' || req.query.incomplete === 'true';
         res.json({ tasks: db.getTasks(req.params.id, incompleteOnly) });
@@ -74,22 +99,22 @@ app.get('/api/session/:id/tasks', (req, res) => {
     }
 });
 
-app.put('/api/session/:id/tasks', (req, res) => {
+app.put('/api/session/:id/tasks', requireClerkUser, requireOwnSession, (req, res) => {
     try {
         const tasks = req.body.tasks;
         if (!Array.isArray(tasks)) return res.status(400).json({ error: 'tasks must be an array' });
-        if (req.body.userId) userStore.ensureUser(req.body.userId);
-        const savedTasks = db.saveTaskList(req.params.id, tasks, {
+        const userId = req.clerkUserId;
+        userStore.ensureUser(userId);
+        const ownedTasks = tasks.map(task => ({ ...task, userId }));
+        const savedTasks = db.saveTaskList(userId, ownedTasks, {
             totalAvailableTimeMs: req.body.totalAvailableTimeMs,
             endConstraint: req.body.endConstraint
         });
-        if (req.body.userId) {
-            const unfinishedTaskIds = tasks.filter(task => {
-                const status = String(task.status || '').toLowerCase();
-                return task.id && task.completed !== true && !task.completedTime && status !== 'completed' && status !== 'cancelled';
-            }).map(task => task.priorityRootId || task.id);
-            userStore.prependOpenTasks(req.body.userId, unfinishedTaskIds);
-        }
+        const unfinishedTaskIds = ownedTasks.filter(task => {
+            const status = String(task.status || '').toLowerCase();
+            return task.id && task.completed !== true && !task.completedTime && status !== 'completed' && status !== 'cancelled';
+        }).map(task => task.priorityRootId || task.id);
+        userStore.prependOpenTasks(userId, unfinishedTaskIds);
         return res.json({ success: true, count: savedTasks.length, timestamp: Date.now() });
     } catch (error) {
         console.error('Failed to save task list:', error);
@@ -97,7 +122,7 @@ app.put('/api/session/:id/tasks', (req, res) => {
     }
 });
 
-app.get('/api/session/:id/stats', (req, res) => {
+app.get('/api/session/:id/stats', requireClerkUser, requireOwnSession, (req, res) => {
     try { res.json({ summary: db.getStats(req.params.id) }); }
     catch (error) { res.status(500).json({ error: 'Failed to fetch statistics', detail: error.message }); }
 });
