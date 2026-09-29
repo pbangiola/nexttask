@@ -27,6 +27,7 @@ let sortStartedAt = null;
 let currentSortNames = [];
 let sortRunId = 0;
 let timeLimitNextStep = null;
+let timingEntryNextStep = null;
 
 function createId(prefix) {
     const random = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2, 11);
@@ -253,8 +254,21 @@ function parseTimedTaskEntries(text) {
 }
 
 function parseTaskEntryText(text) {
-    const parsed = parseTimedTaskEntries(text);
-    return parsed.entries.map(entry => entry.name);
+    const trimmed = String(text || '').trim();
+    if (!trimmed) return [];
+
+    // Preserve fully timed input exactly as parsed, but ordinary task entry is
+    // intentionally allowed to be untimed. A single-line comma list is the
+    // mobile-friendly shorthand for separate task names.
+    const timed = parseTimedTaskEntries(trimmed);
+    if (!timed.invalid.length && timed.entries.length) {
+        return timed.entries.map(entry => entry.name);
+    }
+
+    return trimmed
+        .split(/[\r\n,]+/)
+        .map(value => value.replace(/^\s*\d+[.)]\s*/, '').trim())
+        .filter(Boolean);
 }
 function parsePlainTaskText(text) {
     return [...new Set(parseTaskEntryText(text))];
