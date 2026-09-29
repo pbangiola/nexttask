@@ -8,13 +8,15 @@
         body { font-family: Arial, sans-serif; margin: 20px; max-width: 800px; position: relative; }
         .hidden { display: none; }
         #authShell { margin: 40px auto; max-width: 420px; }
-        #account { position: absolute; top: 0; left: 0; }
         #taskSorterApp { position: relative; }
+        #sessionMenu { position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: 8px; }
+        #account { display: flex; align-items: center; }
+        #sessionMenu button { position: static; margin: 0; }
         button { margin: 5px 0; padding: 8px 12px; cursor: pointer; }
         input, textarea { margin: 5px 0; padding: 6px; display: block; width: 100%; max-width: 400px; box-sizing: border-box; }
         .checkbox-container, .upload-container { margin: 15px 0; padding: 10px; border-radius: 4px; }
         .upload-container { border: 1px dashed #ccc; background: #fafafa; }
-        #stopWorkingBtn, #startOverBtn { position: absolute; top: 0; right: 0; border-radius: 4px; }
+        #stopWorkingBtn, #startOverBtn { border-radius: 4px; }
         #stopWorkingBtn { background-color: #ffcdd2; border: 1px solid #e53935; color: #b71c1c; font-weight: bold; border-radius: 4px; }
         #startOverBtn { background-color: #eceff1; border: 1px solid #90a4ae; color: #37474f; border-radius: 4px; }
 
@@ -60,10 +62,12 @@
         <p id="authError" class="hidden"></p>
         <div id="signIn" class="hidden"></div>
     </div>
-    <div id="account" class="hidden"><div id="userButton"></div></div>
     <div id="taskSorterApp" class="hidden">
-    <button id="stopWorkingBtn" class="hidden">Stop Working</button>
-    <button id="startOverBtn" class="hidden">Start Over</button>
+    <div id="sessionMenu">
+        <button id="stopWorkingBtn" class="hidden">Stop Working</button>
+        <button id="startOverBtn" class="hidden">Start Over</button>
+        <div id="account" class="hidden"><div id="userButton"></div></div>
+    </div>
     <h1>Task Sorter</h1>
     <div id="modeSelect">
         <button id="workBtn">Work</button>
