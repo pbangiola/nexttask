@@ -150,12 +150,11 @@ function prepareSortingDisplay(sortTask) {
     timerInterval = setInterval(renderSortingTimer, 1_000);
 }
 
-
 function showFocus(task){
     if (hasHardStop() && Date.now() >= hardStopAtMs) { handleHardStop(); return; }
     startHardStopWatch();
     ensureTask(task); hideStaticScreens(); hide(el('startOverBtn')); show(el('stopWorkingBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='focusScreen'; if(task.lastChanged===null) startTaskClock(task);
-    const heading=document.createElement('h2'); heading.textContent=`Current Task: ${task.name}`; const timer=document.createElement('p'); timer.id='timer'; timer.style.fontSize='24px'; timer.style.fontWeight='bold';
+    appendProjectToolbar(screen); const heading=document.createElement('h2'); heading.textContent=`Current Task: ${task.name}`; const timer=document.createElement('p'); timer.id='timer'; timer.style.fontSize='24px'; timer.style.fontWeight='bold';
     function renderTimer(){checkpointTask(task);const remaining=task.estimatedTimeMs-task.actualTimeMs;timer.style.color=remaining>=0?'green':'red';timer.textContent=remaining>=0?`${formatDuration(remaining)} remaining`:`${formatDuration(remaining)} overdue`;saveLocal('focus');}
     const done=document.createElement('button'); done.textContent='Done, Next!'; done.onclick=()=>{done.disabled=true;clearInterval(timerInterval);completeTask(task);activeTaskId=firstIncompleteTask()?.id||null;save('dashboard');beginWork();};
     const blocked=document.createElement('button'); blocked.textContent='Blocked'; blocked.onclick=()=>{clearInterval(timerInterval);pauseTaskClock(task);showBlockedFlow(task);};
@@ -292,8 +291,7 @@ function showSequentialTiming(startIndex = 0) {
             return;
         }
 
-        task.estimatedTimeMs = minutes * 60_000;
-        clearInterval(timerInterval);
+        task.estimatedTimeMs = minutes * 60000;
         saveLocal('timing-entry');
         showSequentialTiming(index + 1);
     };
@@ -302,57 +300,38 @@ function showSequentialTiming(startIndex = 0) {
     container.appendChild(screen);
 
     updatePlanningTimer();
-    timerInterval = setInterval(updatePlanningTimer, 1_000);
+    timerInterval = setInterval(updatePlanningTimer, 1000);
     saveLocal('timing-entry');
 }
 
-function showCompletion(){clearInterval(timerInterval);hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic();const screen=document.createElement('div');screen.id='completionScreen';const heading=document.createElement('h2');heading.textContent='All Done!';const varianceMs=sortedTasks.filter(task=>ensureTask(task).completed).reduce((sum,task)=>sum+task.estimatedTimeMs-task.actualTimeMs,0);const remaining=document.createElement('p');remaining.textContent=`Time Remaining: ${varianceMs<0?'-':''}${formatDuration(varianceMs,true)}`;remaining.style.color=varianceMs>=0?'green':'red';const title=document.createElement('h3');title.textContent='How Each Task Went:';const list=document.createElement('ul');sortedTasks.filter(task=>task.completed).forEach(task=>{const item=document.createElement('li');const actualMin=Math.round(task.actualTimeMs/60000);const estimateMin=Math.round(task.estimatedTimeMs/60000);const difference=estimateMin-actualMin;const comparison=difference>0?`${difference} minute${difference===1?'':'s'} ahead of schedule`:difference<0?`${Math.abs(difference)} minute${Math.abs(difference)===1?'':'s'} behind schedule`:'right on schedule';item.textContent=`${task.name} — finished in ${actualMin} minute${actualMin===1?'':'s'}, ${comparison}`;list.appendChild(item);});screen.append(heading,remaining,title,list);container.appendChild(screen);save('completion');}
+function appendProjectToolbar(screen){const ctx=window.currentWorkProjectContext;if(!ctx||!screen)return;const bar=document.createElement('div');bar.className='project-work-toolbar';const elapsed=Math.max(0,Date.now()-Number(ctx.startedAtMs||Date.now())),remaining=Math.max(0,Number(ctx.estimatedMs||0)-elapsed),deadline=Number(ctx.deadlineAtMs||0),deadlineText=deadline?formatDuration(deadline-Date.now(),true)+(deadline>=Date.now()?' until deadline':' past deadline'):'No project deadline';bar.textContent=`${ctx.name} • elapsed ${formatDuration(elapsed,true)} • remaining ${formatDuration(remaining,true)} • ${deadlineText} • ${new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}`;screen.appendChild(bar);}
+function showDashboard(){hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic(),screen=document.createElement('div');screen.id='dashboardScreen';const heading=document.createElement('h2');heading.textContent='Your Task List';screen.appendChild(heading);appendProjectToolbar(screen);const list=document.createElement('ol');let lastPath=null;sortedTasks.forEach(task=>{ensureTask(task);if(task.projectPath&&task.projectPath!==lastPath){const h=document.createElement('li');h.className='project-list-header';h.textContent=task.projectPath;list.appendChild(h);lastPath=task.projectPath;}const item=document.createElement('li'),estimate=task.estimatedTimeMs?` — ${Math.round(task.estimatedTimeMs/60000)} min`:'',state=task.completed?' ✓':task.status==='blocked'?' — blocked':'';item.textContent=`${task.name}${estimate}${state}`;list.appendChild(item);});screen.appendChild(list);const capacity=document.createElement('p');capacity.textContent=`Allocated: ${Math.round(allocatedTimeMs()/60000)} minutes`+(totalAvailableTimeMs?` of ${Math.round(totalAvailableTimeMs/60000)} available`:'');screen.appendChild(capacity);const b=document.createElement('button');b.textContent='Get to Work';b.onclick=beginWork;const ex=document.createElement('button');ex.textContent='Download Task List';ex.onclick=exportCsv;screen.append(b,ex);container.appendChild(screen);save('dashboard');}
 
-function showDashboard() {
-    hideStaticScreens(); hide(el('stopWorkingBtn')); show(el('startOverBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='dashboardScreen';
-    const heading=document.createElement('h2'); heading.textContent='Your Task List'; screen.appendChild(heading);
-    const list=document.createElement('ol'); sortedTasks.forEach(task=>{ ensureTask(task); const item=document.createElement('li'); const estimate=task.estimatedTimeMs?` — ${Math.round(task.estimatedTimeMs/60000)} min`:''; const state=task.completed?' ✓':task.status==='blocked'?' — blocked':''; item.textContent=`${task.name}${estimate}${state}`; list.appendChild(item); }); screen.appendChild(list);
-    const capacity=document.createElement('p'); capacity.textContent=`Allocated: ${Math.round(allocatedTimeMs()/60000)} minutes`+(totalAvailableTimeMs?` of ${Math.round(totalAvailableTimeMs/60000)} available`:''); screen.appendChild(capacity);
-    const work=document.createElement('button'); work.textContent='Get to Work'; work.onclick=beginWork; screen.appendChild(work);
-    const exportButton=document.createElement('button'); exportButton.textContent='Download Task List'; exportButton.onclick=exportCsv; screen.appendChild(exportButton);
-    container.appendChild(screen); save('dashboard');
+function showCompletion(){
+    hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic();const screen=document.createElement('div');screen.id='completionScreen';
+    const heading=document.createElement('h2');heading.textContent='All Tasks Completed!';screen.appendChild(heading);
+    const exportButton=document.createElement('button');exportButton.textContent='Download Task List';exportButton.onclick=exportCsv;screen.appendChild(exportButton);
+    container.appendChild(screen);saveLocal('completion');
 }
 
-function showSessionEnded() {
-    clearInterval(timerInterval);
-    clearInterval(hardStopInterval);
-    hardStopInterval = null;
-    hideStaticScreens();
-    hide(el('stopWorkingBtn'));
-    show(el('startOverBtn'));
-
-    const container = clearDynamic();
-    const screen = document.createElement('div');
-    screen.id = 'sessionEndedScreen';
-
-    const heading = document.createElement('h2');
-    heading.textContent = 'Session Ended';
-
-    const message = document.createElement('p');
-    message.textContent = 'Your available time is up. The current task was saved without being marked complete.';
-
-    const listButton = document.createElement('button');
-    listButton.textContent = 'View Saved Task List';
-    listButton.onclick = showDashboard;
-
-    const resumeButton = document.createElement('button');
-    resumeButton.textContent = 'Start Another Session';
-    resumeButton.onclick = () => {
-        hardStopHandled = false;
-        sessionStartedAtMs = 0;
-        hardStopAtMs = 0;
-        totalAvailableTimeMs = 0;
-        saveLocal('time-constraint');
-        showTimeConstraint();
-    };
-
-    screen.append(heading, message, listButton, resumeButton);
-    container.appendChild(screen);
-    saveLocal('session-ended');
+function showSessionEnded(){
+    hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic();const screen=document.createElement('div');screen.id='sessionEndedScreen';
+    const heading=document.createElement('h2');heading.textContent='Work Session Ended';screen.appendChild(heading);
+    if(endConstraint){const p=document.createElement('p');p.textContent=endConstraint;screen.appendChild(p);}
+    const list=document.createElement('ol');incompleteTasks().forEach(task=>{const li=document.createElement('li');li.textContent=task.name;list.appendChild(li);});screen.appendChild(list);
+    const exportButton=document.createElement('button');exportButton.textContent='Download Task List';exportButton.onclick=exportCsv;screen.appendChild(exportButton);
+    container.appendChild(screen);saveLocal('session-ended');
 }
 
+function updateCapacityMessage() {
+    let message = el('capacityMessage');
+    if (!message) {
+        message = document.createElement('p');
+        message.id = 'capacityMessage';
+        el('tasks')?.insertAdjacentElement('afterend', message);
+    }
+    if (!message) return;
+    const names = parseTaskEntryText(el('tasks')?.value || '');
+    const estimate = estimatedSortingTimeMs(names.length);
+    message.textContent = names.length ? `Estimated sorting time: ${formatDuration(estimate)}` : '';
+}

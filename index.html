@@ -12,8 +12,43 @@
         .checkbox-container, .upload-container { margin: 15px 0; padding: 10px; border-radius: 4px; }
         .upload-container { border: 1px dashed #ccc; background: #fafafa; }
         #stopWorkingBtn, #startOverBtn { position: absolute; top: 0; right: 0; border-radius: 4px; }
-        #stopWorkingBtn { background-color: #ffcdd2; border: 1px solid #e53935; color: #b71c1c; font-weight: bold; }
-        #startOverBtn { background-color: #eceff1; border: 1px solid #90a4ae; color: #37474f; }
+        #stopWorkingBtn { background-color: #ffcdd2; border: 1px solid #e53935; color: #b71c1c; font-weight: bold; border-radius: 4px; }
+        #startOverBtn { background-color: #eceff1; border: 1px solid #90a4ae; color: #37474f; border-radius: 4px; }
+
+        /* Sorting UI: responsive sizing keeps timer and choices visually balanced. */
+        #sortTaskTimer {
+            font-size: clamp(18px, 3.2vw, 21.6px) !important;
+            font-weight: bold;
+        }
+        #taskCompare #task1,
+        #taskCompare #task2 {
+            display: block;
+            width: min(100%, 620px);
+            font-size: clamp(20px, 3.6vw, 24px);
+            line-height: 1.2;
+            padding: 0.65em 0.9em;
+            text-align: left;
+        }
+
+        /* Project Planner */
+        .planner-choice-grid { display: flex; flex-direction: column; gap: 10px; margin: 18px 0; }
+        .planner-choice-grid > button, .planner-list > button {
+            display: block; width: 100%; max-width: 520px; padding: 14px; text-align: left;
+            border: 1px solid #b7d7bb; border-radius: 6px; background: #f1f8f2; font-weight: bold;
+        }
+        .planner-choice-grid > button span { display: block; margin-top: 4px; color: #666; font-size: 12px; font-weight: normal; }
+        .planner-secondary { background: #eceff1; border: 1px solid #b0bec5; }
+        .planner-check { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .planner-check input { width: auto; margin: 2px 0 0; }
+        .planner-list { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+        .planner-project-row { padding: 12px 0; border-bottom: 1px solid #ddd; }
+        .planner-project-link { padding: 0; margin: 0 0 4px; border: 0; background: none; color: #1565c0; text-decoration: underline; font-size: 16px; font-weight: bold; }
+        .planner-project-row span { display: block; color: #666; font-size: 13px; }
+        .planner-project-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:14px 0}.planner-project-card{border:1px solid #b7d7bb;border-radius:8px;padding:14px;background:#f7fbf7;display:flex;flex-direction:column;gap:8px;min-height:120px}.planner-project-card-link{border:0;background:none;padding:0;margin:0;text-align:left;font-size:18px;font-weight:bold;color:#1565c0}.planner-project-card span{color:#666;font-size:13px}.planner-project-delete{margin-top:auto;align-self:flex-start}.project-work-toolbar{position:sticky;top:0;z-index:5;padding:8px 10px;margin:0 0 12px;border:1px solid #cfd8dc;border-radius:6px;background:#fff;font-size:13px;font-weight:bold}.project-list-header{list-style:none;margin:10px 0 4px -20px;font-weight:bold;color:#455a64}
+        .planner-callout { padding: 14px; background: #fff8e1; border: 1px solid #ffcc80; border-radius: 6px; }
+        .planner-insert { display: block; margin: 7px 0; padding: 5px 8px; font-size: 12px; }
+        .planner-order-row { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .planner-moving { margin-top: 12px; padding: 10px; background: #f1f8e9; border-radius: 4px; }
     </style>
 </head>
 <body>
@@ -22,7 +57,7 @@
     <h1>Task Sorter</h1>
     <div id="modeSelect">
         <button id="workBtn">Work</button>
-        <button id="planBtn" disabled>Plan <i>(Coming Soon)</i></button>
+        <button id="planBtn">Plan</button>
     </div>
     <div id="workChoiceStep" class="hidden">
         <h2>What do you want to do?</h2>
@@ -58,10 +93,18 @@
     </div>
     <div id="dynamicContainer"></div>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.3/papaparse.min.js" onerror="console.warn('CSV helper unavailable; using built-in parser.')"></script>
-    <script src="frontend/initialization.js?v=20260806-2"></script>
-    <script src="frontend/persistence.js?v=20260806-2"></script>
-    <script src="frontend/ui.js?v=20260806-2"></script>
-    <script src="frontend/core.js?v=20260806-2"></script>
-    <script src="frontend/timing.js?v=20260806-2"></script>
+    <script src="frontend/initialization.js?v=20260810-plan"></script>
+    <script src="frontend/persistence.js?v=20260810-plan"></script>
+    <script src="frontend/ui.js?v=20260810-plan"></script>
+    <script src="frontend/core.js?v=20260810-plan"></script>
+    <script src="frontend/timing.js?v=20260810-plan"></script>
+    <script src="frontend/work-planner.js?v=20260811-project-launch-1"></script>
+    <script src="frontend/planner.js?v=20260811-backlog-manage-1"></script>
+    <script src="frontend/project-bulk-create.js?v=20260823-project-bulk-create-1"></script>
+    <script src="frontend/project-queue-filter.js?v=20260823-project-filter-1"></script>
+    <script src="frontend/project-editor.js?v=20260812-task-insert-1"></script>
+    <script src="frontend/duplicate-review.js?v=20260823-duplicates-1"></script>
+    <script src="frontend/project-csv.js?v=20260811-plan-6b"></script>
+    <script src="frontend/planner-bridge.js?v=20260810-plan-2"></script>
 </body>
 </html>
