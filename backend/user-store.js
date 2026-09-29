@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 
 const dataDir = process.env.RAILWAY_VOLUME_MOUNT_PATH || __dirname;
-const dbPath = path.join(dataDir, 'task_sorter.db');
+const dbPath = path.join(dataDir, 'task_sorter_sso.db');
 const db = new Database(dbPath);
 db.pragma('foreign_keys = ON');
 
@@ -71,7 +71,7 @@ module.exports={
  attachTask(userId,taskId){this.ensureUser(userId);return attachTaskStmt.run(String(userId),Date.now(),String(taskId));},
  prependOpenTasks(userId,taskIds){this.ensureUser(userId);return prependOpenTasksTransaction(String(userId),Array.isArray(taskIds)?taskIds:[]);},
  getOpenTasks(userId){this.ensureUser(userId);return getOpenTasksStmt.all(String(userId));},
- importOpenTasksIntoSession(userId,sessionId){this.ensureUser(userId);this.claimUnownedTasks(userId);const sid=ensureSession(sessionId);moveOpenTasksToSessionStmt.run(sid,Date.now(),String(userId));return getOpenTasksStmt.all(String(userId));},
+ importOpenTasksIntoSession(userId,sessionId){this.ensureUser(userId);const sid=ensureSession(sessionId);moveOpenTasksToSessionStmt.run(sid,Date.now(),String(userId));return getOpenTasksStmt.all(String(userId));},
  getRootNodes(userId){this.ensureUser(userId);return getRootNodesStmt.all(String(userId));},
  getChildren(userId,parentId){this.ensureUser(userId);requireNode(userId,parentId);return getChildrenStmt.all(String(userId),String(parentId));},
  getNode(userId,nodeId){this.ensureUser(userId);return requireNode(userId,nodeId);},
