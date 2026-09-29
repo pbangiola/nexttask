@@ -14,6 +14,11 @@ db.exec(`
         applied_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS data_migrations (
+        name TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
         updated_at INTEGER NOT NULL,
@@ -51,6 +56,55 @@ db.exec(`
 
 for (const table of ['completed_tasks', 'task_queue']) {
     db.exec(`DROP TABLE IF EXISTS ${table};`);
+}
+
+const SSO_RESET_MIGRATION = '2026-09-29-clerk-fresh-start';
+
+function tableExists(name) {
+    return Boolean(db.prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
+    ).get(name));
+}
+
+function applyClerkFreshStartOnce() {
+    const alreadyApplied = db.prepare(
+        'SELECT 1 FROM data_migrations WHERE name = ?'
+    ).get(SSO_RESET_MIGRATION);
+    if (alreadyApplied) return false;
+
+    // This is an intentional one-time destructive migration. Older deployments
+    // may contain tables with foreign keys into legacy user/project schemas.
+    // Disable FK enforcement while clearing them so stale relationships cannot
+    // prevent the reset itself. The marker is written only after the reset
+    // succeeds, making ordinary future deploys/restarts non-destructive.
+    db.pragma('foreign_keys = OFF');
+    try {
+        const reset = db.transaction(() => {
+            for (const table of ['projects', 'project_tasks', 'task_queue', 'completed_tasks']) {
+                if (tableExists(table)) db.exec(`DROP TABLE "${table}";`);
+            }
+            if (tableExists('tasks')) db.exec('DELETE FROM tasks;');
+            if (tableExists('sessions')) db.exec('DELETE FROM sessions;');
+            if (tableExists('users')) db.exec('DELETE FROM users;');
+
+            db.prepare(
+                'INSERT INTO data_migrations (name, applied_at) VALUES (?, ?)'
+            ).run(SSO_RESET_MIGRATION, Date.now());
+        });
+        reset();
+    } finally {
+        db.pragma('foreign_keys = ON');
+    }
+
+    const violations = db.pragma('foreign_key_check');
+    if (violations.length) {
+        throw new Error(`Foreign key violations remain after SSO reset: ${JSON.stringify(violations)}`);
+    }
+    return true;
+}
+
+if (applyClerkFreshStartOnce()) {
+    console.log(`Applied one-time data reset: ${SSO_RESET_MIGRATION}`);
 }
 
 function getColumns(tableName) {

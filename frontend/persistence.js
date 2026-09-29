@@ -54,7 +54,6 @@ function localSnapshot(view) {
 function saveLocal(view = inferView()) { localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(localSnapshot(view))); }
 function serverPayload() {
     return {
-        userId,
         totalAvailableTimeMs,
         sessionStartedAtMs,
         hardStopAtMs,

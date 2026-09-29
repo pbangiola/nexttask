@@ -71,7 +71,7 @@ module.exports={
  attachTask(userId,taskId){this.ensureUser(userId);return attachTaskStmt.run(String(userId),Date.now(),String(taskId));},
  prependOpenTasks(userId,taskIds){this.ensureUser(userId);return prependOpenTasksTransaction(String(userId),Array.isArray(taskIds)?taskIds:[]);},
  getOpenTasks(userId){this.ensureUser(userId);return getOpenTasksStmt.all(String(userId));},
- importOpenTasksIntoSession(userId,sessionId){this.ensureUser(userId);this.claimUnownedTasks(userId);const sid=ensureSession(sessionId);moveOpenTasksToSessionStmt.run(sid,Date.now(),String(userId));return getOpenTasksStmt.all(String(userId));},
+ importOpenTasksIntoSession(userId,sessionId){this.ensureUser(userId);const sid=ensureSession(sessionId);moveOpenTasksToSessionStmt.run(sid,Date.now(),String(userId));return getOpenTasksStmt.all(String(userId));},
  getRootNodes(userId){this.ensureUser(userId);return getRootNodesStmt.all(String(userId));},
  getChildren(userId,parentId){this.ensureUser(userId);requireNode(userId,parentId);return getChildrenStmt.all(String(userId),String(parentId));},
  getNode(userId,nodeId){this.ensureUser(userId);return requireNode(userId,nodeId);},

@@ -7,11 +7,16 @@
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; max-width: 800px; position: relative; }
         .hidden { display: none; }
+        #authShell { margin: 40px auto; max-width: 420px; }
+        #taskSorterApp { position: relative; }
+        #sessionMenu { position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: 8px; }
+        #account { display: flex; align-items: center; }
+        #sessionMenu button { position: static; margin: 0; }
         button { margin: 5px 0; padding: 8px 12px; cursor: pointer; }
         input, textarea { margin: 5px 0; padding: 6px; display: block; width: 100%; max-width: 400px; box-sizing: border-box; }
         .checkbox-container, .upload-container { margin: 15px 0; padding: 10px; border-radius: 4px; }
         .upload-container { border: 1px dashed #ccc; background: #fafafa; }
-        #stopWorkingBtn, #startOverBtn { position: absolute; top: 0; right: 0; border-radius: 4px; }
+        #stopWorkingBtn, #startOverBtn { border-radius: 4px; }
         #stopWorkingBtn { background-color: #ffcdd2; border: 1px solid #e53935; color: #b71c1c; font-weight: bold; border-radius: 4px; }
         #startOverBtn { background-color: #eceff1; border: 1px solid #90a4ae; color: #37474f; border-radius: 4px; }
 
@@ -52,8 +57,17 @@
     </style>
 </head>
 <body>
-    <button id="stopWorkingBtn" class="hidden">Stop Working</button>
-    <button id="startOverBtn" class="hidden">Start Over</button>
+    <div id="authShell">
+        <p id="authLoading">Loading sign-in…</p>
+        <p id="authError" class="hidden"></p>
+        <div id="signIn" class="hidden"></div>
+    </div>
+    <div id="taskSorterApp" class="hidden">
+    <div id="sessionMenu">
+        <button id="stopWorkingBtn" class="hidden">Stop Working</button>
+        <button id="startOverBtn" class="hidden">Start Over</button>
+        <div id="account" class="hidden"><div id="userButton"></div></div>
+    </div>
     <h1>Task Sorter</h1>
     <div id="modeSelect">
         <button id="workBtn">Work</button>
@@ -93,18 +107,7 @@
     </div>
     <div id="dynamicContainer"></div>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.3/papaparse.min.js" onerror="console.warn('CSV helper unavailable; using built-in parser.')"></script>
-    <script src="frontend/initialization.js?v=20260810-plan"></script>
-    <script src="frontend/persistence.js?v=20260810-plan"></script>
-    <script src="frontend/ui.js?v=20260810-plan"></script>
-    <script src="frontend/core.js?v=20260810-plan"></script>
-    <script src="frontend/timing.js?v=20260810-plan"></script>
-    <script src="frontend/work-planner.js?v=20260811-project-launch-1"></script>
-    <script src="frontend/planner.js?v=20260811-backlog-manage-1"></script>
-    <script src="frontend/project-bulk-create.js?v=20260823-project-bulk-create-1"></script>
-    <script src="frontend/project-queue-filter.js?v=20260823-project-filter-1"></script>
-    <script src="frontend/project-editor.js?v=20260812-task-insert-1"></script>
-    <script src="frontend/duplicate-review.js?v=20260823-duplicates-1"></script>
-    <script src="frontend/project-csv.js?v=20260811-plan-6b"></script>
-    <script src="frontend/planner-bridge.js?v=20260810-plan-2"></script>
+    </div>
+    <script src="frontend/auth.js?v=20260929-sso-1"></script>
 </body>
 </html>
