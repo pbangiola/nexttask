@@ -3,19 +3,18 @@
 (() => {
     const API_BASE_URL = 'https://nexttask-production.up.railway.app';
     const APP_SCRIPTS = [
-        'frontend/initialization.js?v=20260929-sso-1',
-        'frontend/persistence.js?v=20260929-sso-1',
-        'frontend/ui.js?v=20260929-sso-1',
-        'frontend/core.js?v=20260929-sso-1',
-        'frontend/timing.js?v=20260929-sso-1',
-        'frontend/work-planner.js?v=20260929-sso-1',
-        'frontend/planner.js?v=20260929-sso-1',
-        'frontend/project-bulk-create.js?v=20260929-sso-1',
-        'frontend/project-queue-filter.js?v=20260929-sso-1',
-        'frontend/project-editor.js?v=20260929-sso-1',
-        'frontend/duplicate-review.js?v=20260929-sso-1',
-        'frontend/project-csv.js?v=20260929-sso-1',
-        'frontend/planner-bridge.js?v=20260929-sso-1'
+        'frontend/initialization.js?v=20260929-dev-1',
+        'frontend/persistence.js?v=20260929-dev-1',
+        'frontend/ui.js?v=20260929-dev-1',
+        'frontend/core.js?v=20260929-dev-1',
+        'frontend/timing.js?v=20260929-dev-1',
+        'frontend/work-planner.js?v=20260929-dev-1',
+        'frontend/planner.js?v=20260929-dev-1',
+        'frontend/project-queue-filter.js?v=20260929-dev-1',
+        'frontend/project-editor.js?v=20260929-dev-1',
+        'frontend/duplicate-review.js?v=20260929-dev-1',
+        'frontend/project-csv.js?v=20260929-dev-1',
+        'frontend/planner-bridge.js?v=20260929-dev-1'
     ];
 
     const nativeFetch = window.fetch.bind(window);
