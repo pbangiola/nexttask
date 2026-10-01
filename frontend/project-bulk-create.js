@@ -27,7 +27,7 @@
         localStorage.setItem('nextTaskProjectPlannerUi', JSON.stringify(state));
     }
 
-    async function createTask(parentId, name) {
+    async function createTask(parentId, name, estimatedTimeMs = 0) {
         return (await api('/nodes', {
             method: 'POST',
             body: JSON.stringify({
@@ -35,8 +35,16 @@
                 name,
                 nodeType: 'task',
                 parentId,
+                estimatedTimeMs,
                 sessionId
             })
+        })).node;
+    }
+
+    async function updateEstimate(id, estimatedTimeMs) {
+        return (await api(`/nodes/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            body: JSON.stringify({ estimatedTimeMs })
         })).node;
     }
 
@@ -69,8 +77,17 @@
         const button = el('partsContinue');
         if (!parentId || !textarea || !button) return;
 
-        const names = resolveDuplicateTaskNames(parseTaskEntryText(textarea.value));
-        if (!names.length) return alert('Please add at least one task.');
+        const parsed = parseTimedTaskEntries(textarea.value);
+        const fullyTimed = parsed.entries.length > 0 && parsed.invalid.length === 0;
+        const rawEntries = fullyTimed
+            ? parsed.entries
+            : parseTaskEntryText(textarea.value).map(name => ({ name, estimatedTimeMs: 0 }));
+        const names = resolveDuplicateTaskNames(rawEntries.map(entry => entry.name));
+        const entries = names.map((name, index) => ({
+            name,
+            estimatedTimeMs: Number(rawEntries[index]?.estimatedTimeMs || 0)
+        }));
+        if (!entries.length) return alert('Please add at least one task.');
 
         button.disabled = true;
         try {
@@ -78,9 +95,13 @@
             const byName = new Map(children.map(child => [child.name, child]));
             const nodes = [];
 
-            for (const name of names) {
-                let node = byName.get(name);
-                if (!node) node = await createTask(parentId, name);
+            for (const entry of entries) {
+                let node = byName.get(entry.name);
+                if (!node) {
+                    node = await createTask(parentId, entry.name, entry.estimatedTimeMs);
+                } else if (entry.estimatedTimeMs > 0 && Number(node.estimated_ms || 0) !== entry.estimatedTimeMs) {
+                    node = await updateEstimate(node.id, entry.estimatedTimeMs);
+                }
                 nodes.push(node);
             }
 
