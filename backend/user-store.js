@@ -56,6 +56,11 @@ const completeFinishedProjectsStmt = db.prepare(`
     WHERE parent.user_id=@user_id
       AND parent.node_type='project'
       AND parent.status NOT IN ('completed','cancelled')
+      AND EXISTS (
+          SELECT 1 FROM tasks child
+          WHERE child.user_id=parent.user_id
+            AND child.parent_id=parent.id
+      )
       AND NOT EXISTS (
           SELECT 1 FROM tasks child
           WHERE child.user_id=parent.user_id
