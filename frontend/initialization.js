@@ -9,10 +9,10 @@ const LOCAL_STATE_KEY_PREFIX = 'taskSorterSession';
 
 // Authentication bootstraps these values from Clerk before application scripts load.
 // A user's Clerk ID is also the single active-session ID for this fresh-start MVP.
+const isGuestMode = window.taskSorterMode !== 'authenticated';
 let userId = String(window.taskSorterAuth?.userId || '');
-let sessionId = userId;
-const LOCAL_STATE_KEY = `${LOCAL_STATE_KEY_PREFIX}_${userId}`;
-if (!userId) throw new Error('Task Sorter requires an authenticated Clerk user.');
+let sessionId = userId || 'guest';
+const LOCAL_STATE_KEY = isGuestMode ? `${LOCAL_STATE_KEY_PREFIX}_guest` : `${LOCAL_STATE_KEY_PREFIX}_${userId}`;
 
 let sortedTasks = [];
 let activeTaskId = null;
@@ -92,7 +92,7 @@ function showTimeLimitQuestion(nextStep) {
 }
 
 function bindEvents(){
-    el('workBtn').onclick=showWorkChoice;
+    if (el('workBtn')) el('workBtn').onclick=showWorkChoice;
     el('createNewListBtn').onclick=()=>showTimeLimitQuestion('new-list');
     el('resumeExistingListBtn').onclick=()=>showTimeLimitQuestion('resume-list');
     el('timeConstraintNextBtn').onclick=()=>{
