@@ -6,6 +6,9 @@
     <title>Task Sorter</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; max-width: 800px; position: relative; }
+        #appHeader { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:16px; }
+        #appHeader h1 { margin:0; }
+        #signInBtn { flex:0 0 auto; }
         .hidden { display: none; }
         #authShell { margin: 40px auto; max-width: 420px; }
         #taskSorterApp { position: relative; }
@@ -57,7 +60,7 @@
     </style>
 </head>
 <body>
-    <button id="signInBtn" style="position:absolute;top:0;right:0;">Sign in</button>
+    
     <div id="authShell" class="hidden">
         <p id="authLoading">Loading sign-in…</p>
         <p id="authError" class="hidden"></p>
@@ -69,7 +72,7 @@
         <button id="startOverBtn" class="hidden">Start Over</button>
         <div id="account" class="hidden"><div id="userButton"></div></div>
     </div>
-    <h1>Task Sorter</h1>
+    <div id="appHeader"><h1>Task Sorter</h1><button id="signInBtn">Sign in</button></div>
     <div id="modeSelect" class="hidden">
         <button id="workBtn">Work</button>
         <button id="planBtn">Plan</button>
