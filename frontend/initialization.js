@@ -253,22 +253,34 @@ function parseTimedTaskEntries(text) {
     return { entries, invalid };
 }
 
-function parseTaskEntryText(text) {
+function parseTaskEntryRecords(text) {
     const trimmed = String(text || '').trim();
     if (!trimmed) return [];
 
-    // Preserve fully timed input exactly as parsed, but ordinary task entry is
-    // intentionally allowed to be untimed. A single-line comma list is the
-    // mobile-friendly shorthand for separate task names.
-    const timed = parseTimedTaskEntries(trimmed);
-    if (!timed.invalid.length && timed.entries.length) {
-        return timed.entries.map(entry => entry.name);
+    // Parse each line independently so mixed timed/untimed lists preserve
+    // every valid inline estimate instead of falling back to plain names.
+    const lines = trimmed.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+    if (lines.length > 1) {
+        return lines.flatMap(line => {
+            const timed = parseTimedTaskChunk(line);
+            if (timed?.name) return [timed];
+            const name = line.replace(/^\s*\d+[.)]\s*/, '').trim();
+            return name ? [{ name, estimatedTimeMs: 0 }] : [];
+        });
     }
 
+    const timed = parseTimedTaskEntries(trimmed);
+    if (!timed.invalid.length && timed.entries.length) return timed.entries;
+
     return trimmed
-        .split(/[\r\n,]+/)
+        .split(',')
         .map(value => value.replace(/^\s*\d+[.)]\s*/, '').trim())
-        .filter(Boolean);
+        .filter(Boolean)
+        .map(name => ({ name, estimatedTimeMs: 0 }));
+}
+
+function parseTaskEntryText(text) {
+    return parseTaskEntryRecords(text).map(entry => entry.name);
 }
 function parsePlainTaskText(text) {
     return [...new Set(parseTaskEntryText(text))];

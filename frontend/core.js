@@ -40,35 +40,24 @@ function currentTask() { return sortedTasks.find(task => task.id === activeTaskI
 //Initialize task sorting
 async function startSorting() {
     const rawText = el('tasks').value;
-    const timed = parseTimedTaskEntries(rawText);
-    let workTasks;
-
-    if (!timed.invalid.length && timed.entries.length) {
-        const names = resolveDuplicateTaskNames(timed.entries.map(entry => entry.name));
-        if (!names.length) return;
-
-        const remainingEntries = [...timed.entries];
-        workTasks = names.map(name => {
-            const baseName = name.replace(/ again(?: \d+)?$/i, '');
-            let entryIndex = remainingEntries.findIndex(entry => duplicateKey(entry.name) === duplicateKey(baseName));
-            if (entryIndex < 0) entryIndex = 0;
-            const [entry] = remainingEntries.splice(entryIndex, 1);
-            return createTask(name, { estimatedTimeMs: entry?.estimatedTimeMs || 0 });
-        });
-    } else {
-        const names = resolveDuplicateTaskNames(parseTaskEntryText(rawText));
-        if (!names.length) {
-            alert('Please enter at least one task.');
-            return;
-        }
-        workTasks = names.map(name => createTask(name));
+    const entries = parseTaskEntryRecords(rawText);
+    const names = resolveDuplicateTaskNames(entries.map(entry => entry.name));
+    if (!names.length) {
+        alert('Please enter at least one task.');
+        return;
     }
+
+    const remainingEntries = [...entries];
+    const workTasks = names.map(name => {
+        const baseName = name.replace(/ again(?: \d+)?$/i, '');
+        let entryIndex = remainingEntries.findIndex(entry => duplicateKey(entry.name) === duplicateKey(baseName));
+        if (entryIndex < 0) entryIndex = 0;
+        const [entry] = remainingEntries.splice(entryIndex, 1);
+        return createTask(name, { estimatedTimeMs: entry?.estimatedTimeMs || 0 });
+    });
 
     currentSortNames = workTasks.map(task => task.name);
 
-    // Untimed input is deliberate: collect estimates one task at a time before
-    // sorting. This keeps mobile entry terse while still requiring every task
-    // to have an estimate before work begins.
     if (workTasks.some(task => task.estimatedTimeMs <= 0)) {
         sortedTasks = workTasks;
         activeTaskId = workTasks[0]?.id || null;
@@ -83,10 +72,72 @@ async function startSorting() {
     await sortPreparedTaskList(workTasks);
 }
 
-async function sortPreparedTaskList(workTasks = sortedTasks) {
+function showTaskDecomposition(parentTask, workTasks) {
+    hideStaticScreens();
+    show(el('startOverBtn'));
+    const container = clearDynamic();
+    const screen = document.createElement('div');
+    screen.id = 'taskDecompositionScreen';
+
+    const heading = document.createElement('h2');
+    heading.textContent = `Split “${parentTask.name}” into smaller tasks`;
+    const note = document.createElement('p');
+    note.textContent = 'Enter the subtasks below, one per line. You can include timings, for example “Outline report, 10m”.';
+    const input = document.createElement('textarea');
+    input.rows = 8;
+    input.placeholder = 'Enter subtasks here';
+    input.value = '';
+
+    const saveButton = document.createElement('button');
+    saveButton.textContent = 'Replace Project with Subtasks';
+    saveButton.onclick = () => {
+        const entries = parseTaskEntryRecords(input.value);
+        if (!entries.length) {
+            alert('Enter at least one subtask.');
+            return;
+        }
+        const names = resolveDuplicateTaskNames(entries.map(entry => entry.name));
+        if (!names.length) return;
+
+        const remainingEntries = [...entries];
+        const subtasks = names.map(name => {
+            const baseName = name.replace(/ again(?: \d+)?$/i, '');
+            let entryIndex = remainingEntries.findIndex(entry => duplicateKey(entry.name) === duplicateKey(baseName));
+            if (entryIndex < 0) entryIndex = 0;
+            const [entry] = remainingEntries.splice(entryIndex, 1);
+            return createTask(name, { estimatedTimeMs: entry?.estimatedTimeMs || 0 });
+        });
+
+        const parentIndex = workTasks.findIndex(item => item.id === parentTask.id);
+        const revisedTasks = [...workTasks];
+        revisedTasks.splice(parentIndex >= 0 ? parentIndex : 0, 1, ...subtasks);
+
+        if (revisedTasks.some(task => task.estimatedTimeMs <= 0)) {
+            sortedTasks = revisedTasks;
+            activeTaskId = revisedTasks[0]?.id || null;
+            timingEntryNextStep = 'sort-new-list';
+            saveLocal('timing-entry');
+            showSequentialTiming(0);
+            return;
+        }
+        sortPreparedTaskList(revisedTasks);
+    };
+
+    const keepButton = document.createElement('button');
+    keepButton.textContent = 'Keep as One Task';
+    keepButton.onclick = () => sortPreparedTaskList([...workTasks], parentTask.id);
+
+    screen.append(heading, note, input, saveButton, keepButton);
+    container.appendChild(screen);
+    input.focus();
+    saveLocal('timing-entry');
+}
+
+async function sortPreparedTaskList(workTasks = sortedTasks, skipDecompositionTaskId = null) {async function sortPreparedTaskList(workTasks = sortedTasks) {
     timingEntryNextStep = null;
 
     for (const task of workTasks) {
+        if (task.id === skipDecompositionTaskId) continue;
         const minutes = task.estimatedTimeMs / 60_000;
         if (minutes > DECOMPOSITION_PROMPT_MINUTES) {
             const keepWhole = confirm(
@@ -95,8 +146,7 @@ async function sortPreparedTaskList(workTasks = sortedTasks) {
                 'Choose OK to keep it as one task, or Cancel to go back and split it.'
             );
             if (!keepWhole) {
-                el('tasks').value = workTasks.map(item => item.name).join('\n');
-                showTaskInput();
+                showTaskDecomposition(task, workTasks);
                 return;
             }
         }

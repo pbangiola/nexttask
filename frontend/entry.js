@@ -3,20 +3,20 @@
 (() => {
     const API_BASE_URL = 'https://nexttask-production.up.railway.app';
     const CORE_SCRIPTS = [
-        'frontend/initialization.js?v=20261002-guest-1',
-        'frontend/persistence.js?v=20261002-guest-1',
-        'frontend/ui.js?v=20261002-guest-1',
-        'frontend/core.js?v=20261002-guest-1',
-        'frontend/timing.js?v=20261002-guest-1'
+        'frontend/initialization.js?v=20261002-timing-decomp-1',
+        'frontend/persistence.js?v=20261002-timing-decomp-1',
+        'frontend/ui.js?v=20261002-timing-decomp-1',
+        'frontend/core.js?v=20261002-timing-decomp-1',
+        'frontend/timing.js?v=20261002-timing-decomp-1'
     ];
     const AUTH_ONLY_SCRIPTS = [
-        'frontend/work-planner.js?v=20261002-guest-1',
-        'frontend/planner.js?v=20261002-guest-1',
-        'frontend/project-queue-filter.js?v=20261002-guest-1',
-        'frontend/project-editor.js?v=20261002-guest-1',
-        'frontend/duplicate-review.js?v=20261002-guest-1',
-        'frontend/project-csv.js?v=20261002-guest-1',
-        'frontend/planner-bridge.js?v=20261002-guest-1'
+        'frontend/work-planner.js?v=20261002-timing-decomp-1',
+        'frontend/planner.js?v=20261002-timing-decomp-1',
+        'frontend/project-queue-filter.js?v=20261002-timing-decomp-1',
+        'frontend/project-editor.js?v=20261002-timing-decomp-1',
+        'frontend/duplicate-review.js?v=20261002-timing-decomp-1',
+        'frontend/project-csv.js?v=20261002-timing-decomp-1',
+        'frontend/planner-bridge.js?v=20261002-timing-decomp-1'
     ];
 
     const nativeFetch = window.fetch.bind(window);
