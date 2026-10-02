@@ -234,7 +234,8 @@ function init(){
     const restored=restoreLocalState();
 
     if (!restored || !sortedTasks.length) {
-        showModeSelect();
+        if (isGuestMode) showTaskInput();
+        else showModeSelect();
         return;
     }
 
@@ -254,4 +255,4 @@ function init(){
     else if (restored.view==='stop-checklist') showStopChecklist();
     else showDashboard();
 }
-document.addEventListener('DOMContentLoaded',init);
+
