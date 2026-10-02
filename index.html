@@ -57,19 +57,20 @@
     </style>
 </head>
 <body>
-    <div id="authShell">
+    <button id="signInBtn" style="position:absolute;top:0;right:0;">Sign in</button>
+    <div id="authShell" class="hidden">
         <p id="authLoading">Loading sign-in…</p>
         <p id="authError" class="hidden"></p>
         <div id="signIn" class="hidden"></div>
     </div>
-    <div id="taskSorterApp" class="hidden">
+    <div id="taskSorterApp">
     <div id="sessionMenu">
         <button id="stopWorkingBtn" class="hidden">Stop Working</button>
         <button id="startOverBtn" class="hidden">Start Over</button>
         <div id="account" class="hidden"><div id="userButton"></div></div>
     </div>
     <h1>Task Sorter</h1>
-    <div id="modeSelect">
+    <div id="modeSelect" class="hidden">
         <button id="workBtn">Work</button>
         <button id="planBtn">Plan</button>
     </div>
@@ -86,7 +87,7 @@
         <input type="text" id="endConstraint" placeholder="e.g., class ends, leave for appointment">
         <button id="timeConstraintNextBtn">Next</button>
     </div>
-    <div id="taskInput" class="hidden">
+    <div id="taskInput">
         <h2>Enter Your Tasks</h2>
         <textarea id="tasks" rows="10" cols="40" placeholder="Enter each task with a time, e.g. &quot;Email Sam, 10m&quot; or &quot;Email Sam 10m&quot;"></textarea>
         <div class="checkbox-container">
@@ -108,6 +109,6 @@
     <div id="dynamicContainer"></div>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.3/papaparse.min.js" onerror="console.warn('CSV helper unavailable; using built-in parser.')"></script>
     </div>
-    <script src="frontend/auth.js?v=20260929-dev-1"></script>
+    <script src="frontend/entry.js?v=20261002-guest-1"></script>
 </body>
 </html>
