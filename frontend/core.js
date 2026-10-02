@@ -133,7 +133,7 @@ function showTaskDecomposition(parentTask, workTasks) {
     saveLocal('timing-entry');
 }
 
-async function sortPreparedTaskList(workTasks = sortedTasks, skipDecompositionTaskId = null) {async function sortPreparedTaskList(workTasks = sortedTasks) {
+async function sortPreparedTaskList(workTasks = sortedTasks, skipDecompositionTaskId = null) {
     timingEntryNextStep = null;
 
     for (const task of workTasks) {
