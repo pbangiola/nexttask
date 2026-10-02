@@ -123,6 +123,7 @@
         if (authenticated) {
             for (const src of AUTH_ONLY_SCRIPTS) await loadScript(src);
         }
+        if (typeof window.init === 'function') window.init();
     }
 
     window.addEventListener('load', boot, { once: true });
