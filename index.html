@@ -1,113 +1,78 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Task Sorter</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; max-width: 800px; position: relative; }
-        .hidden { display: none; }
-        #authShell { margin: 40px auto; max-width: 420px; }
-        #taskSorterApp { position: relative; }
-        #sessionMenu { position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: 8px; }
-        #account { display: flex; align-items: center; }
-        #sessionMenu button { position: static; margin: 0; }
-        button { margin: 5px 0; padding: 8px 12px; cursor: pointer; }
-        input, textarea { margin: 5px 0; padding: 6px; display: block; width: 100%; max-width: 400px; box-sizing: border-box; }
-        .checkbox-container, .upload-container { margin: 15px 0; padding: 10px; border-radius: 4px; }
-        .upload-container { border: 1px dashed #ccc; background: #fafafa; }
-        #stopWorkingBtn, #startOverBtn { border-radius: 4px; }
-        #stopWorkingBtn { background-color: #ffcdd2; border: 1px solid #e53935; color: #b71c1c; font-weight: bold; border-radius: 4px; }
-        #startOverBtn { background-color: #eceff1; border: 1px solid #90a4ae; color: #37474f; border-radius: 4px; }
-
-        /* Sorting UI: responsive sizing keeps timer and choices visually balanced. */
-        #sortTaskTimer {
-            font-size: clamp(18px, 3.2vw, 21.6px) !important;
-            font-weight: bold;
-        }
-        #taskCompare #task1,
-        #taskCompare #task2 {
-            display: block;
-            width: min(100%, 620px);
-            font-size: clamp(20px, 3.6vw, 24px);
-            line-height: 1.2;
-            padding: 0.65em 0.9em;
-            text-align: left;
-        }
-
-        /* Project Planner */
-        .planner-choice-grid { display: flex; flex-direction: column; gap: 10px; margin: 18px 0; }
-        .planner-choice-grid > button, .planner-list > button {
-            display: block; width: 100%; max-width: 520px; padding: 14px; text-align: left;
-            border: 1px solid #b7d7bb; border-radius: 6px; background: #f1f8f2; font-weight: bold;
-        }
-        .planner-choice-grid > button span { display: block; margin-top: 4px; color: #666; font-size: 12px; font-weight: normal; }
-        .planner-secondary { background: #eceff1; border: 1px solid #b0bec5; }
-        .planner-check { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
-        .planner-check input { width: auto; margin: 2px 0 0; }
-        .planner-list { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
-        .planner-project-row { padding: 12px 0; border-bottom: 1px solid #ddd; }
-        .planner-project-link { padding: 0; margin: 0 0 4px; border: 0; background: none; color: #1565c0; text-decoration: underline; font-size: 16px; font-weight: bold; }
-        .planner-project-row span { display: block; color: #666; font-size: 13px; }
-        .planner-project-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:14px 0}.planner-project-card{border:1px solid #b7d7bb;border-radius:8px;padding:14px;background:#f7fbf7;display:flex;flex-direction:column;gap:8px;min-height:120px}.planner-project-card-link{border:0;background:none;padding:0;margin:0;text-align:left;font-size:18px;font-weight:bold;color:#1565c0}.planner-project-card span{color:#666;font-size:13px}.planner-project-delete{margin-top:auto;align-self:flex-start}.project-work-toolbar{position:sticky;top:0;z-index:5;padding:8px 10px;margin:0 0 12px;border:1px solid #cfd8dc;border-radius:6px;background:#fff;font-size:13px;font-weight:bold}.project-list-header{list-style:none;margin:10px 0 4px -20px;font-weight:bold;color:#455a64}
-        .planner-callout { padding: 14px; background: #fff8e1; border: 1px solid #ffcc80; border-radius: 6px; }
-        .planner-insert { display: block; margin: 7px 0; padding: 5px 8px; font-size: 12px; }
-        .planner-order-row { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
-        .planner-moving { margin-top: 12px; padding: 10px; background: #f1f8e9; border-radius: 4px; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Task Sorter — Eisenhower Planner</title>
+  <style>
+    :root { font-family: Arial, sans-serif; color: #202124; }
+    body { margin: 0; background: #f6f7f8; }
+    main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    h1 { margin-bottom: 4px; }
+    .subtle { color: #5f6368; }
+    .card { background: white; border: 1px solid #ddd; border-radius: 10px; padding: 20px; margin: 18px 0; }
+    textarea, input { box-sizing: border-box; width: 100%; padding: 10px; margin: 6px 0 12px; }
+    button { padding: 10px 14px; margin: 5px; cursor: pointer; }
+    .hidden { display: none !important; }
+    .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .compare-grid button { min-height: 110px; font-size: 1.05rem; }
+    .task-row { display: grid; grid-template-columns: 2fr 1.4fr .8fr; gap: 12px; align-items: end; border-bottom: 1px solid #eee; padding: 10px 0; }
+    .task-name { padding-bottom: 16px; font-weight: 600; }
+    #matrix { position: relative; height: 620px; border: 2px solid #555; background: white; overflow: hidden; margin-top: 18px; }
+    .axis-v, .axis-h { position: absolute; background: #888; z-index: 1; }
+    .axis-v { width: 2px; top: 0; bottom: 0; left: 50%; }
+    .axis-h { height: 2px; left: 0; right: 0; top: 50%; }
+    .quadrant { position: absolute; padding: 10px; color: #777; font-weight: 700; z-index: 0; }
+    .q1 { top: 0; right: 0; } .q2 { top: 0; left: 0; }
+    .q3 { bottom: 0; left: 0; } .q4 { bottom: 0; right: 0; }
+    .point { position: absolute; transform: translate(-50%,-50%); border: 1px solid #333; background: white; border-radius: 16px; padding: 5px 8px; max-width: 180px; font-size: 12px; z-index: 2; box-shadow: 0 1px 4px #bbb; }
+    .overdue { border-color: #b00020; font-weight: 700; }
+    .rank-list { columns: 2; }
+    @media (max-width: 700px) { .compare-grid, .task-row { grid-template-columns: 1fr; } .rank-list { columns: 1; } #matrix { height: 520px; } }
+  </style>
 </head>
 <body>
-    <div id="authShell">
-        <p id="authLoading">Loading sign-in…</p>
-        <p id="authError" class="hidden"></p>
-        <div id="signIn" class="hidden"></div>
+<main>
+  <h1>Eisenhower Planner</h1>
+  <p class="subtle">Rough prototype: rank importance by pairwise comparison, then calculate urgency from deadline minus estimated duration.</p>
+
+  <section id="entryScreen" class="card">
+    <h2>1. Enter tasks</h2>
+    <textarea id="taskInput" rows="10" placeholder="One task per line"></textarea>
+    <button id="startImportanceBtn">Rank Importance</button>
+  </section>
+
+  <section id="compareScreen" class="card hidden">
+    <h2>2. Which task is more important?</h2>
+    <p id="compareProgress" class="subtle"></p>
+    <div class="compare-grid">
+      <button id="taskA"></button>
+      <button id="taskB"></button>
     </div>
-    <div id="taskSorterApp" class="hidden">
-    <div id="sessionMenu">
-        <button id="stopWorkingBtn" class="hidden">Stop Working</button>
-        <button id="startOverBtn" class="hidden">Start Over</button>
-        <div id="account" class="hidden"><div id="userButton"></div></div>
+  </section>
+
+  <section id="timingScreen" class="card hidden">
+    <h2>3. Add deadlines and durations</h2>
+    <p class="subtle">Deadline means when the task must be finished. Duration is your estimated working time.</p>
+    <div id="timingRows"></div>
+    <button id="buildMatrixBtn">Build Matrix</button>
+  </section>
+
+  <section id="resultScreen" class="card hidden">
+    <h2>Objective Eisenhower Matrix</h2>
+    <p class="subtle">Horizontal position = importance rank. Vertical position = time remaining until latest safe start. The matrix updates as time passes.</p>
+    <div id="matrix">
+      <div class="axis-v"></div><div class="axis-h"></div>
+      <div class="quadrant q1">Important / More urgent</div>
+      <div class="quadrant q2">Less important / More urgent</div>
+      <div class="quadrant q3">Less important / Less urgent</div>
+      <div class="quadrant q4">Important / Less urgent</div>
     </div>
-    <h1>Task Sorter</h1>
-    <div id="modeSelect">
-        <button id="workBtn">Work</button>
-        <button id="planBtn">Plan</button>
-    </div>
-    <div id="workChoiceStep" class="hidden">
-        <h2>What do you want to do?</h2>
-        <button id="createNewListBtn">Create</button>
-        <button id="resumeExistingListBtn">Resume</button>
-    </div>
-    <div id="timeConstraintInput" class="hidden">
-        <h2>Set Up Your Time</h2>
-        <label for="availableTime">How much time do you have to work? (in minutes)</label>
-        <input type="number" id="availableTime" placeholder="e.g., 45" min="1">
-        <label for="endConstraint">What happens when this time is up?</label>
-        <input type="text" id="endConstraint" placeholder="e.g., class ends, leave for appointment">
-        <button id="timeConstraintNextBtn">Next</button>
-    </div>
-    <div id="taskInput" class="hidden">
-        <h2>Enter Your Tasks</h2>
-        <textarea id="tasks" rows="10" cols="40" placeholder="Enter each task with a time, e.g. &quot;Email Sam, 10m&quot; or &quot;Email Sam 10m&quot;"></textarea>
-        <div class="checkbox-container">
-            <label style="display: flex; align-items: center; gap: 8px;">
-                <input type="checkbox" id="skipSortCheckbox" style="width: auto;"> Skip sorting (use current order)
-            </label>
-        </div>
-        <button id="startSort">Start Sorting</button>
-        <div class="upload-container">
-            <h3>Or Import a Saved List</h3>
-            <input type="file" id="csvUpload" accept=".txt,.csv,text/plain,text/csv">
-        </div>
-    </div>
-    <div id="taskCompare" class="hidden">
-        <h2>Which task comes first?</h2>
-        <button id="task1"></button>
-        <button id="task2"></button>
-    </div>
-    <div id="dynamicContainer"></div>
-    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.3/papaparse.min.js" onerror="console.warn('CSV helper unavailable; using built-in parser.')"></script>
-    </div>
-    <script src="frontend/auth.js?v=20260929-dev-1"></script>
+    <h3>Ranked tasks</h3>
+    <ol id="rankedList" class="rank-list"></ol>
+    <button id="startOverBtn">Start Over</button>
+  </section>
+</main>
+<script src="script.js"></script>
 </body>
 </html>
