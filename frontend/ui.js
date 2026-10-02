@@ -11,7 +11,14 @@ function hideStaticScreens() { ['modeSelect','workChoiceStep','timeConstraintInp
 function showModeSelect() { hideStaticScreens(); clearDynamic(); show(el('modeSelect')); hide(el('stopWorkingBtn')); hide(el('startOverBtn')); }
 function showWorkChoice() { hideStaticScreens(); clearDynamic(); show(el('workChoiceStep')); show(el('startOverBtn')); }
 function showTimeConstraint() { hideStaticScreens(); clearDynamic(); show(el('timeConstraintInput')); show(el('startOverBtn')); el('availableTime').value = totalAvailableTimeMs ? Math.round(totalAvailableTimeMs/60000) : ''; el('endConstraint').value = endConstraint; }
-function showTaskInput() { hideStaticScreens(); clearDynamic(); show(el('taskInput')); show(el('startOverBtn')); updateCapacityMessage(); }
+function showTaskInput() {
+    hideStaticScreens();
+    clearDynamic();
+    show(el('taskInput'));
+    const hasProgress = sortedTasks.length > 0 || Boolean(localStorage.getItem(LOCAL_STATE_KEY));
+    if (hasProgress) show(el('startOverBtn')); else hide(el('startOverBtn'));
+    updateCapacityMessage();
+}
 
 //show and hide buttons
 
@@ -27,7 +34,7 @@ function resetAll() {
     clearSessionTiming();
     endConstraint = '';
     currentSortNames = [];
-    showModeSelect();
+    if (isGuestMode) showTaskInput(); else showModeSelect();
 }
 
 function restartCurrentStep() {
