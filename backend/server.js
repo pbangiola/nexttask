@@ -5,10 +5,11 @@ const { clerkMiddleware, getAuth } = require('@clerk/express');
 const db = require('./database');
 const userStore = require('./user-store');
 const userRoutes = require('./user-routes');
+const taskGraphRoutes = require('./task-graph-routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BACKEND_VERSION = 'recursive-task-tree-v1';
+const BACKEND_VERSION = 'task-graph-rebuild-v1';
 
 const defaultAllowedOrigins = [
     'https://pbangiola.github.io',
@@ -63,6 +64,7 @@ function requireOwnSession(req, res, next) {
 
 app.use('/api/users', requireClerkUser);
 app.use('/api', userRoutes);
+app.use('/api', requireClerkUser, taskGraphRoutes);
 
 app.get('/api/health', (req, res) => {
     try {
@@ -75,7 +77,8 @@ app.get('/api/health', (req, res) => {
             capabilities: [
                 'users', 'sessions', 'full-task-list-sync', 'incomplete-task-resume',
                 'unfinished-task-prepend', 'hierarchical-task-nodes', 'project-tree-crud',
-                'recursive-work-flattening', 'structural-blocker-flow'
+                'recursive-work-flattening', 'structural-blocker-flow',
+                'durable-work-sessions', 'ranked-session-items', 'work-interval-history'
             ],
             timestamp: Date.now()
         });
