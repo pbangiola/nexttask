@@ -115,7 +115,7 @@ module.exports = {
         const existing=db.prepare("SELECT * FROM work_intervals WHERE user_id=? AND task_id=? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1").get(String(userId),task.id);
         if(existing) return existing;
         const id=String(input.id||'').trim(); if(!id) throw new Error('Interval id is required');
-        const now=Date.now(), requested=Number(input.startedAt); const started=Number.isFinite(requested)?Math.min(now,Math.max(0,requested)):now;
+        const now=Date.now(), requested=Number(input.startedAt); const started=input.startedAt!=null&&Number.isFinite(requested)?Math.min(now,Math.max(0,requested)):now;
         db.prepare('INSERT INTO work_intervals(id,user_id,task_id,work_session_id,started_at,ended_at,duration_ms,created_at,updated_at) VALUES(?,?,?,?,?,NULL,0,?,?)')
           .run(id,String(userId),task.id,sessionId,started,now,now);
         return db.prepare('SELECT * FROM work_intervals WHERE id=?').get(id);
@@ -124,7 +124,8 @@ module.exports = {
         const row=db.prepare('SELECT * FROM work_intervals WHERE id=? AND user_id=?').get(String(id),String(userId));
         if(!row) throw new Error('Work interval not found');
         if(row.ended_at) return row;
-        const end=Math.max(Number(row.started_at),Math.min(Number(endedAt||Date.now()),Date.now()));
+        const requestedEnd=Number(endedAt);
+        const end=Math.max(Number(row.started_at),Math.min(Number.isFinite(requestedEnd)?requestedEnd:Date.now(),Date.now()));
         db.prepare('UPDATE work_intervals SET ended_at=?,duration_ms=?,updated_at=? WHERE id=? AND user_id=?')
           .run(end,end-Number(row.started_at),Date.now(),String(id),String(userId));
         return db.prepare('SELECT * FROM work_intervals WHERE id=?').get(String(id));
