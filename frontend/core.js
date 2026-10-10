@@ -237,13 +237,12 @@ async function init(){
             const session=await window.TaskGraph.openWorkSession();
             if (session) {
                 const detail=await window.TaskGraph.getWorkSession(session.id);
-                const ranks=new Map((detail.items||[]).map((item,index)=>[item.id,index]));
                 const existing=new Map(sortedTasks.map(task=>[task.id,task]));
                 const queued=(detail.items||[]).map(item=>existing.get(item.id)||createTask(item.name,{id:item.id,estimatedTimeMs:item.estimated_ms,actualTimeMs:item.elapsed_ms,status:item.status,created:item.created,started:item.started,lastChanged:null}));
                 if (queued.length) {
                     sortedTasks=queued;
-                    if (!restored) saveLocal('dashboard');
                     window.activeWorkSessionId=session.id;
+                    if (!restored) saveLocal('dashboard');
                     await window.TaskGraphTiming?.restore(session.id);
                     if(!sortedTasks.some(task=>task.id===activeTaskId)) activeTaskId=firstIncompleteTask()?.id||null;
                 }
