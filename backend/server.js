@@ -64,7 +64,9 @@ function requireOwnSession(req, res, next) {
 
 app.use('/api/users', requireClerkUser);
 app.use('/api', userRoutes);
-app.use('/api', requireClerkUser, taskGraphRoutes);
+// Mount public diagnostics before the authenticated task-graph router.
+// Express middleware is order-sensitive: the catch-all /api guard must not
+// intercept /api/health or other explicitly public endpoints.
 
 app.get('/api/health', (req, res) => {
     try {
@@ -87,6 +89,8 @@ app.get('/api/health', (req, res) => {
         res.status(500).json({ ok: false, error: error.message, timestamp: Date.now() });
     }
 });
+
+app.use('/api', requireClerkUser, taskGraphRoutes);
 
 app.get('/api/session/:id', requireClerkUser, requireOwnSession, (req, res) => {
     try { res.json(db.getSession(req.params.id)); }
