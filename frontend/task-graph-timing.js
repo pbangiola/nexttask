@@ -16,6 +16,9 @@ window.TaskGraphTiming = (() => {
         return enqueue(taskId, async () => {
             if (active.has(taskId)) return;
             try {
+                // The legacy UI saves new tasks asynchronously. Wait for their snapshot
+                // before opening a durable interval (foreign key requires task row).
+                if (typeof pendingTaskSnapshot !== 'undefined') await pendingTaskSnapshot;
                 const interval = await window.TaskGraph.startWork(taskId, window.activeWorkSessionId);
                 active.set(taskId, interval.id);
             } catch (error) { console.warn('Work interval start failed:', error); }
