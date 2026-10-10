@@ -172,17 +172,17 @@ const upsertTaskStmt = db.prepare(`
         @created, @started, @completed, @last_changed, @updated_at
     )
     ON CONFLICT(id) DO UPDATE SET
-        session_id = excluded.session_id,
+        session_id = tasks.session_id,
         user_id = tasks.user_id,
         parent_id = tasks.parent_id,
         project_id = tasks.project_id,
         node_type = tasks.node_type,
         independently_actionable = tasks.independently_actionable,
-        name = CASE WHEN tasks.parent_id IS NOT NULL THEN tasks.name ELSE excluded.name END,
+        name = CASE WHEN tasks.session_id <> excluded.session_id OR tasks.parent_id IS NOT NULL THEN tasks.name ELSE excluded.name END,
         status = excluded.status,
         estimated_ms = excluded.estimated_ms,
         elapsed_ms = excluded.elapsed_ms,
-        position = excluded.position,
+        position = CASE WHEN tasks.parent_id IS NULL AND tasks.session_id = excluded.session_id THEN excluded.position ELSE tasks.position END,
         blocked_by_task_id = excluded.blocked_by_task_id,
         started = excluded.started,
         completed = excluded.completed,
