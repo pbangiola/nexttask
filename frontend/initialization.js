@@ -2,7 +2,9 @@
 
 //load and set global variables
 
-const API_BASE_URL = 'https://nexttask-production.up.railway.app';
+const API_BASE_URL = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+    ? window.location.origin
+    : 'https://nexttask-production.up.railway.app';
 const DECOMPOSITION_PROMPT_MINUTES = 20;
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 const LOCAL_STATE_KEY_PREFIX = 'taskSorterSession';
