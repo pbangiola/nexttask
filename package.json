@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node backend/server.js",
     "dev": "node --watch backend/server.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",
