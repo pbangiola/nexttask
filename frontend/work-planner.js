@@ -118,13 +118,13 @@
         if (!window.TaskGraph) throw new Error('Task graph API is unavailable');
         if (!tasks.length) return;
         const previous = await window.TaskGraph.openWorkSession();
-        if (previous) await window.TaskGraph.endWorkSession(previous.id);
         const session = await window.TaskGraph.createWorkSession({
             availableMs: totalAvailableTimeMs,
             hardStopAt: hardStopAtMs || null,
             endConstraint,
             taskIds: tasks.map(task => task.id)
         });
+        if (previous && previous.id !== session.id) await window.TaskGraph.endWorkSession(previous.id);
         window.activeWorkSessionId = session.id;
         await window.TaskGraphTiming?.restore(session.id);
     }
