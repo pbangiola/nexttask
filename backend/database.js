@@ -265,9 +265,8 @@ const replaceTaskList = db.transaction((sessionId, tasks, session) => {
         upsertTaskStmt.run(row);
     });
 
-    // A project is complete when it has no open children. This intentionally
-    // includes zero-child projects. Repeat so nested completion cascades upward.
-    completeFinishedProjects(sessionId);
+    // Completion rollups are handled by the canonical user graph. A focus snapshot
+    // must not auto-complete an empty project or mutate unrelated hierarchy.
 });
 
 module.exports = {
