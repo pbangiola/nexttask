@@ -110,7 +110,7 @@ module.exports = {
     startInterval(userId,input={}) {
         const task=requireTask(userId,input.taskId);
         const sessionId=input.workSessionId||null;
-        if(task.node_type !== 'task' || task.independently_actionable !== 1 || ['completed','cancelled'].includes(task.status)) throw new Error('Cannot time a non-actionable or closed task');
+        if(task.node_type !== 'task' || task.independently_actionable !== 1 || task.status === 'cancelled' || (task.status === 'completed' && (!task.completed || !Number.isFinite(Number(input.startedAt)) || Number(input.startedAt) > Number(task.completed)))) throw new Error('Cannot time a non-actionable or closed task');
         if(sessionId) { const session=requireSession(userId,sessionId); if(session.status!=='open') throw new Error('Work session is closed'); }
         const existing=db.prepare("SELECT * FROM work_intervals WHERE user_id=? AND task_id=? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1").get(String(userId),task.id);
         if(existing) return existing;
