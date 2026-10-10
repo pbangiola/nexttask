@@ -11,7 +11,7 @@ window.TaskGraphTiming = (() => {
         next.finally(() => { if (pending.get(taskId) === next) pending.delete(taskId); }).catch(() => {});
         return next;
     }
-    function start(taskId) {
+    function start(taskId, startedAt = Date.now()) {
         if (!window.activeWorkSessionId || !window.TaskGraph) return;
         return enqueue(taskId, async () => {
             if (active.has(taskId)) return;
@@ -19,7 +19,7 @@ window.TaskGraphTiming = (() => {
                 // The legacy UI saves new tasks asynchronously. Wait for their snapshot
                 // before opening a durable interval (foreign key requires task row).
                 if (typeof pendingTaskSnapshot !== 'undefined') await pendingTaskSnapshot;
-                const interval = await window.TaskGraph.startWork(taskId, window.activeWorkSessionId);
+                const interval = await window.TaskGraph.startWork(taskId, window.activeWorkSessionId, startedAt);
                 active.set(taskId, interval.id);
             } catch (error) { console.warn('Work interval start failed:', error); }
         });
