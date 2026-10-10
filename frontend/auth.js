@@ -1,7 +1,10 @@
 'use strict';
 
 (() => {
-    const API_BASE_URL = 'https://nexttask-production.up.railway.app';
+    // Local development must never send test tasks to the production backend.
+    const API_BASE_URL = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+        ? window.location.origin
+        : 'https://nexttask-production.up.railway.app';
     const APP_SCRIPTS = [
         'frontend/initialization.js?v=20260929-dev-1',
         'frontend/persistence.js?v=20260929-dev-1',
