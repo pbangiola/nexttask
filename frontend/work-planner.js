@@ -115,7 +115,8 @@
     }
 
     async function persistSelectedWork(tasks) {
-        if (!window.TaskGraph || !tasks.length) return;
+        if (!window.TaskGraph) throw new Error('Task graph API is unavailable');
+        if (!tasks.length) return;
         const previous = await window.TaskGraph.openWorkSession();
         if (previous) await window.TaskGraph.endWorkSession(previous.id);
         const session = await window.TaskGraph.createWorkSession({

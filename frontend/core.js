@@ -229,9 +229,25 @@ function beginWork(){ const task=firstIncompleteTask(); if(!task){showCompletion
 
 
 //initialize
-function init(){
+async function init(){
     bindEvents();
     const restored=restoreLocalState();
+    if (restored && sortedTasks.length && window.TaskGraph) {
+        try {
+            const session=await window.TaskGraph.openWorkSession();
+            if (session) {
+                const detail=await window.TaskGraph.getWorkSession(session.id);
+                const ranks=new Map((detail.items||[]).map((item,index)=>[item.id,index]));
+                const queued=sortedTasks.filter(task=>ranks.has(task.id));
+                if (queued.length) {
+                    sortedTasks=queued.sort((a,b)=>ranks.get(a.id)-ranks.get(b.id));
+                    window.activeWorkSessionId=session.id;
+                    await window.TaskGraphTiming?.restore(session.id);
+                    if(!sortedTasks.some(task=>task.id===activeTaskId)) activeTaskId=firstIncompleteTask()?.id||null;
+                }
+            }
+        } catch(error) { console.warn('Server session recovery unavailable; using local snapshot:',error); }
+    }
 
     if (!restored || !sortedTasks.length) {
         showModeSelect();

@@ -29,6 +29,7 @@ function restoreLocalState() {
         const state = JSON.parse(raw);
         sortedTasks = Array.isArray(state.sortedTasks) ? state.sortedTasks.map(ensureTask) : [];
         activeTaskId = state.activeTaskId || null;
+        window.activeWorkSessionId = state.activeWorkSessionId || null;
         totalAvailableTimeMs = Math.max(0, Number(state.totalAvailableTimeMs || 0));
         sessionStartedAtMs = Math.max(0, Number(state.sessionStartedAtMs || 0));
         hardStopAtMs = Math.max(0, Number(state.hardStopAtMs || 0));
@@ -44,6 +45,7 @@ function localSnapshot(view) {
     return {
         sortedTasks,
         activeTaskId,
+        activeWorkSessionId: window.activeWorkSessionId || null,
         totalAvailableTimeMs,
         sessionStartedAtMs,
         hardStopAtMs,
