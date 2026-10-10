@@ -5,6 +5,7 @@ const router = express.Router();
 function user(req){return req.clerkUserId;}
 function fail(res,error){const missing=/not found/i.test(error.message);return res.status(missing?404:400).json({error:error.message});}
 
+router.get('/tasks/actionable',(req,res)=>{try{res.json({tasks:store.getActionableTasks(user(req))});}catch(e){fail(res,e);}});
 router.get('/work-sessions/open',(req,res)=>{try{res.json({workSession:store.getOpenSession(user(req))});}catch(e){fail(res,e);}});
 router.post('/work-sessions',(req,res)=>{try{res.status(201).json({workSession:store.createSession(user(req),req.body||{})});}catch(e){fail(res,e);}});
 router.get('/work-sessions/:id',(req,res)=>{try{res.json({workSession:store.getSession(user(req),req.params.id),items:store.getItems(user(req),req.params.id)});}catch(e){fail(res,e);}});

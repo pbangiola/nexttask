@@ -79,7 +79,7 @@ function requireSession(userId, sessionId) {
 const replaceItems = db.transaction((userId, sessionId, taskIds) => {
     requireSession(userId, sessionId);
     const ids = [...new Set((taskIds || []).map(String))];
-    ids.forEach(id => requireTask(userId, id));
+    ids.forEach(id => { const task=requireTask(userId,id); if (task.node_type !== 'task' || task.independently_actionable !== 1 || ['completed','cancelled'].includes(task.status)) throw new Error('Queue items must be open actionable tasks'); });
     db.prepare('DELETE FROM work_session_items WHERE work_session_id=?').run(sessionId);
     const insert = db.prepare('INSERT INTO work_session_items(work_session_id,task_id,rank,added_at) VALUES(?,?,?,?)');
     const now = Date.now();
@@ -88,10 +88,13 @@ const replaceItems = db.transaction((userId, sessionId, taskIds) => {
 });
 
 module.exports = {
+    getActionableTasks(userId) { return db.prepare("SELECT * FROM tasks WHERE user_id=? AND node_type='task' AND independently_actionable=1 AND status NOT IN ('completed','cancelled') ORDER BY position,created").all(String(userId)); },
     createSession(userId, input={}) {
         const id=String(input.id||'').trim();
         if(!id) throw new Error('Work session id is required');
         const now=Date.now();
+        const owner=db.prepare('SELECT user_id FROM work_sessions WHERE id=?').get(id);
+        if(owner && owner.user_id!==String(userId)) throw new Error('Work session id already belongs to another user');
         db.prepare(`INSERT INTO work_sessions(id,user_id,started_at,ended_at,available_ms,hard_stop_at,end_constraint,status,created_at,updated_at)
             VALUES(@id,@user_id,@started_at,NULL,@available_ms,@hard_stop_at,@end_constraint,'open',@created_at,@updated_at)
             ON CONFLICT(id) DO UPDATE SET available_ms=excluded.available_ms,hard_stop_at=excluded.hard_stop_at,end_constraint=excluded.end_constraint,updated_at=excluded.updated_at`)
@@ -106,7 +109,8 @@ module.exports = {
     startInterval(userId,input={}) {
         const task=requireTask(userId,input.taskId);
         const sessionId=input.workSessionId||null;
-        if(sessionId) requireSession(userId,sessionId);
+        if(task.node_type !== 'task' || task.independently_actionable !== 1 || ['completed','cancelled'].includes(task.status)) throw new Error('Cannot time a non-actionable or closed task');
+        if(sessionId) { const session=requireSession(userId,sessionId); if(session.status!=='open') throw new Error('Work session is closed'); }
         const existing=db.prepare("SELECT * FROM work_intervals WHERE user_id=? AND task_id=? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1").get(String(userId),task.id);
         if(existing) return existing;
         const id=String(input.id||'').trim(); if(!id) throw new Error('Interval id is required');
@@ -119,7 +123,7 @@ module.exports = {
         const row=db.prepare('SELECT * FROM work_intervals WHERE id=? AND user_id=?').get(String(id),String(userId));
         if(!row) throw new Error('Work interval not found');
         if(row.ended_at) return row;
-        const end=Math.max(Number(endedAt||Date.now()),Number(row.started_at));
+        const end=Math.max(Number(row.started_at),Math.min(Number(endedAt||Date.now()),Date.now()));
         db.prepare('UPDATE work_intervals SET ended_at=?,duration_ms=?,updated_at=? WHERE id=? AND user_id=?')
           .run(end,end-Number(row.started_at),Date.now(),String(id),String(userId));
         return db.prepare('SELECT * FROM work_intervals WHERE id=?').get(String(id));

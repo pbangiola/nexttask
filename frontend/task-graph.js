@@ -28,6 +28,7 @@ window.TaskGraph = (() => {
         if(taskIds.length) await setQueue(id,taskIds);
         return workSession;
     }
+    async function actionableTasks(){return (await jsonFetch('/api/tasks/actionable')).tasks;}
     async function openWorkSession(){return (await jsonFetch('/api/work-sessions/open')).workSession;}
     async function getWorkSession(id){return jsonFetch(`/api/work-sessions/${encodeURIComponent(id)}`);}
     async function setQueue(id,taskIds){return (await jsonFetch(`/api/work-sessions/${encodeURIComponent(id)}/items`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({taskIds})})).items;}
@@ -41,5 +42,5 @@ window.TaskGraph = (() => {
     }
     async function intervals(taskId){return (await jsonFetch(`/api/tasks/${encodeURIComponent(taskId)}/work-intervals`)).intervals;}
 
-    return {actionableLeaves,createWorkSession,openWorkSession,getWorkSession,setQueue,endWorkSession,startWork,stopWork,intervals};
+    return {actionableLeaves,actionableTasks,createWorkSession,openWorkSession,getWorkSession,setQueue,endWorkSession,startWork,stopWork,intervals};
 })();
