@@ -34,9 +34,9 @@ window.TaskGraph = (() => {
     async function openIntervals(id){return (await jsonFetch(`/api/work-sessions/${encodeURIComponent(id)}/open-intervals`)).intervals;}
     async function setQueue(id,taskIds){return (await jsonFetch(`/api/work-sessions/${encodeURIComponent(id)}/items`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({taskIds})})).items;}
     async function endWorkSession(id){return (await jsonFetch(`/api/work-sessions/${encodeURIComponent(id)}/end`,{method:'POST'})).workSession;}
-    async function startWork(taskId,workSessionId=null){
+    async function startWork(taskId,workSessionId=null,startedAt=Date.now()){
         const id=uuid('interval');
-        return (await jsonFetch('/api/work-intervals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,taskId,workSessionId,startedAt:Date.now()})})).interval;
+        return (await jsonFetch('/api/work-intervals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,taskId,workSessionId,startedAt})})).interval;
     }
     async function stopWork(intervalId,endedAt=Date.now()){
         return (await jsonFetch(`/api/work-intervals/${encodeURIComponent(intervalId)}/stop`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({endedAt})})).interval;
