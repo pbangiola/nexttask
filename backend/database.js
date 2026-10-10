@@ -182,7 +182,7 @@ const upsertTaskStmt = db.prepare(`
         status = excluded.status,
         estimated_ms = excluded.estimated_ms,
         elapsed_ms = excluded.elapsed_ms,
-        position = CASE WHEN tasks.parent_id IS NULL AND tasks.session_id = excluded.session_id THEN excluded.position ELSE tasks.position END,
+        position = tasks.position,
         blocked_by_task_id = excluded.blocked_by_task_id,
         started = excluded.started,
         completed = excluded.completed,
