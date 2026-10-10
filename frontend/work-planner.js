@@ -114,7 +114,20 @@
         return workTreeCache;
     }
 
-    function startNodes(nodes) {
+    async function persistSelectedWork(tasks) {
+        if (!window.TaskGraph || !tasks.length) return;
+        const previous = await window.TaskGraph.openWorkSession();
+        if (previous) await window.TaskGraph.endWorkSession(previous.id);
+        const session = await window.TaskGraph.createWorkSession({
+            availableMs: totalAvailableTimeMs,
+            hardStopAt: hardStopAtMs || null,
+            endConstraint,
+            taskIds: tasks.map(task => task.id)
+        });
+        window.activeWorkSessionId = session.id;
+    }
+
+    async function startNodes(nodes) {
         const root=nodes?.length===1?nodes[0]:null; window.currentWorkProjectContext=root?{id:root.id,name:root.name,estimatedMs:leafStats(root).ms,startedAtMs:Date.now(),deadlineAtMs:Number(root.deadline_at||root.due_at||root.deadline||0)}:null;
         sortedTasks = flattenTree(nodes);
         activeTaskId = firstIncompleteTask()?.id || null;
@@ -122,6 +135,8 @@
             alert('There are no unfinished executable tasks here.');
             return false;
         }
+        try { await persistSelectedWork(sortedTasks); }
+        catch (error) { console.error('Unable to persist work selection:', error); alert('Work could not be started because its queue was not saved.'); return false; }
         save('dashboard');
         beginWork();
         return true;
@@ -145,6 +160,7 @@
                 return;
             }
 
+            await persistSelectedWork(sortedTasks);
             save('dashboard');
             if (startImmediately) beginWork();
             else showDashboard();
