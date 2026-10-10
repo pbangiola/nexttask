@@ -40,5 +40,6 @@ window.TaskGraphTiming = (() => {
             for (const interval of intervals) active.set(interval.task_id, interval.id);
         } catch (error) { console.warn('Unable to recover active intervals:', error); }
     }
-    return {start, stop, restore};
+    function activeIntervalId(taskId) { return active.get(taskId) || null; }
+    return {start, stop, restore, activeIntervalId};
 })();
