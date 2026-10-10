@@ -242,13 +242,11 @@ async function init(){
                 if (queued.length) {
                     sortedTasks=queued;
                     window.activeWorkSessionId=session.id;
-                    if (!restored) {
-                        totalAvailableTimeMs=Number(session.available_ms||0);
-                        sessionStartedAtMs=Number(session.started_at||0);
-                        hardStopAtMs=Number(session.hard_stop_at||0);
-                        endConstraint=String(session.end_constraint||'');
-                        saveLocal('dashboard');
-                    }
+                    totalAvailableTimeMs=Number(session.available_ms||0);
+                    sessionStartedAtMs=Number(session.started_at||0);
+                    hardStopAtMs=Number(session.hard_stop_at||0);
+                    endConstraint=String(session.end_constraint||'');
+                    if (!restored) saveLocal('dashboard');
                     await window.TaskGraphTiming?.restore(session.id);
                     if(!sortedTasks.some(task=>task.id===activeTaskId)) activeTaskId=firstIncompleteTask()?.id||null;
                 }
