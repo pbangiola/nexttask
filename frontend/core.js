@@ -266,7 +266,7 @@ async function init(){
     const active=currentTask();
 
     if (recoveredView==='focus'&&active?.lastChanged!==null) showFocus(active);
-    else if (restored.view==='timing-entry') showSequentialTiming(0);
+    else if (recoveredView==='timing-entry') showSequentialTiming(0);
     else if (restored.view==='timing-gateway') showSequentialTiming(0);
     else if (restored.view==='completion') showCompletion();
     else if (restored.view==='session-ended') showSessionEnded();
