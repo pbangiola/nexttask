@@ -32,5 +32,12 @@ window.TaskGraphTiming = (() => {
             } catch (error) { console.warn('Work interval stop failed:', error); }
         });
     }
-    return {start, stop};
+    async function restore(sessionId) {
+        if (!sessionId || !window.TaskGraph) return;
+        try {
+            const intervals=await window.TaskGraph.openIntervals(sessionId);
+            for (const interval of intervals) active.set(interval.task_id, interval.id);
+        } catch (error) { console.warn('Unable to recover active intervals:', error); }
+    }
+    return {start, stop, restore};
 })();

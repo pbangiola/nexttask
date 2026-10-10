@@ -125,6 +125,7 @@
             taskIds: tasks.map(task => task.id)
         });
         window.activeWorkSessionId = session.id;
+        await window.TaskGraphTiming?.restore(session.id);
     }
 
     async function startNodes(nodes) {
