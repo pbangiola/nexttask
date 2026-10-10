@@ -3,7 +3,7 @@
 // functions for saving and restoring state
 
 function backupToServer() {
-    fetch(`${API_BASE_URL}/api/session/${encodeURIComponent(sessionId)}/tasks`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(serverPayload()) })
+    fetch(`${API_BASE_URL}/api/session/${encodeURIComponent(userId)}/tasks`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(serverPayload()) })
         .then(response => { if (!response.ok) throw new Error(`Backup failed (${response.status})`); })
         .catch(error => console.warn('Server backup failed; browser state is safe:', error));
 }
