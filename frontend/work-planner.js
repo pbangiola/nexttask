@@ -47,7 +47,7 @@
                 continue;
             }
 
-            if (node.node_type === 'project') continue;
+            if (node.node_type === 'project' || Number(node.independently_actionable) === 0) continue;
             out.push(taskFromLeaf(node, displayName, nodeRootId));
         }
         return out;
