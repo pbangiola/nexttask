@@ -2,10 +2,18 @@
 
 // functions for saving and restoring state
 
+// Serialize snapshots so a timer never starts before its task exists on disk.
+let pendingTaskSnapshot = Promise.resolve();
 function backupToServer() {
-    fetch(`${API_BASE_URL}/api/session/${encodeURIComponent(userId)}/tasks`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(serverPayload()) })
-        .then(response => { if (!response.ok) throw new Error(`Backup failed (${response.status})`); })
-        .catch(error => console.warn('Server backup failed; browser state is safe:', error));
+    const payload = JSON.stringify(serverPayload());
+    pendingTaskSnapshot = pendingTaskSnapshot.catch(() => {}).then(async () => {
+        const response = await fetch(`${API_BASE_URL}/api/session/${encodeURIComponent(userId)}/tasks`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: payload
+        });
+        if (!response.ok) throw new Error(`Backup failed (${response.status})`);
+    });
+    pendingTaskSnapshot.catch(error => console.warn('Server backup failed; browser state is safe:', error));
+    return pendingTaskSnapshot;
 }
 function save(view = inferView()) { saveLocal(view); backupToServer(); }
 
