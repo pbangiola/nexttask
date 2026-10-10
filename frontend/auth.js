@@ -77,7 +77,7 @@
 
             document.getElementById('authLoading')?.classList.add('hidden');
 
-            if (!clerk.isSignedIn || !clerk.user?.id || !clerk.session) {
+            if (!clerk.isSignedIn || !clerk.session?.user?.id) {
                 const signIn = document.getElementById('signIn');
                 signIn?.classList.remove('hidden');
                 const appUrl = new URL('.', window.location.href).href;
@@ -88,7 +88,9 @@
                 return;
             }
 
-            const userId = clerk.user.id;
+            // Bind application state to the active session, not a potentially stale
+            // Clerk user object after an account switch.
+            const userId = clerk.session.user.id;
             window.taskSorterAuth = { userId };
 
             // Remove anonymous-era identity/state so authenticated accounts always
@@ -101,7 +103,22 @@
                 const url = typeof input === 'string' ? input : input?.url;
                 if (!url || !url.startsWith(API_BASE_URL)) return originalFetch(input, options);
 
-                const token = await clerk.session.getToken();
+                const token = await clerk.session.getToken({ skipCache: true });
+                if (!token) throw new Error('Clerk session token unavailable. Sign in again.');
+                // Verify that the active session and token refer to the same user
+                // before allowing any authenticated request. The backend still
+                // independently verifies token signatures and ownership.
+                let tokenSubject;
+                try {
+                    const part = token.split('.')[1];
+                    const base64 = part.replace(/-/g, '+').replace(/_/g, '/');
+                    tokenSubject = JSON.parse(atob(base64)).sub;
+                } catch (_) {
+                    throw new Error('Unable to read Clerk session identity. Sign in again.');
+                }
+                if (tokenSubject !== userId) {
+                    throw new Error('Clerk account changed during this session. Reload the page to reconnect.');
+                }
                 const headers = new Headers(options.headers || (input instanceof Request ? input.headers : undefined));
                 if (token) headers.set('Authorization', `Bearer ${token}`);
                 return originalFetch(input, { ...options, headers });
