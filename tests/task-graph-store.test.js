@@ -11,6 +11,10 @@ const legacy = require('../backend/database');
 const users = require('../backend/user-store');
 const graph = require('../backend/task-graph-store');
 
+test.after(() => {
+  fs.rmSync(temporaryDatabase, {recursive:true, force:true});
+});
+
 function task(owner, id) {
   return users.createNode(owner, {id, name:id, nodeType:'task', independentlyActionable:true});
 }
