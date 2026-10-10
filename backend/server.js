@@ -120,11 +120,7 @@ app.put('/api/session/:id/tasks', requireClerkUser, requireOwnSession, (req, res
             totalAvailableTimeMs: req.body.totalAvailableTimeMs,
             endConstraint: req.body.endConstraint
         });
-        const unfinishedTaskIds = ownedTasks.filter(task => {
-            const status = String(task.status || '').toLowerCase();
-            return task.id && task.completed !== true && !task.completedTime && status !== 'completed' && status !== 'cancelled';
-        }).map(task => task.priorityRootId || task.id);
-        userStore.prependOpenTasks(userId, unfinishedTaskIds);
+        // Work queue order lives in work_session_items; do not reorder project nodes here.
         return res.json({ success: true, count: savedTasks.length, timestamp: Date.now() });
     } catch (error) {
         console.error('Failed to save task list:', error);
