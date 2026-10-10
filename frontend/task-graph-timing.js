@@ -36,7 +36,6 @@ window.TaskGraphTiming = (() => {
         if (!sessionId || !window.TaskGraph) return;
         try {
             const intervals=await window.TaskGraph.openIntervals(sessionId);
-            active.clear();
             for (const interval of intervals) active.set(interval.task_id, interval.id);
         } catch (error) { console.warn('Unable to recover active intervals:', error); }
     }
