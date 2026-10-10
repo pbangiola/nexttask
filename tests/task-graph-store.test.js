@@ -12,7 +12,9 @@ const users = require('../backend/user-store');
 const graph = require('../backend/task-graph-store');
 
 test.after(() => {
-  fs.rmSync(temporaryDatabase, {recursive:true, force:true});
+  // SQLite connections are owned by the store modules and close on process exit.
+  // Removing an open database here can trigger native cleanup failures.
+  process.env.RAILWAY_VOLUME_MOUNT_PATH = temporaryDatabase;
 });
 
 function task(owner, id) {
