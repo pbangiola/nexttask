@@ -232,15 +232,17 @@ function beginWork(){ const task=firstIncompleteTask(); if(!task){showCompletion
 async function init(){
     bindEvents();
     const restored=restoreLocalState();
-    if (restored && sortedTasks.length && window.TaskGraph) {
+    if (window.TaskGraph) {
         try {
             const session=await window.TaskGraph.openWorkSession();
             if (session) {
                 const detail=await window.TaskGraph.getWorkSession(session.id);
                 const ranks=new Map((detail.items||[]).map((item,index)=>[item.id,index]));
-                const queued=sortedTasks.filter(task=>ranks.has(task.id));
+                const existing=new Map(sortedTasks.map(task=>[task.id,task]));
+                const queued=(detail.items||[]).map(item=>existing.get(item.id)||createTask(item.name,{id:item.id,estimatedTimeMs:item.estimated_ms,actualTimeMs:item.elapsed_ms,status:item.status,created:item.created,started:item.started,lastChanged:null}));
                 if (queued.length) {
-                    sortedTasks=queued.sort((a,b)=>ranks.get(a.id)-ranks.get(b.id));
+                    sortedTasks=queued;
+                    if (!restored) saveLocal('dashboard');
                     window.activeWorkSessionId=session.id;
                     await window.TaskGraphTiming?.restore(session.id);
                     if(!sortedTasks.some(task=>task.id===activeTaskId)) activeTaskId=firstIncompleteTask()?.id||null;
@@ -249,12 +251,13 @@ async function init(){
         } catch(error) { console.warn('Server session recovery unavailable; using local snapshot:',error); }
     }
 
-    if (!restored || !sortedTasks.length) {
+    if (!sortedTasks.length) {
         showModeSelect();
         return;
     }
 
-    if (hasHardStop() && Date.now() >= hardStopAtMs && restored.view !== 'session-ended') {
+    const recoveredView=restored?.view||'dashboard';
+    if (hasHardStop() && Date.now() >= hardStopAtMs && recoveredView !== 'session-ended') {
         handleHardStop();
         return;
     }
@@ -262,7 +265,7 @@ async function init(){
     startHardStopWatch();
     const active=currentTask();
 
-    if (restored.view==='focus'&&active?.lastChanged!==null) showFocus(active);
+    if (recoveredView==='focus'&&active?.lastChanged!==null) showFocus(active);
     else if (restored.view==='timing-entry') showSequentialTiming(0);
     else if (restored.view==='timing-gateway') showSequentialTiming(0);
     else if (restored.view==='completion') showCompletion();
