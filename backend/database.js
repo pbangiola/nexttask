@@ -173,7 +173,7 @@ const upsertTaskStmt = db.prepare(`
     )
     ON CONFLICT(id) DO UPDATE SET
         session_id = excluded.session_id,
-        user_id = COALESCE(excluded.user_id, tasks.user_id),
+        user_id = tasks.user_id,
         parent_id = excluded.parent_id,
         project_id = excluded.project_id,
         node_type = excluded.node_type,
@@ -188,6 +188,7 @@ const upsertTaskStmt = db.prepare(`
         completed = excluded.completed,
         last_changed = excluded.last_changed,
         updated_at = excluded.updated_at
+    WHERE tasks.user_id IS NULL OR tasks.user_id = excluded.user_id
 `);
 
 const completeFinishedProjectsStmt = db.prepare(`

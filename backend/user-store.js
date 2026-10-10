@@ -34,7 +34,7 @@ db.exec(`
 const ensureUserStmt = db.prepare(`INSERT INTO users (id, created_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at;`);
 const ensureSessionStmt = db.prepare(`INSERT INTO sessions (id, updated_at, total_available_time_ms, end_constraint) VALUES (?, ?, 0, '') ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at;`);
 const claimUnownedTasksStmt = db.prepare(`UPDATE tasks SET user_id=? WHERE user_id IS NULL;`);
-const attachTaskStmt = db.prepare(`UPDATE tasks SET user_id=?, updated_at=? WHERE id=?;`);
+const attachTaskStmt = db.prepare(`UPDATE tasks SET user_id=?, updated_at=? WHERE id=? AND (user_id IS NULL OR user_id=?);`);
 const getOpenTasksStmt = db.prepare(`SELECT * FROM tasks WHERE user_id=? AND status NOT IN ('completed','cancelled') ORDER BY position, created;`);
 const getOpenTaskByIdStmt = db.prepare(`SELECT id FROM tasks WHERE user_id=? AND id=? AND status NOT IN ('completed','cancelled');`);
 const updateTaskPositionStmt = db.prepare(`UPDATE tasks SET position=?, updated_at=? WHERE user_id=? AND id=?;`);
@@ -79,7 +79,7 @@ function buildTree(rows){const byId=new Map(rows.map(r=>[r.id,{...r,children:[]}
 function snapshotRows(rows){return rows.map(r=>({id:r.id,parent_id:r.parent_id,project_id:r.project_id,position:r.position,status:r.status,node_type:r.node_type,independently_actionable:r.independently_actionable}));}
 function completeFinishedProjects(userId){const uid=String(userId),now=Date.now();let changed=0;do{changed=completeFinishedProjectsStmt.run({user_id:uid,now}).changes;}while(changed>0);}
 
-const prependOpenTasksTransaction=db.transaction((userId,taskIds)=>{const uid=String(userId),now=Date.now();const requested=[...new Set((taskIds||[]).map(id=>String(id||'').trim()).filter(Boolean))];requested.forEach(id=>attachTaskStmt.run(uid,now,id));const open=requested.filter(id=>Boolean(getOpenTaskByIdStmt.get(uid,id)));const set=new Set(open);const older=getOpenTasksStmt.all(uid).map(t=>t.id).filter(id=>!set.has(id));[...open,...older].forEach((id,i)=>updateTaskPositionStmt.run(i+1,now,uid,id));return open.length+older.length;});
+const prependOpenTasksTransaction=db.transaction((userId,taskIds)=>{const uid=String(userId),now=Date.now();const requested=[...new Set((taskIds||[]).map(id=>String(id||'').trim()).filter(Boolean))];requested.forEach(id=>attachTaskStmt.run(uid,now,id,uid));const open=requested.filter(id=>Boolean(getOpenTaskByIdStmt.get(uid,id)));const set=new Set(open);const older=getOpenTasksStmt.all(uid).map(t=>t.id).filter(id=>!set.has(id));[...open,...older].forEach((id,i)=>updateTaskPositionStmt.run(i+1,now,uid,id));return open.length+older.length;});
 const reparentTransaction=db.transaction((userId,nodeId,parentId,position)=>{const node=requireNode(userId,nodeId);const pid=assertValidParent(userId,node.id,parentId);const pos=Number(position)>0?Number(position):nextSiblingPosition(userId,pid);const before=snapshotRows([node]);setNodeParentStmt.run(pid,pid,pos,Date.now(),String(userId),node.id);return {node:getNodeStmt.get(String(userId),node.id),undo:before};});
 const deleteTransaction=db.transaction((userId,nodeId,mode)=>{const uid=String(userId);const node=requireNode(uid,nodeId);const rows=subtreeStmt.all(uid,node.id,uid);const undo=snapshotRows(rows);const now=Date.now();if(node.node_type==='project'&&rows.length>1&&mode==='ungroup'){const children=getChildrenStmt.all(uid,node.id);const targetParent=node.parent_id??null;let pos=Number(node.position||1);for(const child of children){setNodeParentStmt.run(targetParent,targetParent,pos++,now,uid,child.id);}setNodeStatusStmt.run('cancelled',now,uid,node.id);}else{for(const row of rows)setNodeStatusStmt.run('cancelled',now,uid,row.id);}return {success:true,nodeId:node.id,undo};});
 const restoreTransaction=db.transaction((userId,snapshot)=>{const uid=String(userId),now=Date.now();for(const row of snapshot||[]){requireNode(uid,row.id);restoreNodeStmt.run({user_id:uid,id:row.id,parent_id:row.parent_id??null,project_id:row.project_id??row.parent_id??null,position:Number(row.position||0),status:row.status||'pending',node_type:normalizeNodeType(row.node_type),independently_actionable:normalizeActionable(row.independently_actionable),updated_at:now});}return true;});
@@ -87,7 +87,7 @@ const restoreTransaction=db.transaction((userId,snapshot)=>{const uid=String(use
 module.exports={
  ensureUser(userId){const now=Date.now();ensureUserStmt.run(String(userId),now,now);},
  claimUnownedTasks(userId){this.ensureUser(userId);return claimUnownedTasksStmt.run(String(userId));},
- attachTask(userId,taskId){this.ensureUser(userId);return attachTaskStmt.run(String(userId),Date.now(),String(taskId));},
+ attachTask(userId,taskId){this.ensureUser(userId);return attachTaskStmt.run(String(userId),Date.now(),String(taskId),String(userId));},
  prependOpenTasks(userId,taskIds){this.ensureUser(userId);return prependOpenTasksTransaction(String(userId),Array.isArray(taskIds)?taskIds:[]);},
  getOpenTasks(userId){this.ensureUser(userId);return getOpenTasksStmt.all(String(userId));},
  importOpenTasksIntoSession(userId,sessionId){this.ensureUser(userId);const sid=ensureSession(sessionId);moveOpenTasksToSessionStmt.run(sid,Date.now(),String(userId));return getOpenTasksStmt.all(String(userId));},
