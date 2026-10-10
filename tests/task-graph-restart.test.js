@@ -15,7 +15,7 @@ const env = {...process.env, RAILWAY_VOLUME_MOUNT_PATH: temporaryDatabase};
 function run(code) {
   const result = spawnSync(process.execPath, ['-e', code], {cwd:root, env, encoding:'utf8', timeout:15000});
   assert.equal(result.status, 0, 'Child process failed:\\n' + result.stderr + '\\n' + result.stdout);
-  const output = result.stdout.trim().split('\\n').at(-1);
+  const output = result.stdout.trim().split(/\r?\n/).at(-1);
   return JSON.parse(output);
 }
 
