@@ -5,7 +5,8 @@
     const APP_SCRIPTS = [
         'frontend/initialization.js?v=20260929-dev-1',
         'frontend/persistence.js?v=20260929-dev-1',
-        'frontend/task-graph.js?v=20261005-task-graph-1',
+        'frontend/task-graph.js?v=20261010-task-graph-2',
+        'frontend/task-graph-timing.js?v=20261010-timing-1',
         'frontend/ui.js?v=20260929-dev-1',
         'frontend/core.js?v=20260929-dev-1',
         'frontend/timing.js?v=20260929-dev-1',

@@ -8,9 +8,9 @@ function checkpointTask(task, now = Date.now()) {
         task.lastChanged = now;
     }
 }
-function startTaskClock(task, now = Date.now()) { ensureTask(task); if (task.started === null) task.started = now; task.lastChanged = now; task.status = 'active'; activeTaskId = task.id; }
-function pauseTaskClock(task, now = Date.now()) { checkpointTask(task, now); task.lastChanged = null; if (!task.completed && task.status !== 'blocked') task.status = 'pending'; }
-function completeTask(task, now = Date.now()) { checkpointTask(task, now); task.lastChanged = null; task.completed = true; task.completedTime = now; task.status = 'completed'; task.blockedByTaskId = null; }
+function startTaskClock(task, now = Date.now()) { ensureTask(task); if (task.started === null) task.started = now; task.lastChanged = now; task.status = 'active'; activeTaskId = task.id; window.TaskGraphTiming?.start(task.id); }
+function pauseTaskClock(task, now = Date.now()) { window.TaskGraphTiming?.stop(task.id, now); checkpointTask(task, now); task.lastChanged = null; if (!task.completed && task.status !== 'blocked') task.status = 'pending'; }
+function completeTask(task, now = Date.now()) { window.TaskGraphTiming?.stop(task.id, now); checkpointTask(task, now); task.lastChanged = null; task.completed = true; task.completedTime = now; task.status = 'completed'; task.blockedByTaskId = null; }
 
 function formatDuration(ms, alwaysHours = false) {
     const totalSeconds = Math.floor(Math.abs(ms) / 1000);
