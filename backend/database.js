@@ -194,6 +194,9 @@ const replaceTaskList = db.transaction((sessionId, tasks, session) => {
         }
         // A snapshot can update work state, but never the canonical graph.
         if (existing?.node_type === 'project') return;
+        // A stale browser snapshot cannot restart terminal canonical work.
+        // Explicit planner edits, rather than Focus recovery, own reopening.
+        if (existing && ['completed', 'cancelled'].includes(existing.status)) return;
         for (const reference of existing ? [row.blocked_by_task_id] : [row.parent_id, row.project_id, row.blocked_by_task_id]) {
             if (reference == null) continue;
             const target = db.prepare('SELECT * FROM tasks WHERE id=? AND user_id=?').get(String(reference), row.user_id);

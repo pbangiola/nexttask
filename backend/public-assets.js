@@ -6,7 +6,7 @@ const scripts = [
     'auth', 'initialization', 'persistence', 'ui', 'core', 'timing',
     'work-planner', 'planner', 'project-queue-filter', 'project-editor',
     'duplicate-review', 'project-csv', 'planner-bridge', 'deadline-audio',
-    'task-graph-timing'
+    'task-graph', 'task-graph-timing', 'focus-durability'
 ];
 
 module.exports = function publicAssets(app) {

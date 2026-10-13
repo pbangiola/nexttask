@@ -15,20 +15,7 @@ function showTaskInput() { hideStaticScreens(); clearDynamic(); show(el('taskInp
 
 //show and hide buttons
 
-function resetAll() {
-    clearInterval(timerInterval);
-    sortRunId++;
-    localStorage.removeItem(LOCAL_STATE_KEY);
-    localStorage.removeItem('taskSorterSessionId');
-    sessionId = createId('session');
-    localStorage.setItem('taskSorterSessionId', sessionId);
-    sortedTasks = [];
-    activeTaskId = null;
-    clearSessionTiming();
-    endConstraint = '';
-    currentSortNames = [];
-    showModeSelect();
-}
+function resetAll() { return window.FocusDurability.finish([], Date.now(), false, true); }
 
 function restartCurrentStep() {
     clearInterval(timerInterval);
@@ -48,6 +35,13 @@ function restartCurrentStep() {
 
     if (!el('taskCompare')?.classList.contains('hidden')) {
         sortRunId++;
+        if (window.currentExistingSort) {
+            completeTask(window.currentExistingSort, Date.now());
+            window.currentExistingSort = null;
+            save('dashboard');
+            window.resumeExistingList();
+            return;
+        }
         sortedTasks = [];
         activeTaskId = null;
         hide(el('taskCompare'));
@@ -150,22 +144,24 @@ function prepareSortingDisplay(sortTask) {
     timerInterval = setInterval(renderSortingTimer, 1_000);
 }
 
-function showFocus(task){
+function showFocus(task) { return window.FocusDurability.enter(task); }
+
+function renderFocus(task){
     if (hasHardStop() && Date.now() >= hardStopAtMs) { handleHardStop(); return; }
     startHardStopWatch();
-    ensureTask(task); hideStaticScreens(); hide(el('startOverBtn')); show(el('stopWorkingBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='focusScreen'; if(task.lastChanged===null) startTaskClock(task);
+    ensureTask(task); hideStaticScreens(); hide(el('startOverBtn')); show(el('stopWorkingBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='focusScreen';
     appendProjectToolbar(screen); const heading=document.createElement('h2'); heading.textContent=`Current Task: ${task.name}`; const timer=document.createElement('p'); timer.id='timer'; timer.style.fontSize='24px'; timer.style.fontWeight='bold';
     function renderTimer(){checkpointTask(task);const remaining=task.estimatedTimeMs-task.actualTimeMs;timer.style.color=remaining>=0?'green':'red';timer.textContent=remaining>=0?`${formatDuration(remaining)} remaining`:`${formatDuration(remaining)} overdue`;saveLocal('focus');}
-    const done=document.createElement('button'); done.textContent='Done, Next!'; done.onclick=()=>{done.disabled=true;clearInterval(timerInterval);completeTask(task);activeTaskId=firstIncompleteTask()?.id||null;save('dashboard');beginWork();};
-    const blocked=document.createElement('button'); blocked.textContent='Blocked'; blocked.onclick=()=>{clearInterval(timerInterval);pauseTaskClock(task);showBlockedFlow(task);};
-    const add=document.createElement('button'); add.textContent='Add New Task'; add.onclick=()=>{clearInterval(timerInterval);checkpointTask(task);showAddTask(task);};
-    screen.append(heading,timer,done,blocked,add); container.appendChild(screen); renderTimer(); clearInterval(timerInterval); timerInterval=setInterval(renderTimer,1000); save('focus');
+    const done=document.createElement('button'); done.textContent='Done, Next!'; done.onclick=()=>{const action=window.FocusDurability.done(task);if(action)done.disabled=true;};
+    const blocked=document.createElement('button'); blocked.textContent='Blocked'; blocked.onclick=()=>{window.FocusDurability.pause(task,()=>showBlockedFlow(task));};
+    const add=document.createElement('button'); add.textContent='Add New Task'; add.onclick=()=>{window.FocusDurability.pause(task,()=>showAddTask(task));};
+    screen.append(heading,timer,done,blocked,add); container.appendChild(screen); renderTimer(); clearInterval(timerInterval); timerInterval=setInterval(renderTimer,1000);
 }
 
 function showBlockedFlow(blockedTask){
     hideStaticScreens(); hide(el('stopWorkingBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='blockedTaskScreen';
     const heading=document.createElement('h2'); heading.textContent=`What is blocking “${blockedTask.name}”?`; const input=document.createElement('input'); input.placeholder='Blocking task';
-    const confirm=document.createElement('button'); confirm.textContent='Add Blocker and Requeue Both'; confirm.onclick=()=>{const name=input.value.trim();if(!name){alert('Enter the blocking task.');return;}const blocker=createTask(name);const blockedIndex=sortedTasks.findIndex(task=>task.id===blockedTask.id);if(blockedIndex>=0)sortedTasks.splice(blockedIndex,1);blockedTask.status='blocked';blockedTask.blockedByTaskId=blocker.id;blockedTask.lastChanged=null;sortedTasks.push(blocker,blockedTask);activeTaskId=firstIncompleteTask()?.id||null;save('dashboard');showDashboard();};
+    const confirm=document.createElement('button'); confirm.textContent='Add Blocker and Requeue Both'; confirm.onclick=()=>{const name=input.value.trim();if(!name){alert('Enter the blocking task.');return;}confirm.disabled=true;window.FocusDurability.blocker(blockedTask,createTask(name));};
     const cancel=document.createElement('button'); cancel.textContent='Cancel and Continue Working'; cancel.onclick=()=>showFocus(blockedTask);
     screen.append(heading,input,confirm,cancel); container.appendChild(screen); saveLocal('focus');
 }
@@ -179,22 +175,22 @@ function showAddTask(activeTask){
 
 function showTaskPlacement(newTask,activeTask){
     const openTasks=incompleteTasks(); hideStaticScreens(); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='taskPlacementScreen'; const heading=document.createElement('h2'); heading.textContent=`Where should “${newTask.name}” go?`; screen.appendChild(heading); const choices=document.createElement('div'); const activeIndex=sortedTasks.findIndex(task=>task.id===activeTask.id);
-    function addChoice(label,insertIndex){const button=document.createElement('button');button.textContent=label;button.style.display='block';button.onclick=()=>{sortedTasks.splice(insertIndex,0,newTask);save('focus');showFocus(activeTask);};choices.appendChild(button);}
+    function addChoice(label,insertIndex){const button=document.createElement('button');button.textContent=label;button.style.display='block';button.onclick=()=>{button.disabled=true;window.FocusDurability.add(newTask,insertIndex,activeTask);};choices.appendChild(button);}
     addChoice('Do this next',Math.max(0,activeIndex+1)); openTasks.filter(task=>task.id!==activeTask.id).forEach(task=>{const index=sortedTasks.findIndex(item=>item.id===task.id);addChoice(`After “${task.name}”`,index+1);}); addChoice('Put it at the end',sortedTasks.length);
     const cancel=document.createElement('button');cancel.textContent='Cancel';cancel.onclick=()=>showFocus(activeTask);screen.append(choices,cancel);container.appendChild(screen);
 }
 
-function stopWorking(){clearInterval(timerInterval);const task=currentTask();if(task)pauseTaskClock(task);hide(el('stopWorkingBtn'));showStopChecklist();}
+function stopWorking(){return window.FocusDurability.pause(currentTask(),()=>{hide(el('stopWorkingBtn'));showStopChecklist();});}
 
 function showStopChecklist(){
     hideStaticScreens(); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='stopChecklistScreen';
     const heading=document.createElement('h2'); heading.textContent='Did you finish any of these tasks?'; const note=document.createElement('p'); note.textContent='Check any tasks you completed, then end this work session.'; screen.append(heading,note);
     const checklist=document.createElement('div'); const checkboxes=[]; incompleteTasks().forEach(task=>{const label=document.createElement('label');label.style.display='block';const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.style.width='auto';checkbox.style.display='inline-block';checkbox.style.marginRight='8px';label.append(checkbox,document.createTextNode(task.name));checklist.appendChild(label);checkboxes.push({checkbox,task});});
-    const finish=document.createElement('button'); finish.textContent='End Work Session'; finish.onclick=()=>{const now=Date.now();checkboxes.forEach(({checkbox,task})=>{if(checkbox.checked)completeTask(task,now);});activeTaskId=firstIncompleteTask()?.id||null;save('dashboard');if(firstIncompleteTask())showDashboard();else showCompletion();};
+    const finish=document.createElement('button'); finish.textContent='End Work Session'; finish.onclick=()=>{finish.disabled=true;window.FocusDurability.finish(checkboxes.filter(({checkbox})=>checkbox.checked).map(({task})=>task.id),Date.now());};
     const resume=document.createElement('button');resume.textContent='Keep Working';resume.onclick=()=>{const task=currentTask();if(task)showFocus(task);else showDashboard();};screen.append(checklist,finish,resume);container.appendChild(screen);saveLocal('stop-checklist');
 }
 
-async function resumeExistingList(){hideStaticScreens();const container=clearDynamic();container.textContent='Loading saved tasks…';try{await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:'{}'});await fetch(`${API_BASE_URL}/api/session/${encodeURIComponent(sessionId)}/tasks`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId,tasks:[],totalAvailableTimeMs:0,endConstraint:''})});const response=await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}/tasks/import`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId})});if(!response.ok)throw new Error(`Resume failed (${response.status})`);const data=await response.json();sortedTasks=(data.tasks||[]).map(row=>createTask(row.name,{id:row.id,estimatedTimeMs:row.estimated_ms,actualTimeMs:row.elapsed_ms,completed:false,status:row.status,created:row.created,started:row.started,lastChanged:null,blockedByTaskId:row.blocked_by_task_id}));activeTaskId=firstIncompleteTask()?.id||null;if(!sortedTasks.length){alert('No unfinished saved tasks were found.');showWorkChoice();return;}showDashboard();}catch(error){console.error(error);alert('The saved task list could not be loaded.');showWorkChoice();}}
+function resumeExistingList() { return window.WorkPlanner.resume(); }
 
 function showSequentialTiming(startIndex = 0) {
     clearInterval(timerInterval);

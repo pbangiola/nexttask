@@ -5,18 +5,21 @@
         ? window.location.origin
         : 'https://nexttask-production.up.railway.app';
     const APP_SCRIPTS = [
-        'frontend/initialization.js?v=20260929-dev-1',
-        'frontend/persistence.js?v=20260929-dev-1',
-        'frontend/ui.js?v=20260929-dev-1',
-        'frontend/core.js?v=20260929-dev-1',
-        'frontend/timing.js?v=20260929-dev-1',
-        'frontend/work-planner.js?v=20260929-dev-1',
-        'frontend/planner.js?v=20261013-consolidation-1',
-        'frontend/project-queue-filter.js?v=20260929-dev-1',
-        'frontend/project-editor.js?v=20260929-dev-1',
-        'frontend/duplicate-review.js?v=20260929-dev-1',
-        'frontend/project-csv.js?v=20260929-dev-1',
-        'frontend/planner-bridge.js?v=20260929-dev-1'
+        'frontend/initialization.js?v=20261013-focus-1',
+        'frontend/task-graph.js?v=20261013-focus-1',
+        'frontend/task-graph-timing.js?v=20261013-focus-1',
+        'frontend/persistence.js?v=20261013-focus-1',
+        'frontend/ui.js?v=20261013-focus-1',
+        'frontend/core.js?v=20261013-focus-1',
+        'frontend/timing.js?v=20261013-focus-1',
+        'frontend/focus-durability.js?v=20261013-focus-1',
+        'frontend/work-planner.js?v=20261013-focus-1',
+        'frontend/planner.js?v=20261013-focus-1',
+        'frontend/project-queue-filter.js?v=20261013-focus-1',
+        'frontend/project-editor.js?v=20261013-focus-1',
+        'frontend/duplicate-review.js?v=20261013-focus-1',
+        'frontend/project-csv.js?v=20261013-focus-1',
+        'frontend/planner-bridge.js?v=20261013-focus-1'
     ];
 
     const nativeFetch = window.fetch.bind(window);
@@ -62,7 +65,7 @@
 
     async function loadApplication() {
         for (const src of APP_SCRIPTS) await loadScript(src);
-        if (typeof window.init === 'function') window.init();
+        if (typeof window.init === 'function') await window.init();
     }
 
     async function boot() {
@@ -87,6 +90,19 @@
 
             const userId = clerk.user.id;
             window.taskSorterAuth = { userId };
+            const authenticatedSession = clerk.session;
+            const abort = new AbortController();
+            const sameAccount = () => clerk.user?.id === userId && clerk.session?.id === authenticatedSession.id;
+            clerk.addListener(() => {
+                if (sameAccount()) return;
+                window.taskSorterAuth = null;
+                abort.abort();
+                window.TaskGraph?.invalidate();
+                clearInterval(typeof timerInterval === 'undefined' ? null : timerInterval);
+                clearInterval(typeof hardStopInterval === 'undefined' ? null : hardStopInterval);
+                document.getElementById('taskSorterApp')?.classList.add('hidden');
+                showFatal('Account changed. Reload to continue with this account.');
+            });
 
             // Remove anonymous-era identity/state so authenticated accounts always
             // start from their own Clerk-owned server data and browser snapshot.
@@ -96,12 +112,16 @@
             const originalFetch = nativeFetch;
             window.fetch = async (input, options = {}) => {
                 const url = typeof input === 'string' ? input : input?.url;
-                if (!url || !url.startsWith(API_BASE_URL)) return originalFetch(input, options);
+                if (!url || new URL(url, window.location.href).origin !== API_BASE_URL || !new URL(url, window.location.href).pathname.startsWith('/api/')) return originalFetch(input, options);
 
-                const token = await clerk.session.getToken();
+                if (!sameAccount()) throw new Error('Account changed. Reload to continue.');
+                const token = await authenticatedSession.getToken();
+                if (!sameAccount() || !token) throw new Error('Authenticated account is unavailable.');
                 const headers = new Headers(options.headers || (input instanceof Request ? input.headers : undefined));
                 if (token) headers.set('Authorization', `Bearer ${token}`);
-                return originalFetch(input, { ...options, headers });
+                const response = await originalFetch(input, { ...options, headers, signal: abort.signal });
+                if (!sameAccount()) throw new Error('Account changed. Reload to continue.');
+                return response;
             };
 
             const account = document.getElementById('account');
@@ -109,8 +129,9 @@
             const userButton = document.getElementById('userButton');
             if (userButton) clerk.mountUserButton(userButton);
 
-            document.getElementById('taskSorterApp')?.classList.remove('hidden');
             await loadApplication();
+            if (!sameAccount()) throw new Error('Account changed. Reload to continue.');
+            document.getElementById('taskSorterApp')?.classList.remove('hidden');
         } catch (error) {
             console.error('Authentication bootstrap failed:', error);
             showFatal('Sign-in could not be initialized. Please reload the page.');
