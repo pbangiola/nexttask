@@ -54,58 +54,9 @@ db.exec(`
     );
 `);
 
-for (const table of ['completed_tasks', 'task_queue']) {
-    db.exec(`DROP TABLE IF EXISTS ${table};`);
-}
-
-const SSO_RESET_MIGRATION = '2026-09-29-clerk-fresh-start';
-
-function tableExists(name) {
-    return Boolean(db.prepare(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
-    ).get(name));
-}
-
-function applyClerkFreshStartOnce() {
-    const alreadyApplied = db.prepare(
-        'SELECT 1 FROM data_migrations WHERE name = ?'
-    ).get(SSO_RESET_MIGRATION);
-    if (alreadyApplied) return false;
-
-    // This is an intentional one-time destructive migration. Older deployments
-    // may contain tables with foreign keys into legacy user/project schemas.
-    // Disable FK enforcement while clearing them so stale relationships cannot
-    // prevent the reset itself. The marker is written only after the reset
-    // succeeds, making ordinary future deploys/restarts non-destructive.
-    db.pragma('foreign_keys = OFF');
-    try {
-        const reset = db.transaction(() => {
-            for (const table of ['projects', 'project_tasks', 'task_queue', 'completed_tasks']) {
-                if (tableExists(table)) db.exec(`DROP TABLE "${table}";`);
-            }
-            if (tableExists('tasks')) db.exec('DELETE FROM tasks;');
-            if (tableExists('sessions')) db.exec('DELETE FROM sessions;');
-            if (tableExists('users')) db.exec('DELETE FROM users;');
-
-            db.prepare(
-                'INSERT INTO data_migrations (name, applied_at) VALUES (?, ?)'
-            ).run(SSO_RESET_MIGRATION, Date.now());
-        });
-        reset();
-    } finally {
-        db.pragma('foreign_keys = ON');
-    }
-
-    const violations = db.pragma('foreign_key_check');
-    if (violations.length) {
-        throw new Error(`Foreign key violations remain after SSO reset: ${JSON.stringify(violations)}`);
-    }
-    return true;
-}
-
-if (applyClerkFreshStartOnce()) {
-    console.log(`Applied one-time data reset: ${SSO_RESET_MIGRATION}`);
-}
+// The legacy fresh-start reset is retired. Preserve all rows, legacy tables,
+// and existing migration markers even when upgrading a pre-Clerk database.
+// Anonymous ownership attribution requires a separate approved migration.
 
 function getColumns(tableName) {
     return db.prepare(`PRAGMA table_info(${tableName})`).all().map(column => column.name);
@@ -155,11 +106,11 @@ const ensureSessionStmt = db.prepare(`
 const getSessionStmt = db.prepare(`SELECT * FROM sessions WHERE id = ?`);
 const getTasksStmt = db.prepare(`
     SELECT * FROM tasks
-    WHERE session_id = ?
+    WHERE session_id = ? AND user_id = ?
       AND (? = 0 OR status NOT IN ('completed', 'cancelled'))
     ORDER BY position ASC, created ASC
 `);
-const getTaskStmt = db.prepare(`SELECT * FROM tasks WHERE session_id = ? AND id = ?`);
+const getTaskStmt = db.prepare(`SELECT * FROM tasks WHERE session_id = ? AND user_id = ? AND id = ?`);
 
 const upsertTaskStmt = db.prepare(`
     INSERT INTO tasks (
@@ -172,42 +123,22 @@ const upsertTaskStmt = db.prepare(`
         @created, @started, @completed, @last_changed, @updated_at
     )
     ON CONFLICT(id) DO UPDATE SET
-        session_id = excluded.session_id,
-        user_id = COALESCE(excluded.user_id, tasks.user_id),
-        parent_id = excluded.parent_id,
-        project_id = excluded.project_id,
-        node_type = excluded.node_type,
-        independently_actionable = excluded.independently_actionable,
-        name = excluded.name,
+        session_id = tasks.session_id,
+        user_id = tasks.user_id,
+        parent_id = tasks.parent_id,
+        project_id = tasks.project_id,
+        node_type = tasks.node_type,
+        independently_actionable = tasks.independently_actionable,
+        name = tasks.name,
         status = excluded.status,
         estimated_ms = excluded.estimated_ms,
         elapsed_ms = excluded.elapsed_ms,
-        position = excluded.position,
+        position = tasks.position,
         blocked_by_task_id = excluded.blocked_by_task_id,
         started = excluded.started,
         completed = excluded.completed,
         last_changed = excluded.last_changed,
         updated_at = excluded.updated_at
-`);
-
-const completeFinishedProjectsStmt = db.prepare(`
-    UPDATE tasks AS parent
-    SET status = 'completed',
-        completed = COALESCE(completed, @now),
-        last_changed = NULL,
-        updated_at = @now
-    WHERE parent.session_id = @session_id
-      AND parent.node_type = 'project'
-      AND parent.status NOT IN ('completed', 'cancelled')
-      AND EXISTS (
-          SELECT 1 FROM tasks child
-          WHERE child.parent_id = parent.id
-      )
-      AND NOT EXISTS (
-          SELECT 1 FROM tasks child
-          WHERE child.parent_id = parent.id
-            AND child.status NOT IN ('completed', 'cancelled')
-      )
 `);
 
 function normalizeTask(sessionId, task, position) {
@@ -225,7 +156,7 @@ function normalizeTask(sessionId, task, position) {
         ?? true;
 
     return {
-        id: String(task.id),
+        id: String(task.id || '').trim(),
         session_id: sessionId,
         user_id: task.userId ?? task.user_id ?? null,
         parent_id: parentId,
@@ -246,14 +177,6 @@ function normalizeTask(sessionId, task, position) {
     };
 }
 
-function completeFinishedProjects(sessionId) {
-    const now = Date.now();
-    let changed = 0;
-    do {
-        changed = completeFinishedProjectsStmt.run({ session_id: sessionId, now }).changes;
-    } while (changed > 0);
-}
-
 const replaceTaskList = db.transaction((sessionId, tasks, session) => {
     ensureSessionStmt.run({
         id: sessionId,
@@ -265,12 +188,25 @@ const replaceTaskList = db.transaction((sessionId, tasks, session) => {
     tasks.forEach((task, index) => {
         const row = normalizeTask(sessionId, task, index + 1);
         if (!row.id || !row.name) throw new Error('Every task requires an id and name');
+        const existing = db.prepare('SELECT * FROM tasks WHERE id=?').get(row.id);
+        if (row.user_id !== String(sessionId) || (existing && existing.user_id !== row.user_id)) {
+            throw new Error('Task not found for this user');
+        }
+        // A snapshot can update work state, but never the canonical graph.
+        if (existing?.node_type === 'project') return;
+        for (const reference of existing ? [row.blocked_by_task_id] : [row.parent_id, row.project_id, row.blocked_by_task_id]) {
+            if (reference == null) continue;
+            const target = db.prepare('SELECT * FROM tasks WHERE id=? AND user_id=?').get(String(reference), row.user_id);
+            if (!target) throw new Error('Referenced task not found for this user');
+            if (!existing && (reference === row.parent_id || reference === row.project_id) && target.node_type !== 'project') {
+                throw new Error('Parent node must be a project');
+            }
+        }
         upsertTaskStmt.run(row);
     });
 
-    // A project is complete exactly when it has children and none of those children
-    // remain open. Repeat so nested project completion cascades to its ancestors.
-    completeFinishedProjects(sessionId);
+    // Main's tree-integrity reconciliation remains the owner of project rollups.
+    // Do not infer empty-project or elapsed-time policy from a Focus snapshot.
 });
 
 module.exports = {
@@ -290,15 +226,15 @@ module.exports = {
 
     saveTaskList(sessionId, tasks, session = {}) {
         replaceTaskList(sessionId, tasks, session);
-        return getTasksStmt.all(sessionId, 0);
+        return getTasksStmt.all(sessionId, String(sessionId), 0);
     },
 
     getTasks(sessionId, incompleteOnly = false) {
-        return getTasksStmt.all(sessionId, incompleteOnly ? 1 : 0);
+        return getTasksStmt.all(sessionId, String(sessionId), incompleteOnly ? 1 : 0);
     },
 
     getTask(sessionId, taskId) {
-        return getTaskStmt.get(sessionId, taskId) || null;
+        return getTaskStmt.get(sessionId, String(sessionId), taskId) || null;
     },
 
     getStats(sessionId) {
@@ -310,7 +246,7 @@ module.exports = {
                 COALESCE(SUM(estimated_ms - elapsed_ms), 0) AS total_variance_ms,
                 COALESCE(AVG(estimated_ms - elapsed_ms), 0) AS avg_variance_ms
             FROM tasks
-            WHERE session_id = ? AND status = 'completed'
-        `).get(sessionId);
+            WHERE session_id = ? AND user_id = ? AND status = 'completed'
+        `).get(sessionId, String(sessionId));
     }
 };

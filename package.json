@@ -4,18 +4,19 @@
   "description": "Task Sorter application with a static frontend and persistent Node/SQLite backend.",
   "main": "backend/server.js",
   "engines": {
-    "node": ">=20.9.0"
+    "node": "22.x"
   },
   "scripts": {
     "start": "node backend/server.js",
-    "dev": "node --watch backend/server.js"
+    "dev": "node --watch backend/server.js",
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@clerk/express": "^2.1.72",
-    "better-sqlite3": "^11.8.0",
+    "better-sqlite3": "11.10.0",
     "cors": "^2.8.5",
     "express": "^4.21.2"
   }
