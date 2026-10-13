@@ -50,7 +50,7 @@ test('public index, referenced scripts, health and config work without authentic
     const html = await index.text();
     assert.match(html, /taskSorterApp/);
     assert.equal((await request('/index.html')).status, 200);
-    for (const name of ['auth','initialization','persistence','ui','core','timing','work-planner','planner','project-queue-filter','project-editor','duplicate-review','project-csv','planner-bridge','deadline-audio','task-graph-timing']) {
+    for (const name of ['auth','initialization','persistence','ui','core','timing','work-planner','planner','project-queue-filter','project-editor','duplicate-review','project-csv','planner-bridge','deadline-audio','task-graph','task-graph-timing','focus-durability']) {
         const asset = await request(`/frontend/${name}.js?v=test`);
         assert.equal(asset.status, 200, name);
         assert.match(asset.headers.get('content-type'), /javascript/);
@@ -136,4 +136,38 @@ test('durable session, ranked items and interval routes work for their verified 
     assert.ok((await stopped.json()).interval.duration_ms >= 1000);
     assert.equal((await request('/api/work-sessions/http-alice-session/end','alice','POST',{})).status,200);
     assert.equal((await (await request('/api/work-sessions/open','alice')).json()).workSession,null);
+});
+
+test('atomic create-with-items failure preserves old session/interval; replacement and retries capture exact boundary', async () => {
+    const owner = 'prepare-owner';
+    const a = await request(`/api/users/${owner}/nodes`, owner, 'POST', { id: 'prepare-task', name: 'Task' });
+    assert.equal(a.status, 201);
+    const old = await request('/api/work-sessions/prepare', owner, 'POST', { id: 'prepare-old', taskIds: ['prepare-task'], startedAt: Date.now() - 2000 });
+    assert.equal(old.status, 201);
+    assert.equal((await request('/api/work-intervals', owner, 'POST', { id: 'prepare-interval', taskId: 'prepare-task', workSessionId: 'prepare-old', startedAt: Date.now() - 1000 })).status, 201);
+    const failed = await request('/api/work-sessions/prepare', owner, 'POST', { id: 'prepare-failed', taskIds: ['prepare-task', 'missing-task'], replaceSessionId: 'prepare-old' });
+    assert.equal(failed.status, 404);
+    assert.equal((await (await request('/api/work-sessions/open', owner)).json()).workSession.id, 'prepare-old');
+    assert.equal((await (await request('/api/work-sessions/prepare-failed', owner)).json()).error, 'Work session not found');
+    assert.equal((await (await request('/api/work-sessions/prepare-old/open-intervals', owner)).json()).intervals.length, 1);
+    const boundary = Date.now();
+    const input = { id: 'prepare-new', taskIds: ['prepare-task'], replaceSessionId: 'prepare-old', replacedAt: boundary };
+    assert.equal((await request('/api/work-sessions/prepare', owner, 'POST', input)).status, 201);
+    const intervals = (await (await request('/api/tasks/prepare-task/work-intervals', owner)).json()).intervals;
+    assert.equal(intervals[0].ended_at, boundary);
+    assert.equal((await (await request('/api/work-sessions/prepare-old', owner)).json()).workSession.ended_at, boundary);
+    assert.equal((await request('/api/work-sessions/prepare-new/end', owner, 'POST', { endedAt: boundary })).status, 200);
+    const retry = await request('/api/work-sessions/prepare', owner, 'POST', input);
+    assert.equal((await retry.json()).workSession.status, 'ended', 'uncertain prepare retry cannot reopen closed work');
+    assert.equal((await request('/api/work-sessions/prepare', 'other-owner', 'POST', input)).status, 404);
+});
+
+test('stale active snapshot cannot resurrect completed canonical task', async () => {
+    const owner = 'stale-owner';
+    assert.equal((await request(`/api/users/${owner}/nodes`, owner, 'POST', { id: 'stale-task', name: 'Task' })).status, 201);
+    const completedAt = Date.now();
+    assert.equal((await request(`/api/session/${owner}/tasks`, owner, 'PUT', { tasks: [{ id: 'stale-task', name: 'Task', status: 'completed', completedTime: completedAt, actualTimeMs: 123 }] })).status, 200);
+    assert.equal((await request(`/api/session/${owner}/tasks`, owner, 'PUT', { tasks: [{ id: 'stale-task', name: 'Task', status: 'active', actualTimeMs: 0 }] })).status, 200);
+    const task = (await (await request(`/api/users/${owner}/nodes/stale-task`, owner)).json()).node;
+    assert.equal(task.status, 'completed'); assert.equal(task.completed, completedAt); assert.equal(task.elapsed_ms, 123);
 });

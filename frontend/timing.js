@@ -3,6 +3,7 @@
 //timing functions for the session and tasks
 function checkpointTask(task, now = Date.now()) {
     ensureTask(task);
+    if (hasHardStop()) now = Math.min(now, hardStopAtMs);
     if (task.lastChanged !== null) {
         task.actualTimeMs += Math.max(0, now - task.lastChanged);
         task.lastChanged = now;
@@ -53,22 +54,4 @@ function startHardStopWatch() {
     if (!hardStopHandled) hardStopInterval = setInterval(checkHardStop, 250);
 }
 
-function handleHardStop() {
-    if (hardStopHandled || !hasHardStop()) return;
-
-    hardStopHandled = true;
-    clearInterval(hardStopInterval);
-    hardStopInterval = null;
-    clearInterval(timerInterval);
-
-    const task = currentTask();
-    if (task && task.lastChanged !== null) {
-        pauseTaskClock(task, hardStopAtMs);
-    }
-
-    activeTaskId = firstIncompleteTask()?.id || null;
-    save('session-ended');
-    showSessionEnded();
-}
-
-
+function handleHardStop() { return window.FocusDurability.hardStop(); }

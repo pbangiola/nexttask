@@ -10,7 +10,7 @@ const TEN_MINUTES_MS = 10 * 60 * 1000;
 const LOCAL_STATE_KEY_PREFIX = 'taskSorterSession';
 
 // Authentication bootstraps these values from Clerk before application scripts load.
-// A user's Clerk ID is also the single active-session ID for this fresh-start MVP.
+// The Clerk ID scopes legacy snapshots; durable work-session IDs are separate.
 let userId = String(window.taskSorterAuth?.userId || '');
 let sessionId = userId;
 const LOCAL_STATE_KEY = `${LOCAL_STATE_KEY_PREFIX}_${userId}`;
@@ -57,6 +57,7 @@ function continueAfterTimeLimitChoice() {
 }
 
 function showTimeLimitQuestion(nextStep) {
+    window.FocusDurability.newWork();
     timeLimitNextStep = nextStep;
 
     // Every new work session gets a fresh timing decision. This prevents a
@@ -135,6 +136,7 @@ function importFile(file) {
         );
         const structured = nameIndex >= 0;
 
+        window.FocusDurability.newWork();
         if (structured) {
             sortedTasks = rows.slice(1)
                 .map(row => createTask(row[nameIndex], {

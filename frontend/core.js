@@ -29,10 +29,10 @@ function createTask(name, values = {}) {
 //separate incomplete tasks from complete tasks
 function incompleteTasks() {
     sortedTasks.forEach(ensureTask);
-    return sortedTasks.filter(task => !task.completed);
+    return sortedTasks.filter(task => !task.completed && task.status !== 'cancelled');
 }
 //identify the first incomplete task in the taak list
-function firstIncompleteTask() { return incompleteTasks()[0] || null; }
+function firstIncompleteTask() { return incompleteTasks().find(task => window.FocusDurability.eligible(task)) || null; }
 //identify the task the user is focused on now
 function currentTask() { return sortedTasks.find(task => task.id === activeTaskId && !task.completed) || firstIncompleteTask(); }
 
@@ -92,6 +92,9 @@ async function startSorting() {
         lastChanged: sortStartedAtMs
     });
 
+    sortTask.isSortingOverhead = true;
+    sortTask.independentlyActionable = false;
+    window.FocusDurability.newWork();
     sortedTasks = [sortTask, ...workTasks];
     activeTaskId = sortTask.id;
     sortStartedAt = sortStartedAtMs;
@@ -201,34 +204,9 @@ function mergeWithChoices(left, right, runId) {
 }
 
 //trigger work on the next task in the sorted list
-function beginWork(){ const task=firstIncompleteTask(); if(!task){showCompletion();return;} activeTaskId=task.id; if(task.estimatedTimeMs<=0) showSingleTaskEstimate(task); else showFocus(task); }
+function beginWork(){ const task=firstIncompleteTask(); if(!task){if(incompleteTasks().length)showDashboard();else window.FocusDurability.finish();return;} return showFocus(task); }
 
 
 
 //initialize
-function init(){
-    bindEvents();
-    const restored=restoreLocalState();
-
-    if (!restored || !sortedTasks.length) {
-        showModeSelect();
-        return;
-    }
-
-    if (hasHardStop() && Date.now() >= hardStopAtMs && restored.view !== 'session-ended') {
-        handleHardStop();
-        return;
-    }
-
-    startHardStopWatch();
-    const active=currentTask();
-
-    if (restored.view==='focus'&&active?.lastChanged!==null) showFocus(active);
-    else if (restored.view==='timing-entry') showSequentialTiming(0);
-    else if (restored.view==='timing-gateway') showSequentialTiming(0);
-    else if (restored.view==='completion') showCompletion();
-    else if (restored.view==='session-ended') showSessionEnded();
-    else if (restored.view==='stop-checklist') showStopChecklist();
-    else showDashboard();
-}
-document.addEventListener('DOMContentLoaded',init);
+function init(){ return window.FocusDurability.init(); }

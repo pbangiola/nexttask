@@ -154,19 +154,44 @@ module.exports = {
     getOpenSession(userId) {
         return db.prepare("SELECT * FROM work_sessions WHERE user_id=? AND status='open' ORDER BY updated_at DESC, id LIMIT 1").get(String(userId)) || null;
     },
-    endSession(userId, id) {
+    // Queue validation and replacement are atomic: failure leaves old work intact.
+    prepareSession(userId, input = {}) {
+        return db.transaction(() => {
+            const uid = requiredId(userId, 'User id');
+            const id = requiredId(input.id, 'Work session id');
+            const prior = db.prepare('SELECT * FROM work_sessions WHERE id=?').get(id);
+            if (prior) {
+                if (prior.user_id !== uid) throw new Error('Work session not found');
+                return { workSession: prior, items: items(uid, id) };
+            }
+            if (!Array.isArray(input.taskIds) || !input.taskIds.length) throw new Error('An executable queue is required');
+            const previous = input.replaceSessionId ? requireSession(uid, input.replaceSessionId) : null;
+            const session = module.exports.createSession(uid, input);
+            const queue = replaceItems(uid, id, input.taskIds);
+            if (previous?.status === 'open') module.exports.endSession(uid, previous.id, input.replacedAt);
+            return { workSession: session, items: queue };
+        })();
+    },
+    endSession(userId, id, endedAt = Date.now()) {
         return db.transaction(() => {
             const session = requireSession(userId, id);
             if (session.status !== 'open') return session;
             const now = Date.now();
-            db.prepare('UPDATE work_intervals SET ended_at=?,duration_ms=MAX(0,?-started_at),updated_at=? WHERE work_session_id=? AND user_id=? AND ended_at IS NULL')
-                .run(now, now, now, String(id), String(userId));
-            db.prepare("UPDATE work_sessions SET status='ended',ended_at=?,updated_at=? WHERE id=? AND user_id=?").run(now, now, String(id), String(userId));
+            const end = Math.max(session.started_at, Math.min(now, nonnegative(endedAt, 'endedAt', now)));
+            db.prepare('UPDATE work_intervals SET ended_at=MAX(started_at,?),duration_ms=MAX(0,?-started_at),updated_at=? WHERE work_session_id=? AND user_id=? AND ended_at IS NULL')
+                .run(end, end, now, String(id), String(userId));
+            db.prepare("UPDATE work_sessions SET status='ended',ended_at=?,updated_at=? WHERE id=? AND user_id=?").run(end, now, String(id), String(userId));
             return requireSession(userId, id);
         })();
     },
     setItems(userId, id, taskIds) { return replaceItems(String(userId), String(id), taskIds); },
     getItems(userId, id) { requireSession(userId, id); return items(userId, id); },
+    getHistory(userId, id) {
+        requireSession(userId, id);
+        return db.prepare(`SELECT DISTINCT t.* FROM work_intervals w JOIN tasks t ON t.id=w.task_id
+            WHERE w.work_session_id=? AND w.user_id=? AND t.user_id=? ORDER BY t.created`)
+            .all(String(id), String(userId), String(userId));
+    },
     startInterval(userId, input = {}) { return startInterval(String(userId), input); },
     stopInterval(userId, id, endedAt = Date.now()) {
         return db.transaction(() => {

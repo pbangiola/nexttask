@@ -4,6 +4,7 @@
     const originalServerPayload = window.serverPayload;
     let workTreeCache = [];
     let projectFocusId = null;
+    let sortSelectedWork = false;
     const projectHistory = [];
 
     function isOpen(node) {
@@ -24,12 +25,13 @@
             created: row.created,
             started: row.started,
             lastChanged: null,
-            blockedByTaskId: null
+            blockedByTaskId: row.blocked_by_task_id
         });
         task.canonicalName = row.name;
         task.parentId = row.parent_id ?? null;
         task.nodeType = row.node_type || 'task';
         task.nodePosition = Number(row.position || 0);
+        task.independentlyActionable = row.independently_actionable === 1;
         task.priorityRootId = rootId || row.id;
         task.projectPath = displayName.includes(': ') ? displayName.split(': ').slice(0,-1).join(' › ') : '';
         return task;
@@ -47,7 +49,7 @@
                 continue;
             }
 
-            if (node.node_type === 'project') continue;
+            if (node.node_type === 'project' || node.independently_actionable !== 1) continue;
             out.push(taskFromLeaf(node, displayName, nodeRootId));
         }
         return out;
@@ -114,7 +116,42 @@
         return workTreeCache;
     }
 
-    function startNodes(nodes) {
+    function sortingChoice() {
+        const label = document.createElement('label');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox'; checkbox.checked = sortSelectedWork;
+        checkbox.style.width = 'auto';
+        checkbox.onchange = () => { sortSelectedWork = checkbox.checked; };
+        label.append(checkbox, document.createTextNode(' Sort selected work before Focus'));
+        return label;
+    }
+
+    async function orderSelectedWork() {
+        window.FocusDurability.newWork();
+        if (!sortSelectedWork) return;
+        const executable = sortedTasks.filter(window.FocusDurability.eligible);
+        if (executable.length < 2) return;
+        const other = sortedTasks.filter(task => !window.FocusDurability.eligible(task));
+        const at = Date.now();
+        const sorting = createTask('Sort Tasks', { estimatedTimeMs: estimatedSortingTimeMs(executable.length), status: 'active', started: at, lastChanged: at });
+        sorting.isSortingOverhead = true;
+        sorting.independentlyActionable = false;
+        window.currentExistingSort = sorting;
+        sortedTasks = [sorting, ...executable, ...other];
+        const runId = ++sortRunId;
+        clearDynamic(); hideStaticScreens(); show(el('startOverBtn'));
+        prepareSortingDisplay(sorting);
+        save('sorting');
+        const ordered = await interactiveMergeSort(executable, runId);
+        if (runId !== sortRunId) return false;
+        clearInterval(timerInterval); completeTask(sorting, Date.now());
+        window.currentExistingSort = null;
+        sortedTasks = [sorting, ...ordered, ...other];
+        hide(el('taskCompare'));
+        await save('dashboard');
+    }
+
+    async function startNodes(nodes) {
         const root=nodes?.length===1?nodes[0]:null; window.currentWorkProjectContext=root?{id:root.id,name:root.name,estimatedMs:leafStats(root).ms,startedAtMs:Date.now(),deadlineAtMs:Number(root.deadline_at||root.due_at||root.deadline||0)}:null;
         sortedTasks = flattenTree(nodes);
         activeTaskId = firstIncompleteTask()?.id || null;
@@ -122,7 +159,8 @@
             alert('There are no unfinished executable tasks here.');
             return false;
         }
-        save('dashboard');
+        if (await orderSelectedWork() === false) return false;
+        await window.FocusDurability.prepare();
         beginWork();
         return true;
     }
@@ -145,7 +183,8 @@
                 return;
             }
 
-            save('dashboard');
+            if (await orderSelectedWork() === false) return;
+            await window.FocusDurability.prepare();
             if (startImmediately) beginWork();
             else showDashboard();
         } catch (error) {
@@ -196,7 +235,7 @@
         const back = document.createElement('button');
         back.textContent = 'Back';
         back.onclick = showWorkChoice;
-        screen.append(heading, note, list, back);
+        screen.append(heading, note, sortingChoice(), list, back);
         container.appendChild(screen);
         saveLocal('work-choice');
     }
@@ -259,11 +298,11 @@
         controls.className = 'planner-choice-grid';
         const start = document.createElement('button');
         start.textContent = 'Start This Project';
-        start.onclick = () => startNodes([node]);
+        start.onclick = () => startNodes([node]).catch(() => {});
         const manage = document.createElement('button');
         manage.textContent = 'Manage';
         manage.onclick = () => window.ProjectEditor?.open?.(node.id, { push: false });
-        controls.append(start, manage);
+        controls.append(sortingChoice(), start, manage);
         screen.appendChild(controls);
 
         const back = document.createElement('button');
@@ -285,7 +324,7 @@
 
     // Resume Existing now means select either the whole backlog or a project. Time-limit
     // setup still happens before this call and only controls when the session stops.
-    window.resumeExistingList = async () => {
+    async function resumeSelection() {
         hideStaticScreens();
         const container = clearDynamic();
         container.textContent = 'Loading saved work…';
@@ -297,7 +336,8 @@
             alert('The saved task list could not be loaded.');
             showWorkChoice();
         }
-    };
+    }
+    window.WorkPlanner = { resume: resumeSelection };
 
     // Work uses display names with project prefixes, but persistence must keep the
     // canonical backend node name, parent and sibling position intact.

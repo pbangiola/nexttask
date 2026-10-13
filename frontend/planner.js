@@ -1,7 +1,7 @@
 'use strict';
 
 window.ProjectPlanner = (() => {
-    const UI_STATE_KEY = 'nextTaskProjectPlannerUi';
+    const UI_STATE_KEY = `nextTaskProjectPlannerUi_${userId}`;
     const PROJECT_THRESHOLD_MINUTES = 20;
 
     let view = 'planner-home';

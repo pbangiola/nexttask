@@ -19,5 +19,8 @@
     "better-sqlite3": "11.10.0",
     "cors": "^2.8.5",
     "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
   }
 }
