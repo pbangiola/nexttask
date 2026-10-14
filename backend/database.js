@@ -131,7 +131,9 @@ const upsertTaskStmt = db.prepare(`
         independently_actionable = tasks.independently_actionable,
         name = tasks.name,
         status = excluded.status,
-        estimated_ms = excluded.estimated_ms,
+        -- Focus snapshots may fill a missing estimate, but planner edits own
+        -- subsequent changes. A stale pause/recovery must not erase an edit.
+        estimated_ms = CASE WHEN tasks.estimated_ms > 0 THEN tasks.estimated_ms ELSE excluded.estimated_ms END,
         elapsed_ms = excluded.elapsed_ms,
         position = tasks.position,
         blocked_by_task_id = excluded.blocked_by_task_id,

@@ -1,11 +1,13 @@
 'use strict';
 
 window.ProjectEditor = (() => {
-    const UNDO_KEY = 'nextTaskProjectEditorUndo';
+    const UNDO_KEY = `nextTaskProjectEditorUndo_${userId}`;
     const esc = value => String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#039;');
     const makeId = prefix => `${prefix}_${globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2,11)}`;
     const history=[];
     let currentId=null;
+    let returnToOrigin=()=>window.ProjectPlanner.showProjects();
+    let navigation=0;
 
     async function api(path,options={}){const r=await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}${path}`,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});let body=null;try{body=await r.json();}catch(_){}if(!r.ok)throw new Error(body?.error||`Project request failed (${r.status})`);return body;}
     async function getNode(id){return api(`/nodes/${encodeURIComponent(id)}`);}
@@ -35,8 +37,7 @@ window.ProjectEditor = (() => {
     async function backFromProjectEditor(){
         if(history.length)return open(history.pop(),{push:false});
         currentId=null;
-        localStorage.setItem('nextTaskProjectPlannerUi',JSON.stringify({view:'projects-list'}));
-        return window.ProjectPlanner?.open?.();
+        return returnToOrigin();
     }
 
     window.addEventListener('resize',()=>requestAnimationFrame(updateTopBackVisibility));
@@ -44,16 +45,19 @@ window.ProjectEditor = (() => {
     async function undoLast(){const entry=getUndo();if(!entry)return;try{if(entry.snapshot?.length)await restore(entry.snapshot);if(entry.deleteIds?.length){for(const id of entry.deleteIds)await removeNode(id,'subtree');}clearUndo();await open(entry.returnId||currentId,{push:false});}catch(error){alert(`Undo failed: ${error.message}`);}}
 
     async function open(projectId,options={}){
+        const request=++navigation;
         try{
             if(!projectId)return;
+            if(options.origin){history.length=0;currentId=null;returnToOrigin=options.origin;}
             if(options.push!==false&&currentId&&currentId!==projectId)history.push(currentId);
             currentId=projectId;
             const {node,children}=await getNode(projectId);
+            if(request!==navigation)return;
             if(node.node_type!=='project')throw new Error('Only projects can be opened in the project editor.');
             const tasks=children.filter(c=>c.node_type!=='project');
             const projects=children.filter(c=>c.node_type==='project');
             const c=shell();
-            c.innerHTML=`<h2>${esc(node.name)}</h2><p>${minutes(node.estimated_ms)} min estimated</p>
+            c.innerHTML=`<h2>${esc(node.name)}</h2><p>${minutes(node.estimated_ms)} min planned estimate${children.length ? " (calculated from children)" : ""}</p><button id="projectEditorMetadata">Edit Project Details</button>
                 <button id="projectEditorBackTop" class="projectEditorBack hidden">Back</button>
                 <h3 id="projectEditorTasksHeading">Tasks</h3><div id="projectEditorTasks"></div>
                 <h3>Projects</h3><div id="projectEditorProjects"></div>
@@ -66,12 +70,13 @@ window.ProjectEditor = (() => {
             if(!projects.length)el('projectEditorProjects').innerHTML='<p>No subprojects at this level.</p>';
             el('projectEditorSortLevel').disabled=children.length<2;el('projectEditorSortLevel').onclick=()=>sortCurrentLevel(node,children);el('projectEditorGroup').onclick=()=>showGroup(node);
             el('projectEditorMoveSelected').onclick=()=>showMoveSelected(node);
+            el('projectEditorMetadata').onclick=()=>showEdit(node,node,true);
             el('projectEditorAddTask').onclick=()=>showAddTask(node);
             el('projectEditorAddProject').onclick=()=>showAddProject(node);
             if(el('projectEditorUndo'))el('projectEditorUndo').onclick=undoLast;
             document.querySelectorAll('.projectEditorBack').forEach(button=>button.onclick=backFromProjectEditor);
             requestAnimationFrame(updateTopBackVisibility);
-        }catch(error){console.error(error);const c=shell();c.innerHTML=`<h2>Project Editor</h2><p>${esc(error.message||'Could not open project.')}</p><button id="projectEditorErrorBack">Back</button>`;el('projectEditorErrorBack').onclick=()=>history.length?open(history.pop(),{push:false}):window.ProjectPlanner?.open?.();}
+        }catch(error){if(request!==navigation)return;console.error(error);const c=shell();c.innerHTML=`<h2>Project Editor</h2><p>${esc(error.message||'Could not open project.')}</p><button id="projectEditorErrorBack">Back</button>`;el('projectEditorErrorBack').onclick=backFromProjectEditor;}
     }
 
     async function sortCurrentLevel(parent,children){const ordered=[...(children||[])].sort((a,b)=>(Number(a.position||0)-Number(b.position||0))||(Number(a.created||0)-Number(b.created||0)));if(ordered.length<2)return;try{shell();show(el('taskCompare'));const runId=++sortRunId,sorted=await interactiveMergeSort(ordered,runId);hide(el('taskCompare'));if(runId!==sortRunId)return;for(let i=0;i<sorted.length;i++)await updateNode(sorted[i].id,{position:i+1});open(parent.id,{push:false});}catch(error){hide(el('taskCompare'));alert(error.message);}}
@@ -81,10 +86,37 @@ window.ProjectEditor = (() => {
             if(isProject){const link=document.createElement('button');link.className='planner-project-link';link.textContent=item.name;link.onclick=()=>open(item.id);span.appendChild(link);span.append(` — ${minutes(item.estimated_ms)} min`);}else span.textContent=`${item.name} — ${minutes(item.estimated_ms)} min`;
             const move=document.createElement('button');move.textContent='Move';move.onclick=()=>showMove(item,parent);
             const del=document.createElement('button');del.textContent='Delete';del.onclick=()=>showDelete(item,parent);
-            row.append(move,del);
+            const edit=document.createElement('button');edit.textContent='Edit';edit.onclick=()=>showEdit(item,parent,isProject);
+            row.append(edit,move,del);
             if(isProject){const ungroup=document.createElement('button');ungroup.textContent='Ungroup';ungroup.onclick=()=>ungroupProject(item,parent);row.appendChild(ungroup);}
             container.appendChild(row);});
     }
+    async function showEdit(item,parent,isProject=false){
+        const request=++navigation;
+        try{
+            const {node,children}=await getNode(item.id);
+            if(request!==navigation)return;
+            const derived=isProject&&children.length>0;
+            const c=shell();
+            c.innerHTML=`<h2>Edit ${isProject?'Project':'Task'}</h2><label>Name<input id="projectEditorEditName"></label>
+                <label>${derived?'Calculated planned estimate':'Estimated minutes'}<input id="projectEditorEditMinutes" type="number" min="0" step="any" ${derived?'disabled':''}></label>
+                <button id="projectEditorEditSave">Save</button><button id="projectEditorEditCancel">Cancel</button>`;
+            el('projectEditorEditName').value=node.name;
+            el('projectEditorEditMinutes').value=Number(node.estimated_ms||0)/60000;
+            el('projectEditorEditSave').onclick=async()=>{
+                const name=el('projectEditorEditName').value.trim(),mins=Number(el('projectEditorEditMinutes').value);
+                if(!name||!Number.isFinite(mins)||mins<0||(!isProject&&mins<=0))return alert('Enter a name and valid estimate.');
+                const save=el('projectEditorEditSave');save.disabled=true;
+                el('projectEditorEditCancel').disabled=true;
+                try{
+                    await updateNode(node.id,{name,...(derived?{}:{estimatedTimeMs:Math.round(mins*60000)})});
+                    await open(parent.id,{push:false});
+                }catch(error){alert(error.message);save.disabled=false;el('projectEditorEditCancel').disabled=false;}
+            };
+            el('projectEditorEditCancel').onclick=()=>open(parent.id,{push:false});
+        }catch(error){alert(error.message);}
+    }
+
     function selectedIds(){return Array.from(document.querySelectorAll('.projectEditorSelect:checked')).map(i=>i.value);}
 
     async function showMove(item,parent){try{const projects=flattenProjects(await tree()).filter(p=>p.id!==item.id);const c=shell();c.innerHTML=`<h2>Move ${esc(item.name)}</h2><p>Choose a destination.</p><div id="moveDestinations" class="planner-list"></div><button id="moveBack">Back</button>`;const list=el('moveDestinations');const add=(label,id)=>{const b=document.createElement('button');b.textContent=label;b.onclick=async()=>{try{const result=await reparent(item.id,id);setUndo({snapshot:result.undo,returnId:parent.id});open(parent.id,{push:false});}catch(e){alert(e.message);}};list.appendChild(b);};add('Uncategorized Backlog',null);projects.forEach(p=>add(p.name,p.id));el('moveBack').onclick=()=>open(parent.id,{push:false});}catch(error){alert(error.message);}}
@@ -100,16 +132,18 @@ window.ProjectEditor = (() => {
 
     function showAddTask(parent){
         const c=shell();
-        c.innerHTML=`<h2>Add Task to ${esc(parent.name)}</h2><label>Task name<input id="projectEditorTaskName"></label><label>Estimated time<input id="projectEditorTaskMinutes" type="number" min="1" placeholder="Minutes"></label><button id="projectEditorTaskNext">Choose Position</button><button id="projectEditorTaskCancel">Back</button>`;
-        el('projectEditorTaskNext').onclick=async()=>{
-            const name=el('projectEditorTaskName').value.trim();
-            const mins=parseInt(el('projectEditorTaskMinutes').value,10);
-            if(!name)return alert('Please enter a task name.');
-            if(!Number.isFinite(mins)||mins<1)return alert('Please enter an estimate in minutes.');
-            try{
-                const {children}=await getNode(parent.id);
-                showTaskInsertion(parent,{name,mins},children);
-            }catch(error){alert(error.message);}
+        c.innerHTML=`<h2>Add Task to ${esc(parent.name)}</h2><label>Task name<input id="projectEditorTaskName"></label><label>Estimated time (optional shortcut)<input id="projectEditorTaskMinutes" type="number" min="1" placeholder="Minutes"></label><button id="projectEditorTaskNext">Choose Position</button><button id="projectEditorTaskCancel">Back</button>`;
+        el('projectEditorTaskNext').onclick=()=>{
+            const parsed=parseTaskEntries(el('projectEditorTaskName').value);
+            const mins=Number(el('projectEditorTaskMinutes').value);
+            if(parsed.invalid.length||parsed.entries.length!==1)return alert('Enter one task.');
+            if(el('projectEditorTaskMinutes').value&&(!Number.isFinite(mins)||mins<=0))return alert('Enter a positive estimate.');
+            const draft={...parsed.entries[0]};
+            if(mins>0)draft.estimatedTimeMs=Math.round(mins*60000);
+            collectMissingEstimates([draft],async()=>{
+                try{const {children}=await getNode(parent.id);showTaskInsertion(parent,{name:draft.name,mins:draft.estimatedTimeMs/60000},children);}
+                catch(error){alert(error.message);}
+            },()=>open(parent.id,{push:false}));
         };
         el('projectEditorTaskCancel').onclick=()=>open(parent.id,{push:false});
     }
@@ -140,9 +174,9 @@ window.ProjectEditor = (() => {
         el('projectEditorInsertBack').onclick=()=>showAddTask(parent);
     }
 
-    function showAddProject(parent){const c=shell();c.innerHTML=`<h2>Add Subproject to ${esc(parent.name)}</h2><label>Project name<input id="projectEditorProjectName"></label><label>Estimated time<input id="projectEditorProjectMinutes" type="number" min="1" placeholder="Minutes"></label><button id="projectEditorProjectSave">Add Subproject</button><button id="projectEditorProjectCancel">Back</button>`;el('projectEditorProjectSave').onclick=async()=>{const name=el('projectEditorProjectName').value.trim(),mins=parseInt(el('projectEditorProjectMinutes').value,10);if(!name)return alert('Please enter a project name.');if(!Number.isFinite(mins)||mins<1)return alert('Please enter an estimate in minutes.');try{const child=await createNode({name,nodeType:'project',parentId:parent.id,estimatedTimeMs:mins*60000,independentlyActionable:false,sessionId});await open(child.id);}catch(error){alert(error.message);}};el('projectEditorProjectCancel').onclick=()=>open(parent.id,{push:false});}
+    function showAddProject(parent){const c=shell();c.innerHTML=`<h2>Add Subproject to ${esc(parent.name)}</h2><label>Project name<input id="projectEditorProjectName"></label><label>Estimated time (optional)<input id="projectEditorProjectMinutes" type="number" min="1" placeholder="Minutes"></label><button id="projectEditorProjectSave">Add Subproject</button><button id="projectEditorProjectCancel">Back</button>`;el('projectEditorProjectSave').onclick=async()=>{const name=el('projectEditorProjectName').value.trim(),mins=parseInt(el('projectEditorProjectMinutes').value,10);if(!name)return alert('Please enter a project name.');if(el('projectEditorProjectMinutes').value&&(!Number.isFinite(mins)||mins<1))return alert('Enter a positive estimate or leave it blank.');try{const child=await createNode({name,nodeType:'project',parentId:parent.id,estimatedTimeMs:(mins||0)*60000,independentlyActionable:false,sessionId});await open(child.id);}catch(error){alert(error.message);}};el('projectEditorProjectCancel').onclick=()=>open(parent.id,{push:false});}
 
-    document.addEventListener('click',async event=>{const link=event.target.closest?.('.planner-project-link');if(!link||link.closest('#projectEditorProjects'))return;const allLinks=Array.from(document.querySelectorAll('#projectList .planner-project-link'));const index=allLinks.indexOf(link);if(index<0)return;event.preventDefault();event.stopImmediatePropagation();try{const projects=(await roots()).filter(n=>n.node_type==='project'&&!['completed','cancelled'].includes(n.status));if(projects[index]){history.length=0;currentId=null;await open(projects[index].id,{push:false});}}catch(error){console.error('Could not open recursive project editor:',error);}},true);
+
 
     return {open};
 })();

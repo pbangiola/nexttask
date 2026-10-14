@@ -39,33 +39,12 @@ function currentTask() { return sortedTasks.find(task => task.id === activeTaskI
 
 //Initialize task sorting
 async function startSorting() {
-    const parsed = parseTimedTaskEntries(el('tasks').value);
-    if (parsed.invalid.length) {
-        alert(
-            'Every task needs a time estimate. Try formats like "Email Sam, 10m", "Email Sam 10m", or "Write report, 1h 30m".\n\n' +
-            'Could not read: ' + parsed.invalid.join(' | ')
-        );
-        return;
-    }
-
-    if (!parsed.entries.length) {
-        alert('Please enter at least one task with a time estimate.');
-        return;
-    }
-
-    const names = resolveDuplicateTaskNames(parsed.entries.map(entry => entry.name));
-    if (!names.length) return;
-
-    // Preserve the estimate that belongs to each occurrence even when the
-    // duplicate-name review renames or removes an entry.
-    const remainingEntries = [...parsed.entries];
-    const workTasks = names.map(name => {
-        const baseName = name.replace(/ again(?: \d+)?$/i, '');
-        let entryIndex = remainingEntries.findIndex(entry => duplicateKey(entry.name) === duplicateKey(baseName));
-        if (entryIndex < 0) entryIndex = 0;
-        const [entry] = remainingEntries.splice(entryIndex, 1);
-        return createTask(name, { estimatedTimeMs: entry?.estimatedTimeMs || 0 });
-    });
+    const parsed = parseTaskEntries(el('tasks').value);
+    if (parsed.invalid.length) return alert('Could not read: ' + parsed.invalid.join(' | '));
+    const entries = resolveDuplicateEntries(parsed.entries);
+    if (!entries.length) return alert('Please enter at least one task.');
+    const workTasks = entries.map(entry => createTask(entry.name, entry));
+    window.currentWorkProjectContext = null;
 
     for (const task of workTasks) {
         const minutes = task.estimatedTimeMs / 60_000;
@@ -118,7 +97,7 @@ async function startSorting() {
     activeTaskId = firstIncompleteTask()?.id || null;
     hide(el('taskCompare'));
     save('dashboard');
-    showDashboard();
+    collectMissingEstimates(sortedWorkTasks, () => showDashboard(), () => showTaskInput());
 }
 
 //core merge sort algorithm step 1
@@ -145,6 +124,7 @@ function mergeWithChoices(left, right, runId) {
 
         function finish(result) {
             hide(compare);
+            task1.onclick = null; task2.onclick = null;
             resolve(result);
         }
 

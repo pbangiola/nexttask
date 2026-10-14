@@ -215,20 +215,21 @@ window.FocusDurability = (() => {
         return finish([], hardStopAtMs, true);
     }
     function recoveredTask(row, nodes) {
-        const path = [];
+        const path = [], projectAncestorIds = [];
         let parent = nodes.get(row.parent_id);
         const seen = new Set();
-        while (parent && !seen.has(parent.id)) { seen.add(parent.id); path.unshift(parent.name); parent = nodes.get(parent.parent_id); }
+        while (parent && !seen.has(parent.id)) { seen.add(parent.id); projectAncestorIds.unshift(parent.id); path.unshift(parent.name); parent = nodes.get(parent.parent_id); }
         const task = createTask([...path, row.name].join(': '), {
             id: row.id, estimatedTimeMs: row.estimated_ms, actualTimeMs: row.elapsed_ms,
             status: row.status, completed: row.status === 'completed', completedTime: row.completed,
             created: row.created, started: row.started, lastChanged: null, blockedByTaskId: row.blocked_by_task_id
         });
-        Object.assign(task, { canonicalName: row.name, parentId: row.parent_id, nodeType: row.node_type,
+        Object.assign(task, { projectAncestorIds, canonicalName: row.name, parentId: row.parent_id, nodeType: row.node_type,
             nodePosition: row.position, independentlyActionable: row.independently_actionable === 1, projectPath: path.join(' › ') });
         return task;
     }
     async function recover() {
+        window.currentWorkProjectContext = null;
         // Replay only this owner's immutable pending requests before discovering
         // canonical state. Closed server rows can never be resurrected by cache.
         const serverClosed = await graph.validateRecovery();
