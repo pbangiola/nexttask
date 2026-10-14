@@ -98,8 +98,8 @@ signed-token tests.
 
 ## Network and production verification
 
-If Chromium download returns `403 Domain forbidden`, change the Codex environment
-**Agent internet access / domain allowlist** to include `cdn.playwright.dev` and
+If Chromium download returns `403 Domain forbidden`, keep Codex **Agent internet access** enabled and extend the environment
+**domain allowlist** (`network_policy.allowed_hosts`) to include `cdn.playwright.dev` and
 `playwright.download.prss.microsoft.com`, then rerun setup. Allow `api.github.com`
 for shell API checks, and production backend/frontend domains for readback.
 Do not disable the managed proxy or change Clerk keys based on that error.

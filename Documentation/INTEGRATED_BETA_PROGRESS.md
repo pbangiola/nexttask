@@ -51,3 +51,14 @@ Final browser regression rerun: 7/7 passed, including pairwise cancel without
 rank mutation. QA runner status/serve and both compatibility scripts passed
 shell syntax; isolated serve `/api/health` returned beta version and new optional
 view asset returned HTTP 200. No production task data was used.
+
+PR #76 opened against current main at head 5874469. Actions run 38517903039:
+matched Chromium installation, clean npm ci, syntax/diff and complete suite all
+succeeded. This resolves matched-browser compatibility remotely while local
+download remains blocked. Managed environment policy was read without secrets:
+restricted/enforced, custom allowed_hosts only api.clerk.com plus package-manager
+preset. Exact repair is extending network_policy.allowed_hosts with the documented
+browser/API/production hosts, not rotating Clerk credentials. Production health
+and Pages readback both fail managed-proxy CONNECT HTTP403; public browsing also
+cannot access them. Main's pre-beta commit has a successful Railway deployment
+status; beta release/readback must be checked separately.

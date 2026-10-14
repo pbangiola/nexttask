@@ -154,14 +154,15 @@ remain visible; they are not silently marked done.
 Clean frozen install: 119 packages; Node 22.23.3, better-sqlite3 11.10.0,
 Playwright 1.56.1. Syntax and whitespace checks passed. Full local suite:
 **64 passed, 0 failed, 0 skipped** using system Chromium 154.0.8037.57.
-After small comparison-cancellation/context improvements, browser regressions are
-rerun separately and recorded in progress notes. Lockfile-matched Chromium
+After small comparison-cancellation/context improvements, all seven integration
+browser regressions passed again. GitHub Actions run 38517903039 also passed the
+complete suite with lockfile-matched Chromium; see the PR for current-head CI. Lockfile-matched Chromium
 141.0.7390.37 (build 1194) download was blocked by proxy HTTP 403 **Domain
 forbidden**, not an invalid Clerk credential. GitHub Actions installs that matched
 browser and runs the complete suite before merge eligibility is assessed.
 
-Exact environment action: enable **Agent internet access** for this Codex
-environment and add `cdn.playwright.dev` and
+Exact environment action: keep **Agent internet access** enabled and extend this
+environment's restricted **domain allowlist** (`network_policy.allowed_hosts`) with `cdn.playwright.dev` and
 `playwright.download.prss.microsoft.com` to its **domain allowlist**, then rerun
 `node node_modules/playwright/cli.js install chromium`. For shell GitHub API and
 production verification also allow `api.github.com`,
