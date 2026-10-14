@@ -11,9 +11,9 @@ const LOCAL_STATE_KEY_PREFIX = 'taskSorterSession';
 
 // Authentication bootstraps these values from Clerk before application scripts load.
 // The Clerk ID scopes legacy snapshots; durable work-session IDs are separate.
-let userId = String(window.taskSorterAuth?.userId || '');
+let userId = String(window.taskSorterAuth?.userId || (window.taskSorterMode === 'guest' ? 'guest_local' : ''));
 let sessionId = userId;
-const LOCAL_STATE_KEY = `${LOCAL_STATE_KEY_PREFIX}_${userId}`;
+const LOCAL_STATE_KEY = window.taskSorterMode === 'guest' ? 'nexttaskGuestSession_v1' : `${LOCAL_STATE_KEY_PREFIX}_${userId}`;
 if (!userId) throw new Error('Task Sorter requires an authenticated Clerk user.');
 
 let sortedTasks = [];
@@ -257,21 +257,8 @@ function parseTimedTaskEntries(text) {
 }
 
 // Keep entry identity and estimates together throughout duplicate review and sorting.
-function parseTaskEntries(text) {
-    const timed = parseTimedTaskEntries(text);
-    if (!timed.invalid.length) return timed;
-    const entries = [], invalid = [];
-    for (const line of String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)) {
-        const parsed = parseTimedTaskChunk(line);
-        if (parsed?.name) { entries.push(parsed); continue; }
-        // A duration by itself is never a task. Reject malformed duration suffixes.
-        if (/^\d+(?:\.\d+)?\s*(?:m|min|mins|minutes?|h|hr|hrs|hours?)$/i.test(line) || parseDurationMs(line) || /(?:,\s*|\s+)\d+(?:\.\d+)?\s*(?:m|min|mins|minutes?|h|hours?)\s*$/i.test(line)) {
-            invalid.push(line); continue;
-        }
-        entries.push({ name: line.replace(/^\s*\d+[.)]\s*/, ''), estimatedTimeMs: 0 });
-    }
-    return { entries, invalid };
-}
+function parseTaskEntries(text) { return window.TaskEntry.parse(text); }
+
 function resolveDuplicateEntries(entries) {
     const used = new Set(), result = [];
     for (const entry of entries) {

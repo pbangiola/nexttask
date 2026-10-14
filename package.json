@@ -1,6 +1,6 @@
 {
   "name": "task-sorter",
-  "version": "1.0.0",
+  "version": "2.0.0-beta.1",
   "description": "Task Sorter application with a static frontend and persistent Node/SQLite backend.",
   "main": "backend/server.js",
   "engines": {

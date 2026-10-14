@@ -44,6 +44,8 @@ window.ProjectEditor = (() => {
 
     async function undoLast(){const entry=getUndo();if(!entry)return;try{if(entry.snapshot?.length)await restore(entry.snapshot);if(entry.deleteIds?.length){for(const id of entry.deleteIds)await removeNode(id,'subtree');}clearUndo();await open(entry.returnId||currentId,{push:false});}catch(error){alert(`Undo failed: ${error.message}`);}}
 
+    function returnToParent(parent) { return parent.id ? open(parent.id,{push:false}) : returnToOrigin(); }
+
     async function open(projectId,options={}){
         const request=++navigation;
         try{
@@ -57,7 +59,7 @@ window.ProjectEditor = (() => {
             const tasks=children.filter(c=>c.node_type!=='project');
             const projects=children.filter(c=>c.node_type==='project');
             const c=shell();
-            c.innerHTML=`<h2>${esc(node.name)}</h2><p>${minutes(node.estimated_ms)} min planned estimate${children.length ? " (calculated from children)" : ""}</p><button id="projectEditorMetadata">Edit Project Details</button>
+            c.innerHTML=`<h2>${esc(node.name)}</h2><p>${minutes(node.estimated_ms)} min planned estimate${children.length ? " (calculated from children, including retained history)" : ""}</p><button id="projectEditorMetadata">Edit Project Details</button>
                 <button id="projectEditorBackTop" class="projectEditorBack hidden">Back</button>
                 <h3 id="projectEditorTasksHeading">Tasks</h3><div id="projectEditorTasks"></div>
                 <h3>Projects</h3><div id="projectEditorProjects"></div>
@@ -79,7 +81,7 @@ window.ProjectEditor = (() => {
         }catch(error){if(request!==navigation)return;console.error(error);const c=shell();c.innerHTML=`<h2>Project Editor</h2><p>${esc(error.message||'Could not open project.')}</p><button id="projectEditorErrorBack">Back</button>`;el('projectEditorErrorBack').onclick=backFromProjectEditor;}
     }
 
-    async function sortCurrentLevel(parent,children){const ordered=[...(children||[])].sort((a,b)=>(Number(a.position||0)-Number(b.position||0))||(Number(a.created||0)-Number(b.created||0)));if(ordered.length<2)return;try{shell();show(el('taskCompare'));const runId=++sortRunId,sorted=await interactiveMergeSort(ordered,runId);hide(el('taskCompare'));if(runId!==sortRunId)return;for(let i=0;i<sorted.length;i++)await updateNode(sorted[i].id,{position:i+1});open(parent.id,{push:false});}catch(error){hide(el('taskCompare'));alert(error.message);}}
+    async function sortCurrentLevel(parent,children){const ordered=[...(children||[])].sort((a,b)=>(Number(a.position||0)-Number(b.position||0))||(Number(a.created||0)-Number(b.created||0)));if(ordered.length<2)return;try{shell();show(el('taskCompare'));const runId=++sortRunId,sorted=await interactiveMergeSort(ordered,runId);hide(el('taskCompare'));if(runId!==sortRunId)return;for(let i=0;i<sorted.length;i++)await updateNode(sorted[i].id,{position:i+1});returnToParent(parent);}catch(error){hide(el('taskCompare'));alert(error.message);}}
 
     function renderRows(container,items,parent,isProject){
         items.forEach(item=>{const row=document.createElement('div');row.className=isProject?'planner-project-row':'planner-order-row';row.innerHTML=`<label class="planner-check"><input class="projectEditorSelect" type="checkbox" value="${esc(item.id)}"><span></span></label>`;const span=row.querySelector('span');
@@ -110,25 +112,25 @@ window.ProjectEditor = (() => {
                 el('projectEditorEditCancel').disabled=true;
                 try{
                     await updateNode(node.id,{name,...(derived?{}:{estimatedTimeMs:Math.round(mins*60000)})});
-                    await open(parent.id,{push:false});
+                    await returnToParent(parent);
                 }catch(error){alert(error.message);save.disabled=false;el('projectEditorEditCancel').disabled=false;}
             };
-            el('projectEditorEditCancel').onclick=()=>open(parent.id,{push:false});
+            el('projectEditorEditCancel').onclick=()=>returnToParent(parent);
         }catch(error){alert(error.message);}
     }
 
     function selectedIds(){return Array.from(document.querySelectorAll('.projectEditorSelect:checked')).map(i=>i.value);}
 
-    async function showMove(item,parent){try{const projects=flattenProjects(await tree()).filter(p=>p.id!==item.id);const c=shell();c.innerHTML=`<h2>Move ${esc(item.name)}</h2><p>Choose a destination.</p><div id="moveDestinations" class="planner-list"></div><button id="moveBack">Back</button>`;const list=el('moveDestinations');const add=(label,id)=>{const b=document.createElement('button');b.textContent=label;b.onclick=async()=>{try{const result=await reparent(item.id,id);setUndo({snapshot:result.undo,returnId:parent.id});open(parent.id,{push:false});}catch(e){alert(e.message);}};list.appendChild(b);};add('Uncategorized Backlog',null);projects.forEach(p=>add(p.name,p.id));el('moveBack').onclick=()=>open(parent.id,{push:false});}catch(error){alert(error.message);}}
+    async function showMove(item,parent){try{const projects=flattenProjects(await tree()).filter(p=>p.id!==item.id);const c=shell();c.innerHTML=`<h2>Move ${esc(item.name)}</h2><p>Choose a destination.</p><div id="moveDestinations" class="planner-list"></div><button id="moveBack">Back</button>`;const list=el('moveDestinations');const add=(label,id)=>{const b=document.createElement('button');b.textContent=label;b.onclick=async()=>{try{const result=await reparent(item.id,id);setUndo({snapshot:result.undo,returnId:parent.id});returnToParent(parent);}catch(e){alert(e.message);}};list.appendChild(b);};add('Uncategorized Backlog',null);projects.forEach(p=>add(p.name,p.id));el('moveBack').onclick=()=>returnToParent(parent);}catch(error){alert(error.message);}}
 
-    async function showMoveSelected(parent){const ids=selectedIds();if(!ids.length)return alert('Select at least one task or project.');try{const [{children},allProjects]=await Promise.all([getNode(parent.id),tree()]),order=new Map([...(children||[])].sort((a,b)=>Number(a.position||0)-Number(b.position||0)).map((n,i)=>[n.id,i])),orderedIds=[...ids].sort((a,b)=>(order.get(a)??999999)-(order.get(b)??999999)),projects=flattenProjects(allProjects),c=shell();c.innerHTML=`<h2>Move Selected</h2><div id="moveSelectedDestinations" class="planner-list"></div><button id="moveSelectedBack">Back</button>`;const list=el('moveSelectedDestinations'),add=(label,id)=>{const b=document.createElement('button');b.textContent=label;b.onclick=async()=>{try{const snapshot=[];for(const nodeId of orderedIds){const result=await reparent(nodeId,id);snapshot.push(...(result.undo||[]));}setUndo({snapshot,returnId:parent.id});open(parent.id,{push:false});}catch(e){alert(e.message);}};list.appendChild(b);};add('Uncategorized Backlog',null);projects.filter(p=>!ids.includes(p.id)).forEach(p=>add(p.name,p.id));el('moveSelectedBack').onclick=()=>open(parent.id,{push:false});}catch(error){alert(error.message);}}
+    async function showMoveSelected(parent){const ids=selectedIds();if(!ids.length)return alert('Select at least one task or project.');try{const [{children},allProjects]=await Promise.all([getNode(parent.id),tree()]),order=new Map([...(children||[])].sort((a,b)=>Number(a.position||0)-Number(b.position||0)).map((n,i)=>[n.id,i])),orderedIds=[...ids].sort((a,b)=>(order.get(a)??999999)-(order.get(b)??999999)),projects=flattenProjects(allProjects),c=shell();c.innerHTML=`<h2>Move Selected</h2><div id="moveSelectedDestinations" class="planner-list"></div><button id="moveSelectedBack">Back</button>`;const list=el('moveSelectedDestinations'),add=(label,id)=>{const b=document.createElement('button');b.textContent=label;b.onclick=async()=>{try{const snapshot=[];for(const nodeId of orderedIds){const result=await reparent(nodeId,id);snapshot.push(...(result.undo||[]));}setUndo({snapshot,returnId:parent.id});returnToParent(parent);}catch(e){alert(e.message);}};list.appendChild(b);};add('Uncategorized Backlog',null);projects.filter(p=>!ids.includes(p.id)).forEach(p=>add(p.name,p.id));el('moveSelectedBack').onclick=()=>returnToParent(parent);}catch(error){alert(error.message);}}
 
-    function showGroup(parent){const ids=selectedIds();if(ids.length<2)return alert('Select at least two items to group.');const c=shell();c.innerHTML=`<h2>Group Selected</h2><label>New subproject name<input id="groupName"></label><button id="groupSave">Create Group</button><button id="groupBack">Back</button>`;el('groupSave').onclick=async()=>{const name=el('groupName').value.trim();if(!name)return alert('Give the group a name.');try{const group=await createNode({name,nodeType:'project',parentId:parent.id,independentlyActionable:false,sessionId});const snapshot=[];for(const id of ids){const result=await reparent(id,group.id);snapshot.push(...(result.undo||[]));}setUndo({snapshot,deleteIds:[group.id],returnId:parent.id});open(parent.id,{push:false});}catch(error){alert(error.message);}};el('groupBack').onclick=()=>open(parent.id,{push:false});}
+    function showGroup(parent){const ids=selectedIds();if(ids.length<2)return alert('Select at least two items to group.');const c=shell();c.innerHTML=`<h2>Group Selected</h2><label>New subproject name<input id="groupName"></label><button id="groupSave">Create Group</button><button id="groupBack">Back</button>`;el('groupSave').onclick=async()=>{const name=el('groupName').value.trim();if(!name)return alert('Give the group a name.');try{const group=await createNode({name,nodeType:'project',parentId:parent.id,independentlyActionable:false,sessionId});const snapshot=[];for(const id of ids){const result=await reparent(id,group.id);snapshot.push(...(result.undo||[]));}setUndo({snapshot,deleteIds:[group.id],returnId:parent.id});returnToParent(parent);}catch(error){alert(error.message);}};el('groupBack').onclick=()=>returnToParent(parent);}
 
-    async function ungroupProject(item,parent){try{const result=await removeNode(item.id,'ungroup');setUndo({snapshot:result.undo,returnId:parent.id});open(parent.id,{push:false});}catch(error){alert(error.message);}}
+    async function ungroupProject(item,parent){try{const result=await removeNode(item.id,'ungroup');setUndo({snapshot:result.undo,returnId:parent.id});returnToParent(parent);}catch(error){alert(error.message);}}
 
-    async function showDelete(item,parent){const {children}=await getNode(item.id);if(item.node_type==='project'&&children.length){const c=shell();c.innerHTML=`<h2>Delete ${esc(item.name)}?</h2><p>This project contains ${children.length} direct item${children.length===1?'':'s'}.</p><div class="planner-choice-grid"><button id="deleteAll">Delete Project & Contents</button><button id="deleteUngroup">Keep Contents / Ungroup</button></div><button id="deleteBack">Back</button>`;el('deleteAll').onclick=()=>performDelete(item,parent,'subtree');el('deleteUngroup').onclick=()=>performDelete(item,parent,'ungroup');el('deleteBack').onclick=()=>open(parent.id,{push:false});return;}if(confirm(`Delete “${item.name}”?`))performDelete(item,parent,'subtree');}
-    async function performDelete(item,parent,mode){try{const result=await removeNode(item.id,mode);setUndo({snapshot:result.undo,returnId:parent.id});open(parent.id,{push:false});}catch(error){alert(error.message);}}
+    async function showDelete(item,parent){const {children}=await getNode(item.id);if(item.node_type==='project'&&children.length){const c=shell();c.innerHTML=`<h2>Delete ${esc(item.name)}?</h2><p>This project contains ${children.length} direct item${children.length===1?'':'s'}.</p><div class="planner-choice-grid"><button id="deleteAll">Delete Project & Contents</button><button id="deleteUngroup">Keep Contents / Ungroup</button></div><button id="deleteBack">Back</button>`;el('deleteAll').onclick=()=>performDelete(item,parent,'subtree');el('deleteUngroup').onclick=()=>performDelete(item,parent,'ungroup');el('deleteBack').onclick=()=>returnToParent(parent);return;}if(confirm(`Delete “${item.name}”?`))performDelete(item,parent,'subtree');}
+    async function performDelete(item,parent,mode){try{const result=await removeNode(item.id,mode);setUndo({snapshot:result.undo,returnId:parent.id});returnToParent(parent);}catch(error){alert(error.message);}}
 
     function showAddTask(parent){
         const c=shell();
@@ -143,9 +145,9 @@ window.ProjectEditor = (() => {
             collectMissingEstimates([draft],async()=>{
                 try{const {children}=await getNode(parent.id);showTaskInsertion(parent,{name:draft.name,mins:draft.estimatedTimeMs/60000},children);}
                 catch(error){alert(error.message);}
-            },()=>open(parent.id,{push:false}));
+            },()=>returnToParent(parent));
         };
-        el('projectEditorTaskCancel').onclick=()=>open(parent.id,{push:false});
+        el('projectEditorTaskCancel').onclick=()=>returnToParent(parent);
     }
 
     function showTaskInsertion(parent,draft,children){
@@ -163,7 +165,7 @@ window.ProjectEditor = (() => {
                         await updateNode(ordered[j].id,{position:Number(ordered[j].position||j+1)+1});
                     }
                     await createNode({name:draft.name,nodeType:'task',parentId:parent.id,position:i+1,estimatedTimeMs:draft.mins*60000,sessionId});
-                    open(parent.id,{push:false});
+                    returnToParent(parent);
                 }catch(error){
                     alert(error.message);
                     button.disabled=false;
@@ -174,9 +176,11 @@ window.ProjectEditor = (() => {
         el('projectEditorInsertBack').onclick=()=>showAddTask(parent);
     }
 
-    function showAddProject(parent){const c=shell();c.innerHTML=`<h2>Add Subproject to ${esc(parent.name)}</h2><label>Project name<input id="projectEditorProjectName"></label><label>Estimated time (optional)<input id="projectEditorProjectMinutes" type="number" min="1" placeholder="Minutes"></label><button id="projectEditorProjectSave">Add Subproject</button><button id="projectEditorProjectCancel">Back</button>`;el('projectEditorProjectSave').onclick=async()=>{const name=el('projectEditorProjectName').value.trim(),mins=parseInt(el('projectEditorProjectMinutes').value,10);if(!name)return alert('Please enter a project name.');if(el('projectEditorProjectMinutes').value&&(!Number.isFinite(mins)||mins<1))return alert('Enter a positive estimate or leave it blank.');try{const child=await createNode({name,nodeType:'project',parentId:parent.id,estimatedTimeMs:(mins||0)*60000,independentlyActionable:false,sessionId});await open(child.id);}catch(error){alert(error.message);}};el('projectEditorProjectCancel').onclick=()=>open(parent.id,{push:false});}
+    function showAddProject(parent){const c=shell();c.innerHTML=`<h2>Add Subproject to ${esc(parent.name)}</h2><label>Project name<input id="projectEditorProjectName"></label><label>Estimated time (optional)<input id="projectEditorProjectMinutes" type="number" min="1" placeholder="Minutes"></label><button id="projectEditorProjectSave">Add Subproject</button><button id="projectEditorProjectCancel">Back</button>`;el('projectEditorProjectSave').onclick=async()=>{const name=el('projectEditorProjectName').value.trim(),mins=parseInt(el('projectEditorProjectMinutes').value,10);if(!name)return alert('Please enter a project name.');if(el('projectEditorProjectMinutes').value&&(!Number.isFinite(mins)||mins<1))return alert('Enter a positive estimate or leave it blank.');try{const child=await createNode({name,nodeType:'project',parentId:parent.id,estimatedTimeMs:(mins||0)*60000,independentlyActionable:false,sessionId});await open(child.id);}catch(error){alert(error.message);}};el('projectEditorProjectCancel').onclick=()=>returnToParent(parent);}
 
 
 
-    return {open};
+    async function editTask(id, options={}) { history.length=0;currentId=null;returnToOrigin=options.origin||returnToOrigin;const {node}=await getNode(id);if(node.node_type!=='task')throw new Error('A task is required.');return showEdit(node,{id:node.parent_id},false); }
+    async function moveTask(id, options={}) { history.length=0;currentId=null;returnToOrigin=options.origin||returnToOrigin;const {node}=await getNode(id);return showMove(node,{id:node.parent_id}); }
+    return {open,editTask,moveTask};
 })();

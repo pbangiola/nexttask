@@ -83,3 +83,23 @@ test('B4 stale Focus snapshots preserve edited estimates while still filling mis
     assert.equal((await request('/api/session/'+owner+'/tasks',owner,'PUT',{tasks:[{id:'missing_task',name:'Missing',estimatedTimeMs:60000}]})).status,200);
     assert.equal(raw.prepare('SELECT estimated_ms FROM tasks WHERE id=?').get('missing_task').estimated_ms,60000);
 });
+
+test('owned deadline/ranking proposal is atomic, restart-safe, and cannot alter queue, hierarchy or elapsed totals',async()=>{
+    const owner='priority_owner';
+    for(const id of ['priority_a','priority_b'])await json('/nodes','POST',{id,name:id,estimatedTimeMs:60000},owner);
+    await json('/nodes','POST',{id:'priority_foreign',name:'Foreign'},'priority_other');
+    const session=await request('/api/work-sessions/prepare',owner,'POST',{id:'priority_session',taskIds:['priority_b','priority_a']});assert.equal(session.status,201);
+    const before=raw.prepare('SELECT * FROM tasks WHERE user_id=? ORDER BY id').all(owner);
+    const due=Date.now()+600000;
+    await json('/priorities/priority_a','PUT',{dueAt:due},owner);await json('/priorities/rank','PUT',{taskIds:['priority_a','priority_b']},owner);
+    const ranked=await json('/priorities','GET',undefined,owner);assert.equal(ranked.items.find(r=>r.id==='priority_a').importance_rank,1);
+    const invalid=await request(`/api/users/${owner}/priorities/rank`,owner,'PUT',{taskIds:['priority_a','priority_foreign']});assert.ok(!invalid.ok);
+    const denied=await request(`/api/users/${owner}/priorities/priority_a`,'priority_other','PUT',{dueAt:null});assert.equal(denied.status,403);
+    const malformed=await request(`/api/users/${owner}/priorities/priority_a`,owner,'PUT',{dueAt:-1});assert.equal(malformed.status,400);
+    assert.equal(raw.prepare('SELECT due_at FROM task_priorities WHERE task_id=?').get('priority_a').due_at,due);
+    assert.deepEqual(raw.prepare('SELECT * FROM tasks WHERE user_id=? ORDER BY id').all(owner),before);
+    assert.deepEqual((await (await request('/api/work-sessions/priority_session',owner)).json()).items.map(row=>row.id),['priority_b','priority_a']);
+    const {spawnSync}=require('node:child_process');const result=spawnSync(process.execPath,['-e',"console.log(JSON.stringify(require('./backend/task-priorities').list('priority_owner')))"] ,{cwd:path.resolve(__dirname,'..'),env:process.env,encoding:'utf8'});assert.equal(result.status,0,result.stderr);
+    const restarted=JSON.parse(result.stdout);assert.equal(restarted.items.find(r=>r.id==='priority_a').due_at,due);assert.equal(restarted.items.find(r=>r.id==='priority_a').importance_rank,1);
+    assert.deepEqual(raw.pragma('foreign_key_check'),[]);
+});

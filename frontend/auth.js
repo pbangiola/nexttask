@@ -5,21 +5,24 @@
         ? window.location.origin
         : 'https://nexttask-production.up.railway.app';
     const APP_SCRIPTS = [
-        'frontend/initialization.js?v=20261014-qa-1',
-        'frontend/task-graph.js?v=20261014-qa-1',
-        'frontend/task-graph-timing.js?v=20261014-qa-1',
-        'frontend/persistence.js?v=20261014-qa-1',
-        'frontend/ui.js?v=20261014-qa-1',
-        'frontend/core.js?v=20261014-qa-1',
-        'frontend/timing.js?v=20261014-qa-1',
-        'frontend/focus-durability.js?v=20261014-qa-1',
-        'frontend/work-planner.js?v=20261014-qa-1',
-        'frontend/planner.js?v=20261014-qa-1',
-        'frontend/project-queue-filter.js?v=20261014-qa-1',
-        'frontend/project-editor.js?v=20261014-qa-1',
-        'frontend/duplicate-review.js?v=20261014-qa-1',
-        'frontend/project-csv.js?v=20261014-qa-1',
-        'frontend/planner-bridge.js?v=20261014-qa-1'
+        'frontend/initialization.js?v=20261014-beta-1',
+        'frontend/task-entry.js?v=20261014-beta-1',
+        'frontend/guest-graph.js?v=20261014-beta-1',
+        'frontend/task-graph.js?v=20261014-beta-1',
+        'frontend/task-graph-timing.js?v=20261014-beta-1',
+        'frontend/persistence.js?v=20261014-beta-1',
+        'frontend/ui.js?v=20261014-beta-1',
+        'frontend/core.js?v=20261014-beta-1',
+        'frontend/timing.js?v=20261014-beta-1',
+        'frontend/focus-durability.js?v=20261014-beta-1',
+        'frontend/work-planner.js?v=20261014-beta-1',
+        'frontend/planner.js?v=20261014-beta-1',
+        'frontend/project-queue-filter.js?v=20261014-beta-1',
+        'frontend/project-editor.js?v=20261014-beta-1',
+        'frontend/duplicate-review.js?v=20261014-beta-1',
+        'frontend/project-csv.js?v=20261014-beta-1',
+        'frontend/planner-bridge.js?v=20261014-beta-1',
+        'frontend/beta-insights.js?v=20261014-beta-1'
     ];
 
     const nativeFetch = window.fetch.bind(window);
@@ -44,7 +47,12 @@
         });
     }
 
-    async function loadClerk(publishableKey) {
+    let clerkLoading = null;
+    function loadClerk(publishableKey) {
+        if (!clerkLoading) clerkLoading = initializeClerk(publishableKey).catch(error => { clerkLoading = null; throw error; });
+        return clerkLoading;
+    }
+    async function initializeClerk(publishableKey) {
         const encodedDomain = publishableKey.split('_')[2];
         if (!encodedDomain) throw new Error('Invalid Clerk publishable key.');
         const clerkDomain = atob(encodedDomain).slice(0, -1);
@@ -68,7 +76,40 @@
         if (typeof window.init === 'function') await window.init();
     }
 
+    let applicationStarted = false;
+    async function guest() {
+        if (applicationStarted) return;
+        applicationStarted = true;
+        window.taskSorterMode = 'guest';
+        window.taskSorterAuth = null;
+        window.fetch = (input, options) => {
+            const url = new URL(typeof input === 'string' ? input : input.url, window.location.href);
+            if (url.origin === API_BASE_URL && url.pathname.startsWith('/api/') && !['/api/config','/api/health'].includes(url.pathname)) return Promise.reject(new Error('Guest private requests are disabled.'));
+            return nativeFetch(input, options);
+        };
+        await loadApplication();
+        document.getElementById('planBtn').disabled = true;
+        document.getElementById('planBtn').title = 'Sign in for saved nested projects. Guest lists stay local.';
+        document.getElementById('taskSorterApp').classList.remove('hidden');
+        document.getElementById('authLoading')?.classList.add('hidden');
+        document.getElementById('guestEntryBtn')?.classList.add('hidden');
+        document.getElementById('guestNotice')?.classList.remove('hidden');
+    }
     async function boot() {
+        document.getElementById('guestEntryBtn').onclick = guest;
+        document.getElementById('signInBtn').onclick = async () => {
+            if (window.Clerk?.isSignedIn) { window.location.reload(); return; }
+            try {
+                const response = await nativeFetch(`${API_BASE_URL}/api/config`);
+                if(!response.ok) throw new Error('Sign-in is unavailable.');
+                const config=await response.json();
+                const clerk=await loadClerk(config.clerkPublishableKey);
+                if(clerk.isSignedIn){window.location.reload();return;}
+                const target=document.getElementById('signIn');target.classList.remove('hidden');
+                clerk.mountSignIn(target,{forceRedirectUrl:window.location.href,signUpForceRedirectUrl:window.location.href});
+            } catch(_) { showFatal('Sign-in is unavailable. You can keep using your local guest list.'); }
+        };
+        const fallback = setTimeout(() => guest().catch(()=>showFatal('Local application could not load. Reload to retry.')), 1500);
         try {
             const configResponse = await nativeFetch(`${API_BASE_URL}/api/config`);
             if (!configResponse.ok) throw new Error(`Authentication configuration failed (${configResponse.status}).`);
@@ -85,8 +126,13 @@
                     forceRedirectUrl: appUrl,
                     signUpForceRedirectUrl: appUrl
                 });
-                return;
+                clearTimeout(fallback); await guest(); return;
             }
+            if (applicationStarted) return;
+            clearTimeout(fallback); applicationStarted = true;
+            window.taskSorterMode = 'authenticated';
+            document.getElementById('guestEntryBtn')?.classList.add('hidden');
+            document.getElementById('signInBtn')?.classList.add('hidden');
 
             const userId = clerk.user.id;
             window.taskSorterAuth = { userId };
@@ -133,8 +179,9 @@
             if (!sameAccount()) throw new Error('Account changed. Reload to continue.');
             document.getElementById('taskSorterApp')?.classList.remove('hidden');
         } catch (error) {
-            console.error('Authentication bootstrap failed:', error);
-            showFatal('Sign-in could not be initialized. Please reload the page.');
+            clearTimeout(fallback);
+            if (!applicationStarted) await guest();
+            else if(window.taskSorterMode==='authenticated') showFatal('Sign-in could not be initialized. Reload to retry.');
         }
     }
 

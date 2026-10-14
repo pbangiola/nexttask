@@ -9,7 +9,7 @@ const publicAssets = require('./public-assets');
 
 function createApp(clerkOptions = {}) {
     const app = express();
-    const BACKEND_VERSION = 'task-graph-foundation-v1';
+    const BACKEND_VERSION = 'nexttask-integrated-beta-1';
 
     const defaultAllowedOrigins = [
         'https://pbangiola.github.io',

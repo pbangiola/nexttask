@@ -15,6 +15,11 @@ router.use('/users/:userId', (req, res, next) => {
 });
 function badRequest(res,error){const message=error?.message||'Invalid request';const notFound=message.startsWith('Task node not found');return res.status(notFound?404:400).json({error:message});}
 
+const priorities = require('./task-priorities');
+router.get('/users/:userId/priorities',(req,res)=>{try{res.json(priorities.list(req.params.userId));}catch(error){badRequest(res,error);}});
+router.put('/users/:userId/priorities/rank',(req,res)=>{try{res.json(priorities.rank(req.params.userId,req.body?.taskIds));}catch(error){badRequest(res,error);}});
+router.put('/users/:userId/priorities/:taskId',(req,res)=>{try{res.json({priority:priorities.setDue(req.params.userId,req.params.taskId,req.body?.dueAt)});}catch(error){badRequest(res,error);}});
+
 router.put('/users/:userId',(req,res)=>{try{userStore.ensureUser(req.params.userId);res.json({success:true,userId:req.params.userId});}catch(error){console.error('Failed to ensure user:',error);res.status(500).json({error:'Failed to save user',detail:error.message});}});
 router.get('/users/:userId/tasks',(req,res)=>{try{userStore.ensureUser(req.params.userId);res.json({tasks:userStore.getOpenTasks(req.params.userId)});}catch(error){console.error('Failed to load user tasks:',error);res.status(500).json({error:'Failed to load user tasks',detail:error.message});}});
 router.post('/users/:userId/tasks/import',(req,res)=>{try{const{sessionId}=req.body;if(!sessionId)return res.status(400).json({error:'sessionId is required'});if(String(sessionId)!==String(req.params.userId))return res.status(403).json({error:'Session does not belong to authenticated user'});const tasks=userStore.importOpenTasksIntoSession(req.params.userId,sessionId);res.json({tasks,sessionId});}catch(error){console.error('Failed to import user tasks:',error);res.status(500).json({error:'Failed to import user tasks',detail:error.message});}});

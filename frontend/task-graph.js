@@ -3,6 +3,7 @@
 // One account-bound HTTP client and FIFO write-ahead journal. A response lost
 // after commit is retried with the same request, session ID and interval ID.
 window.TaskGraph = (() => {
+    if (window.taskSorterMode === 'guest') return window.createGuestGraph();
     const owner = String(window.taskSorterAuth?.userId || '');
     const key = `taskSorterDurability_${owner}`;
     let state;
