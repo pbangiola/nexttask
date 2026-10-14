@@ -41,4 +41,6 @@ Live Clerk sign-in, physical mobile suspension, and physical audio output were n
 
 ## Delivery
 
-The implementation and QA are complete. Draft PR creation requires access to `api.github.com`; the current proxy returned CONNECT 403. The environment draft adds only `api.github.com` to the existing custom network rules. Applying it requires the environment settings review/save/publication workflow. GitHub Git access and PR-page reads work; these do not establish API access. PR publication status is reported separately from test results.
+Draft PR: https://github.com/pbangiola/nexttask/pull/75, targeting `codex/focus-durability`. Implementation and QA commit: `d201773d56ff59c318403511a12bf3a8571729fc`. The branch is pushed. No merge or deployment.
+
+Initial GitHub API access returned proxy CONNECT 403. Saved an environment network draft adding only `api.github.com` while preserving existing custom rules; later the actual `gh pr create --draft` operation succeeded. This confirms PR creation, not publication of an environment snapshot.
