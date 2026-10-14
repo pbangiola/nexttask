@@ -256,8 +256,39 @@ function parseTimedTaskEntries(text) {
     return { entries, invalid };
 }
 
+// Keep entry identity and estimates together throughout duplicate review and sorting.
+function parseTaskEntries(text) {
+    const timed = parseTimedTaskEntries(text);
+    if (!timed.invalid.length) return timed;
+    const entries = [], invalid = [];
+    for (const line of String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)) {
+        const parsed = parseTimedTaskChunk(line);
+        if (parsed?.name) { entries.push(parsed); continue; }
+        // A duration by itself is never a task. Reject malformed duration suffixes.
+        if (/^\d+(?:\.\d+)?\s*(?:m|min|mins|minutes?|h|hr|hrs|hours?)$/i.test(line) || parseDurationMs(line) || /(?:,\s*|\s+)\d+(?:\.\d+)?\s*(?:m|min|mins|minutes?|h|hours?)\s*$/i.test(line)) {
+            invalid.push(line); continue;
+        }
+        entries.push({ name: line.replace(/^\s*\d+[.)]\s*/, ''), estimatedTimeMs: 0 });
+    }
+    return { entries, invalid };
+}
+function resolveDuplicateEntries(entries) {
+    const used = new Set(), result = [];
+    for (const entry of entries) {
+        let name = entry.name.trim().replace(/\s+/g, ' ');
+        if (used.has(duplicateKey(name))) {
+            const renamed = nextAvailableAgainName(name, used);
+            if (!confirm(`“${name}” appears more than once. Keep this copy as “${renamed}”?`)) continue;
+            name = renamed;
+        }
+        used.add(duplicateKey(name));
+        result.push({ ...entry, name });
+    }
+    return result;
+}
+
 function parseTaskEntryText(text) {
-    const parsed = parseTimedTaskEntries(text);
+    const parsed = parseTaskEntries(text);
     return parsed.entries.map(entry => entry.name);
 }
 function parsePlainTaskText(text) {

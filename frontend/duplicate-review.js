@@ -2,7 +2,7 @@
 
 (() => {
     const DUPLICATE_THRESHOLD = 0.90;
-    const PROJECT_UNDO_KEY = 'nextTaskProjectEditorUndo';
+    const PROJECT_UNDO_KEY = `nextTaskProjectEditorUndo_${userId}`;
 
     const esc = value => String(value ?? '')
         .replace(/&/g, '&amp;')
