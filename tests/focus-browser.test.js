@@ -220,6 +220,9 @@ test('nested project labels, parent/session/name/position and blocker relationsh
     await page.waitForSelector('#blockedTaskScreen');
     await page.locator('#blockedTaskScreen input').fill('Prerequisite');
     await page.getByRole('button', { name: 'Add Blocker and Requeue Both' }).click();
+    await page.waitForSelector('#timingEntryScreen');
+    await page.locator('#timingEntryScreen input').fill('1');
+    await page.getByRole('button', { name: 'Save & Continue' }).click();
     await page.waitForSelector('#dashboardScreen'); await idle(page);
     const blocked = raw.prepare('SELECT * FROM tasks WHERE id=?').get(leaf.id);
     assert.equal(blocked.status, 'blocked'); assert.ok(blocked.blocked_by_task_id);
@@ -228,9 +231,6 @@ test('nested project labels, parent/session/name/position and blocker relationsh
     await page.reload(); await page.waitForSelector('#dashboardScreen'); await idle(page);
     assert.match(await page.locator('#dashboardScreen').textContent(), /Project: Nested: Leaf/);
     await page.getByRole('button', { name: 'Get to Work', exact: true }).click();
-    await page.waitForSelector('#deadlinePage');
-    await page.locator('#deadlinePage input').fill('1');
-    await page.getByRole('button', { name: 'Start Task' }).click();
     await page.waitForSelector('#focusScreen'); await idle(page);
     await page.getByRole('button', { name: 'Done, Next!' }).click();
     await page.waitForFunction(() => document.querySelector('#focusScreen h2')?.textContent.includes('Leaf'));

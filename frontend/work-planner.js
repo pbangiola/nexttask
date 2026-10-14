@@ -15,7 +15,7 @@
         return Math.round(Number(ms || 0) / 60000);
     }
 
-    function taskFromLeaf(row, displayName, rootId) {
+    function taskFromLeaf(row, displayName, rootId, ancestorIds) {
         const task = createTask(displayName, {
             id: row.id,
             estimatedTimeMs: row.estimated_ms,
@@ -27,6 +27,7 @@
             lastChanged: null,
             blockedByTaskId: row.blocked_by_task_id
         });
+        task.projectAncestorIds = [...ancestorIds];
         task.canonicalName = row.name;
         task.parentId = row.parent_id ?? null;
         task.nodeType = row.node_type || 'task';
@@ -37,7 +38,7 @@
         return task;
     }
 
-    function flattenTree(nodes, prefix = '', rootId = null, out = []) {
+    function flattenTree(nodes, prefix = '', rootId = null, out = [], ancestorIds = []) {
         for (const node of nodes || []) {
             if (!isOpen(node)) continue;
             const displayName = prefix ? `${prefix}: ${node.name}` : node.name;
@@ -45,12 +46,12 @@
             const nodeRootId = rootId || node.id;
 
             if (children.length) {
-                flattenTree(children, displayName, nodeRootId, out);
+                flattenTree(children, displayName, nodeRootId, out, node.node_type==='project' ? [...ancestorIds,node.id] : ancestorIds);
                 continue;
             }
 
             if (node.node_type === 'project' || node.independently_actionable !== 1) continue;
-            out.push(taskFromLeaf(node, displayName, nodeRootId));
+            out.push(taskFromLeaf(node, displayName, nodeRootId, ancestorIds));
         }
         return out;
     }
@@ -152,7 +153,7 @@
     }
 
     async function startNodes(nodes) {
-        const root=nodes?.length===1?nodes[0]:null; window.currentWorkProjectContext=root?{id:root.id,name:root.name,estimatedMs:leafStats(root).ms,startedAtMs:Date.now(),deadlineAtMs:Number(root.deadline_at||root.due_at||root.deadline||0)}:null;
+        const root=nodes?.length===1?nodes[0]:null; window.currentWorkProjectContext=root?.node_type==='project'?{id:root.id,name:root.name,estimatedMs:leafStats(root).ms,startedAtMs:Date.now(),deadlineAtMs:Number(root.deadline_at||root.due_at||root.deadline||0)}:null;
         sortedTasks = flattenTree(nodes);
         activeTaskId = firstIncompleteTask()?.id || null;
         if (!sortedTasks.length) {
@@ -301,7 +302,7 @@
         start.onclick = () => startNodes([node]).catch(() => {});
         const manage = document.createElement('button');
         manage.textContent = 'Manage';
-        manage.onclick = () => window.ProjectEditor?.open?.(node.id, { push: false });
+        manage.onclick = () => window.ProjectEditor.open(node.id, { origin: async()=>{await loadTree();showProjectOverview(node.id,false);} });
         controls.append(sortingChoice(), start, manage);
         screen.appendChild(controls);
 

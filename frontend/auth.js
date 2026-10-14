@@ -5,21 +5,21 @@
         ? window.location.origin
         : 'https://nexttask-production.up.railway.app';
     const APP_SCRIPTS = [
-        'frontend/initialization.js?v=20261013-focus-1',
-        'frontend/task-graph.js?v=20261013-focus-1',
-        'frontend/task-graph-timing.js?v=20261013-focus-1',
-        'frontend/persistence.js?v=20261013-focus-1',
-        'frontend/ui.js?v=20261013-focus-1',
-        'frontend/core.js?v=20261013-focus-1',
-        'frontend/timing.js?v=20261013-focus-1',
-        'frontend/focus-durability.js?v=20261013-focus-1',
-        'frontend/work-planner.js?v=20261013-focus-1',
-        'frontend/planner.js?v=20261013-focus-1',
-        'frontend/project-queue-filter.js?v=20261013-focus-1',
-        'frontend/project-editor.js?v=20261013-focus-1',
-        'frontend/duplicate-review.js?v=20261013-focus-1',
-        'frontend/project-csv.js?v=20261013-focus-1',
-        'frontend/planner-bridge.js?v=20261013-focus-1'
+        'frontend/initialization.js?v=20261014-qa-1',
+        'frontend/task-graph.js?v=20261014-qa-1',
+        'frontend/task-graph-timing.js?v=20261014-qa-1',
+        'frontend/persistence.js?v=20261014-qa-1',
+        'frontend/ui.js?v=20261014-qa-1',
+        'frontend/core.js?v=20261014-qa-1',
+        'frontend/timing.js?v=20261014-qa-1',
+        'frontend/focus-durability.js?v=20261014-qa-1',
+        'frontend/work-planner.js?v=20261014-qa-1',
+        'frontend/planner.js?v=20261014-qa-1',
+        'frontend/project-queue-filter.js?v=20261014-qa-1',
+        'frontend/project-editor.js?v=20261014-qa-1',
+        'frontend/duplicate-review.js?v=20261014-qa-1',
+        'frontend/project-csv.js?v=20261014-qa-1',
+        'frontend/planner-bridge.js?v=20261014-qa-1'
     ];
 
     const nativeFetch = window.fetch.bind(window);
