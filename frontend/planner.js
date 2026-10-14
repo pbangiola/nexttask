@@ -1,7 +1,7 @@
 'use strict';
 
 window.ProjectPlanner = (() => {
-    const UI_STATE_KEY = 'nextTaskProjectPlannerUi';
+    const UI_STATE_KEY = `nextTaskProjectPlannerUi_${userId}`;
     const PROJECT_THRESHOLD_MINUTES = 20;
 
     let view = 'planner-home';
@@ -260,9 +260,9 @@ window.ProjectPlanner = (() => {
     async function showDefineProject() {
         try {
             view='define-project'; let existing=null; if(currentProjectId) existing=(await getNode(currentProjectId)).node; const c=clearShell();
-            c.innerHTML=`<h2>${pendingBacklogIds.length?'These belong together.':'Create a Project'}</h2><label>${pendingBacklogIds.length?'What should we call this project?':'What are you working on?'}<input id="projectName"></label><label>About how long do you think the whole project will take?<input id="projectEstimate" type="number" min="1" placeholder="Minutes"></label><button id="projectContinue">Continue</button><button id="projectBack">Back</button>`;
+            c.innerHTML=`<h2>${pendingBacklogIds.length?'These belong together.':'Create a Project'}</h2><label>${pendingBacklogIds.length?'What should we call this project?':'What are you working on?'}<input id="projectName"></label><label>Optional estimate for the whole project<input id="projectEstimate" type="number" min="1" placeholder="Minutes"></label><button id="projectContinue">Continue</button><button id="projectBack">Back</button>`;
             if(existing){el('projectName').value=existing.name||'';el('projectEstimate').value=existing.estimated_ms?Math.round(existing.estimated_ms/60000):'';}
-            el('projectContinue').onclick=async()=>{try{const name=el('projectName').value.trim();const minutes=parseInt(el('projectEstimate').value,10);if(!name)return alert('Please give the project a name.');if(!Number.isFinite(minutes)||minutes<1)return alert('Please enter your best estimate in minutes.');let root;if(currentProjectId)root=await updateNode(currentProjectId,{name,nodeType:'project',estimatedTimeMs:minutes*60000,independentlyActionable:false});else{root=await createNode({name,nodeType:'project',estimatedTimeMs:minutes*60000,independentlyActionable:false,sessionId});currentProjectId=root.id;}currentParentId=root.id;if(pendingBacklogIds.length){for(let i=0;i<pendingBacklogIds.length;i++)await reparent(pendingBacklogIds[i],root.id,i+1);pendingBacklogIds=[];}saveUi();showPartsEntry(root.id);}catch(error){fail(error,showDefineProject);}};
+            el('projectContinue').onclick=async()=>{try{const name=el('projectName').value.trim();const minutes=parseInt(el('projectEstimate').value,10);if(!name)return alert('Please give the project a name.');if(el('projectEstimate').value && (!Number.isFinite(minutes)||minutes<1))return alert('Enter a positive estimate or leave it blank.');let root;if(currentProjectId)root=await updateNode(currentProjectId,{name,nodeType:'project',estimatedTimeMs:(minutes||0)*60000,independentlyActionable:false});else{root=await createNode({name,nodeType:'project',estimatedTimeMs:(minutes||0)*60000,independentlyActionable:false,sessionId});currentProjectId=root.id;}currentParentId=root.id;if(pendingBacklogIds.length){for(let i=0;i<pendingBacklogIds.length;i++)await reparent(pendingBacklogIds[i],root.id,i+1);pendingBacklogIds=[];}saveUi();showPartsEntry(root.id);}catch(error){fail(error,showDefineProject);}};
             el('projectBack').onclick=()=>returnTarget==='backlog-list'?showBacklogList():returnTarget==='projects-list'?showProjects():showPlannerHome(); saveUi();
         } catch(error){fail(error,showPlannerHome);}
     }
@@ -271,9 +271,31 @@ window.ProjectPlanner = (() => {
         try {
             currentParentId=parentId;view='parts-entry';const {node:parent,children}=await getNode(parentId);const c=clearShell();
             c.innerHTML=`<h2>${esc(parent.name)}</h2><p>What are all the parts of this project you can think of?</p><textarea id="partsText" rows="10"></textarea><label class="planner-check"><input id="partsSkipSort" type="checkbox"><span>Keep this order (skip comparison sorting)</span></label><button id="partsContinue">Continue</button><div class="upload-container"><input id="partsUpload" type="file" accept=".txt,.csv,text/plain,text/csv"></div><button id="partsBack">Back</button>`;
-            el('partsText').value=children.map(child=>child.name).join('\n');
+            // Existing children are edited by ID in ProjectEditor, never reconstructed from names.
+            el('partsText').value='';
             el('partsUpload').onchange=e=>{const file=e.target.files?.[0];if(!file)return;const r=new FileReader();r.onload=x=>{el('partsText').value=String(x.target.result||'').trim();};r.readAsText(file);};
-            el('partsContinue').onclick=async()=>{try{const parsed=parseTimedTaskEntries(el('partsText').value);if(parsed.invalid.length)return alert('Add a time estimate to every part. Try formats like "Email Sam, 10m" or "Write report, 1h 30m".\n\nCould not read: '+parsed.invalid.join(' | '));const names=resolveDuplicateTaskNames(parsed.entries.map(entry=>entry.name));if(!names.length)return alert('Please add at least one part.');const remainingEntries=[...parsed.entries];const byName=new Map(children.map(child=>[child.name,child]));const nodes=[];for(const name of names){const baseName=name.replace(/ again(?: \d+)?$/i,'');let entryIndex=remainingEntries.findIndex(entry=>duplicateKey(entry.name)===duplicateKey(baseName));if(entryIndex<0)entryIndex=0;const [entry]=remainingEntries.splice(entryIndex,1);let node=byName.get(name)||byName.get(baseName);if(!node)node=await createNode({name,nodeType:'task',parentId,sessionId,estimatedTimeMs:entry?.estimatedTimeMs||0});else if(entry?.estimatedTimeMs&&Number(node.estimated_ms||0)!==entry.estimatedTimeMs)node=await updateNode(node.id,{name,estimatedTimeMs:entry.estimatedTimeMs});nodes.push(node);}if(el('partsSkipSort').checked){for(let i=0;i<nodes.length;i++)await updateNode(nodes[i].id,{position:i+1});const next=nodes.find(node=>!node.estimated_ms);return next?showEstimate(next.id):showSummary(currentProjectId);}await sortPlannerNodes(nodes);const next=nodes.find(node=>!node.estimated_ms);return next?showEstimate(next.id):showSummary(currentProjectId);}catch(error){fail(error,()=>showPartsEntry(parentId));}};
+            el('partsContinue').onclick=async()=>{
+                const parsed=parseTaskEntries(el('partsText').value);
+                if(parsed.invalid.length)return alert('Could not read: '+parsed.invalid.join(' | '));
+                let entries=resolveDuplicateEntries(parsed.entries).map(entry=>({...entry,id:makeId('task')}));
+                if(!entries.length)return alert('Please add at least one part.');
+                const skip=el('partsSkipSort').checked;
+                el('partsContinue').disabled=true;
+                if(!skip){
+                    clearShell();show(el('taskCompare'));
+                    const run=++sortRunId;
+                    entries=await interactiveMergeSort(entries,run);
+                    hide(el('taskCompare'));
+                    if(run!==sortRunId)return;
+                }
+                collectMissingEstimates(entries,async()=>{
+                    try{
+                        clearShell().textContent='Saving project parts…';
+                        for(let i=0;i<entries.length;i++) await createNode({...entries[i],nodeType:'task',parentId,sessionId,position:children.length+i+1});
+                        await showSummary(currentProjectId);
+                    }catch(error){fail(error,()=>showPartsEntry(parentId));}
+                },()=>showPartsEntry(parentId));
+            };
             el('partsBack').onclick=()=>showSummary(currentProjectId); saveUi();
         } catch(error){fail(error,showProjects);}
     }
@@ -318,9 +340,9 @@ window.ProjectPlanner = (() => {
 
     async function showSummary(projectId) {
         try {
-            currentProjectId=projectId;view='summary';const full=findInTree(await tree(),projectId);if(!full)return showProjects();const s=leafStats(full);const c=clearShell();c.innerHTML=`<h2>${esc(full.name)}</h2><p>Initial estimate: ${Math.round(Number(full.estimated_ms||0)/60000)} minutes</p><p>Planned estimate: ${Math.round(s.ms/60000)} minutes</p><div id="summaryTree"></div><div class="planner-choice-grid"><button id="editProject">Edit Project</button><button id="summaryDone">Done</button></div>`;const render=(node,depth=0)=>{const div=document.createElement('div');div.style.marginLeft=`${depth*20}px`;div.textContent=`${node.name}${node.children?.length?'':` — ${Math.round(Number(node.estimated_ms||0)/60000)} min`}`;el('summaryTree').appendChild(div);(node.children||[]).forEach(ch=>render(ch,depth+1));};(full.children||[]).forEach(ch=>render(ch));el('editProject').onclick=()=>showPartsEntry(projectId);el('summaryDone').onclick=()=>returnTarget==='backlog-list'?showBacklogList():returnTarget==='projects-list'?showProjects():showPlannerHome();saveUi();
+            currentProjectId=projectId;view='summary';const full=findInTree(await tree(),projectId);if(!full)return showProjects();const s=leafStats(full);const c=clearShell();c.innerHTML=`<h2>${esc(full.name)}</h2><p>Planned estimate: ${Math.round(s.ms/60000)} minutes</p><div id="summaryTree"></div><div class="planner-choice-grid"><button id="editProject">Edit Project</button><button id="summaryDone">Done</button></div>`;const render=(node,depth=0)=>{const div=document.createElement('div');div.style.marginLeft=`${depth*20}px`;div.textContent=`${node.name}${node.children?.length?'':` — ${Math.round(Number(node.estimated_ms||0)/60000)} min`}`;el('summaryTree').appendChild(div);(node.children||[]).forEach(ch=>render(ch,depth+1));};(full.children||[]).forEach(ch=>render(ch));el('editProject').onclick=()=>window.ProjectEditor.open(projectId,{origin:showProjects});el('summaryDone').onclick=()=>returnTarget==='backlog-list'?showBacklogList():returnTarget==='projects-list'?showProjects():showPlannerHome();saveUi();
         } catch(error){fail(error,showProjects);}
     }
 
-    return { open };
+    return { open, showProjects };
 })();

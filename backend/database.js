@@ -131,7 +131,9 @@ const upsertTaskStmt = db.prepare(`
         independently_actionable = tasks.independently_actionable,
         name = tasks.name,
         status = excluded.status,
-        estimated_ms = excluded.estimated_ms,
+        -- Focus snapshots may fill a missing estimate, but planner edits own
+        -- subsequent changes. A stale pause/recovery must not erase an edit.
+        estimated_ms = CASE WHEN tasks.estimated_ms > 0 THEN tasks.estimated_ms ELSE excluded.estimated_ms END,
         elapsed_ms = excluded.elapsed_ms,
         position = tasks.position,
         blocked_by_task_id = excluded.blocked_by_task_id,
@@ -194,6 +196,9 @@ const replaceTaskList = db.transaction((sessionId, tasks, session) => {
         }
         // A snapshot can update work state, but never the canonical graph.
         if (existing?.node_type === 'project') return;
+        // A stale browser snapshot cannot restart terminal canonical work.
+        // Explicit planner edits, rather than Focus recovery, own reopening.
+        if (existing && ['completed', 'cancelled'].includes(existing.status)) return;
         for (const reference of existing ? [row.blocked_by_task_id] : [row.parent_id, row.project_id, row.blocked_by_task_id]) {
             if (reference == null) continue;
             const target = db.prepare('SELECT * FROM tasks WHERE id=? AND user_id=?').get(String(reference), row.user_id);

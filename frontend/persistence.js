@@ -3,11 +3,14 @@
 // functions for saving and restoring state
 
 function backupToServer() {
-    fetch(`${API_BASE_URL}/api/session/${encodeURIComponent(sessionId)}/tasks`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(serverPayload()) })
-        .then(response => { if (!response.ok) throw new Error(`Backup failed (${response.status})`); })
-        .catch(error => console.warn('Server backup failed; browser state is safe:', error));
+    return window.TaskGraph.commit('task snapshot', [window.FocusDurability.snapshot()]);
 }
-function save(view = inferView()) { saveLocal(view); backupToServer(); }
+function save(view = inferView()) {
+    saveLocal(view);
+    const pending = backupToServer();
+    pending.catch(() => {}); // Error state and retry are shown by the journal.
+    return pending;
+}
 
 function inferView() {
     if (el('focusScreen')) return 'focus';
@@ -41,6 +44,7 @@ function restoreLocalState() {
 
 function localSnapshot(view) {
     return {
+        workSessionId: window.activeWorkSessionId,
         sortedTasks,
         activeTaskId,
         totalAvailableTimeMs,

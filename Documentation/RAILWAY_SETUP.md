@@ -1,49 +1,38 @@
-# Railway deployment setup
+# Railway deployment setup — integrated beta
 
-## 1. Set the frontend API URL
+Use Node 22.23.3 (`.nvmrc`; engines 22.x), frozen `npm ci`, and
+`npm start` (`node backend/server.js`). No Docker is required.
 
-Open `js/config.js` and replace:
+The current frontend loader is `frontend/auth.js`, with application API setup in
+`frontend/initialization.js`. GitHub Pages uses the existing backend fallback
+`https://nexttask-production.up.railway.app`; same-origin backend hosting uses the
+request origin. There is no `js/config.js` to edit. If changing the public service
+URL, update both shared bootstrap/application fallback locations consistently.
 
-```js
-const RAILWAY_API_BASE_URL = 'https://REPLACE-WITH-YOUR-RAILWAY-DOMAIN.up.railway.app';
-```
+Set `FRONTEND_ORIGINS=https://pbangiola.github.io` for Pages, or a comma-separated
+list of additional explicit frontend origins. Configure `CLERK_PUBLISHABLE_KEY`
+and `CLERK_SECRET_KEY` from the same intended Clerk instance through Railway's
+private variables. Never commit secrets. Proxy/domain-denial failures are not
+evidence these credentials are invalid.
 
-with the public domain from Railway, for example:
+Mount persistent storage and set/confirm `RAILWAY_VOLUME_MOUNT_PATH`. SQLite
+`task_sorter.db` is stored there. Preserve this volume across deploys. The beta
+adds the owned task-priority table/schema marker without resetting task rows,
+owners, acknowledged elapsed, or existing migration markers. Back up production
+storage before operational changes using the deployment platform's supported
+procedure.
 
-```js
-const RAILWAY_API_BASE_URL = 'https://nexttask-production.up.railway.app';
-```
+Link the backend service to the repository's `main` branch with automatic deploy
+if that is the selected release policy. A main merge only triggers deployment
+when this integration is actually configured. Without Railway access, do not
+claim that the backend deployed.
 
-Do not include a trailing slash.
-
-## 2. Set the Railway frontend-origin variable
-
-In Railway, add this service variable:
-
-```text
-FRONTEND_ORIGINS=https://pbangiola.github.io
-```
-
-For a custom frontend domain or additional local origin, use a comma-separated list:
-
-```text
-FRONTEND_ORIGINS=https://pbangiola.github.io,https://tasks.example.com
-```
-
-## 3. Confirm the persistent volume
-
-Mount the Railway volume and ensure `RAILWAY_VOLUME_MOUNT_PATH` is available to the service. `database.js` uses that directory for `task_sorter.db`.
-
-## 4. Test the backend
-
-Open this route using your Railway domain:
-
-```text
-https://YOUR-RAILWAY-DOMAIN/api/health
-```
-
-It should return JSON containing `"ok": true`.
-
-## 5. Deploy the frontend
-
-Upload the full project structure to GitHub Pages, including all `js/` subfolders. A missing subfolder will cause the page to load without its related feature code.
+Verify `https://nexttask-production.up.railway.app/api/health` reports `ok: true`
+and `version: nexttask-integrated-beta-1`; confirm deploy logs and volume mount.
+Serve the frontend through GitHub Pages with the **whole current frontend/**
+directory plus root index/styles/audio assets, or through the backend's explicit
+public-asset allowlist. New required scripts: `task-entry.js`, `guest-graph.js`,
+`beta-insights.js`; the loader owns ordering and cache version
+`20261014-beta-1`. Never publish backend/database/config/secret files as static
+assets. Confirm Pages and backend separately, then run the local/manual workflow
+checklist in `INTEGRATED_BETA_LOCAL_QA.md` against safe test data.

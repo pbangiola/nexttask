@@ -10,10 +10,10 @@ const TEN_MINUTES_MS = 10 * 60 * 1000;
 const LOCAL_STATE_KEY_PREFIX = 'taskSorterSession';
 
 // Authentication bootstraps these values from Clerk before application scripts load.
-// A user's Clerk ID is also the single active-session ID for this fresh-start MVP.
-let userId = String(window.taskSorterAuth?.userId || '');
+// The Clerk ID scopes legacy snapshots; durable work-session IDs are separate.
+let userId = String(window.taskSorterAuth?.userId || (window.taskSorterMode === 'guest' ? 'guest_local' : ''));
 let sessionId = userId;
-const LOCAL_STATE_KEY = `${LOCAL_STATE_KEY_PREFIX}_${userId}`;
+const LOCAL_STATE_KEY = window.taskSorterMode === 'guest' ? 'nexttaskGuestSession_v1' : `${LOCAL_STATE_KEY_PREFIX}_${userId}`;
 if (!userId) throw new Error('Task Sorter requires an authenticated Clerk user.');
 
 let sortedTasks = [];
@@ -57,6 +57,7 @@ function continueAfterTimeLimitChoice() {
 }
 
 function showTimeLimitQuestion(nextStep) {
+    window.FocusDurability.newWork();
     timeLimitNextStep = nextStep;
 
     // Every new work session gets a fresh timing decision. This prevents a
@@ -135,6 +136,7 @@ function importFile(file) {
         );
         const structured = nameIndex >= 0;
 
+        window.FocusDurability.newWork();
         if (structured) {
             sortedTasks = rows.slice(1)
                 .map(row => createTask(row[nameIndex], {
@@ -254,8 +256,26 @@ function parseTimedTaskEntries(text) {
     return { entries, invalid };
 }
 
+// Keep entry identity and estimates together throughout duplicate review and sorting.
+function parseTaskEntries(text) { return window.TaskEntry.parse(text); }
+
+function resolveDuplicateEntries(entries) {
+    const used = new Set(), result = [];
+    for (const entry of entries) {
+        let name = entry.name.trim().replace(/\s+/g, ' ');
+        if (used.has(duplicateKey(name))) {
+            const renamed = nextAvailableAgainName(name, used);
+            if (!confirm(`“${name}” appears more than once. Keep this copy as “${renamed}”?`)) continue;
+            name = renamed;
+        }
+        used.add(duplicateKey(name));
+        result.push({ ...entry, name });
+    }
+    return result;
+}
+
 function parseTaskEntryText(text) {
-    const parsed = parseTimedTaskEntries(text);
+    const parsed = parseTaskEntries(text);
     return parsed.entries.map(entry => entry.name);
 }
 function parsePlainTaskText(text) {

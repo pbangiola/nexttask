@@ -29,43 +29,22 @@ function createTask(name, values = {}) {
 //separate incomplete tasks from complete tasks
 function incompleteTasks() {
     sortedTasks.forEach(ensureTask);
-    return sortedTasks.filter(task => !task.completed);
+    return sortedTasks.filter(task => !task.completed && task.status !== 'cancelled');
 }
 //identify the first incomplete task in the taak list
-function firstIncompleteTask() { return incompleteTasks()[0] || null; }
+function firstIncompleteTask() { return incompleteTasks().find(task => window.FocusDurability.eligible(task)) || null; }
 //identify the task the user is focused on now
 function currentTask() { return sortedTasks.find(task => task.id === activeTaskId && !task.completed) || firstIncompleteTask(); }
 
 
 //Initialize task sorting
 async function startSorting() {
-    const parsed = parseTimedTaskEntries(el('tasks').value);
-    if (parsed.invalid.length) {
-        alert(
-            'Every task needs a time estimate. Try formats like "Email Sam, 10m", "Email Sam 10m", or "Write report, 1h 30m".\n\n' +
-            'Could not read: ' + parsed.invalid.join(' | ')
-        );
-        return;
-    }
-
-    if (!parsed.entries.length) {
-        alert('Please enter at least one task with a time estimate.');
-        return;
-    }
-
-    const names = resolveDuplicateTaskNames(parsed.entries.map(entry => entry.name));
-    if (!names.length) return;
-
-    // Preserve the estimate that belongs to each occurrence even when the
-    // duplicate-name review renames or removes an entry.
-    const remainingEntries = [...parsed.entries];
-    const workTasks = names.map(name => {
-        const baseName = name.replace(/ again(?: \d+)?$/i, '');
-        let entryIndex = remainingEntries.findIndex(entry => duplicateKey(entry.name) === duplicateKey(baseName));
-        if (entryIndex < 0) entryIndex = 0;
-        const [entry] = remainingEntries.splice(entryIndex, 1);
-        return createTask(name, { estimatedTimeMs: entry?.estimatedTimeMs || 0 });
-    });
+    const parsed = parseTaskEntries(el('tasks').value);
+    if (parsed.invalid.length) return alert('Could not read: ' + parsed.invalid.join(' | '));
+    const entries = resolveDuplicateEntries(parsed.entries);
+    if (!entries.length) return alert('Please enter at least one task.');
+    const workTasks = entries.map(entry => createTask(entry.name, entry));
+    window.currentWorkProjectContext = null;
 
     for (const task of workTasks) {
         const minutes = task.estimatedTimeMs / 60_000;
@@ -92,6 +71,9 @@ async function startSorting() {
         lastChanged: sortStartedAtMs
     });
 
+    sortTask.isSortingOverhead = true;
+    sortTask.independentlyActionable = false;
+    window.FocusDurability.newWork();
     sortedTasks = [sortTask, ...workTasks];
     activeTaskId = sortTask.id;
     sortStartedAt = sortStartedAtMs;
@@ -115,7 +97,7 @@ async function startSorting() {
     activeTaskId = firstIncompleteTask()?.id || null;
     hide(el('taskCompare'));
     save('dashboard');
-    showDashboard();
+    collectMissingEstimates(sortedWorkTasks, () => showDashboard(), () => showTaskInput());
 }
 
 //core merge sort algorithm step 1
@@ -142,6 +124,7 @@ function mergeWithChoices(left, right, runId) {
 
         function finish(result) {
             hide(compare);
+            task1.onclick = null; task2.onclick = null;
             resolve(result);
         }
 
@@ -201,34 +184,9 @@ function mergeWithChoices(left, right, runId) {
 }
 
 //trigger work on the next task in the sorted list
-function beginWork(){ const task=firstIncompleteTask(); if(!task){showCompletion();return;} activeTaskId=task.id; if(task.estimatedTimeMs<=0) showSingleTaskEstimate(task); else showFocus(task); }
+function beginWork(){ const task=firstIncompleteTask(); if(!task){if(incompleteTasks().length)showDashboard();else window.FocusDurability.finish();return;} return showFocus(task); }
 
 
 
 //initialize
-function init(){
-    bindEvents();
-    const restored=restoreLocalState();
-
-    if (!restored || !sortedTasks.length) {
-        showModeSelect();
-        return;
-    }
-
-    if (hasHardStop() && Date.now() >= hardStopAtMs && restored.view !== 'session-ended') {
-        handleHardStop();
-        return;
-    }
-
-    startHardStopWatch();
-    const active=currentTask();
-
-    if (restored.view==='focus'&&active?.lastChanged!==null) showFocus(active);
-    else if (restored.view==='timing-entry') showSequentialTiming(0);
-    else if (restored.view==='timing-gateway') showSequentialTiming(0);
-    else if (restored.view==='completion') showCompletion();
-    else if (restored.view==='session-ended') showSessionEnded();
-    else if (restored.view==='stop-checklist') showStopChecklist();
-    else showDashboard();
-}
-document.addEventListener('DOMContentLoaded',init);
+function init(){ return window.FocusDurability.init(); }
