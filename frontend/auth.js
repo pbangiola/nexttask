@@ -5,24 +5,25 @@
         ? window.location.origin
         : 'https://nexttask-production.up.railway.app';
     const APP_SCRIPTS = [
-        'frontend/initialization.js?v=20261014-beta-1',
-        'frontend/task-entry.js?v=20261014-beta-1',
-        'frontend/guest-graph.js?v=20261014-beta-1',
-        'frontend/task-graph.js?v=20261014-beta-1',
-        'frontend/task-graph-timing.js?v=20261014-beta-1',
-        'frontend/persistence.js?v=20261014-beta-1',
-        'frontend/ui.js?v=20261014-beta-1',
-        'frontend/core.js?v=20261014-beta-1',
-        'frontend/timing.js?v=20261014-beta-1',
-        'frontend/focus-durability.js?v=20261014-beta-1',
-        'frontend/work-planner.js?v=20261014-beta-1',
-        'frontend/planner.js?v=20261014-beta-1',
-        'frontend/project-queue-filter.js?v=20261014-beta-1',
-        'frontend/project-editor.js?v=20261014-beta-1',
-        'frontend/duplicate-review.js?v=20261014-beta-1',
-        'frontend/project-csv.js?v=20261014-beta-1',
-        'frontend/planner-bridge.js?v=20261014-beta-1',
-        'frontend/beta-insights.js?v=20261014-beta-1'
+        'frontend/initialization.js?v=20261015-project-qa-2',
+        'frontend/task-entry.js?v=20261015-project-qa-2',
+        'frontend/guest-graph.js?v=20261015-project-qa-2',
+        'frontend/task-graph.js?v=20261015-project-qa-2',
+        'frontend/task-graph-timing.js?v=20261015-project-qa-2',
+        'frontend/persistence.js?v=20261015-project-qa-2',
+        'frontend/ui.js?v=20261015-project-qa-2',
+        'frontend/core.js?v=20261015-project-qa-2',
+        'frontend/timing.js?v=20261015-project-qa-2',
+        'frontend/project-queue.js?v=20261015-project-qa-2',
+        'frontend/focus-durability.js?v=20261015-project-qa-2',
+        'frontend/work-planner.js?v=20261015-project-qa-2',
+        'frontend/planner.js?v=20261015-project-qa-2',
+        'frontend/project-queue-filter.js?v=20261015-project-qa-2',
+        'frontend/project-editor.js?v=20261015-project-qa-2',
+        'frontend/duplicate-review.js?v=20261015-project-qa-2',
+        'frontend/project-csv.js?v=20261015-project-qa-2',
+        'frontend/planner-bridge.js?v=20261015-project-qa-2',
+        'frontend/beta-insights.js?v=20261015-project-qa-2'
     ];
 
     const nativeFetch = window.fetch.bind(window);

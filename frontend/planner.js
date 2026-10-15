@@ -84,7 +84,7 @@ window.ProjectPlanner = (() => {
         return nodes.filter(n => n.node_type !== 'project' && !['completed','cancelled'].includes(n.status) && String(n.name).toLowerCase() !== 'sort tasks');
     }
     function openRootProjects(nodes) {
-        return nodes.filter(n => n.node_type === 'project' && !['completed','cancelled'].includes(n.status));
+        return nodes.filter(n => n.node_type === 'project' && n.status !== 'cancelled');
     }
     function findInTree(nodes, id) {
         for (const node of nodes) {
@@ -95,8 +95,7 @@ window.ProjectPlanner = (() => {
         return null;
     }
     function leafStats(node) {
-        if (!node?.children?.length) return { ms:Number(node?.estimated_ms || 0), steps:node?.node_type === 'project' ? 0 : 1 };
-        return node.children.reduce((acc, child) => { const s=leafStats(child); acc.ms+=s.ms; acc.steps+=s.steps; return acc; }, {ms:0,steps:0});
+        return {ms:Number(node?.estimated_ms||0),steps:node?.progress?.totalTasks??(node?.node_type==='task'?1:0)};
     }
 
     async function open() {
@@ -239,7 +238,7 @@ window.ProjectPlanner = (() => {
         } catch(error){fail(error,showBacklogList);}
     }
 
-    async function showProjects(){try{view='projects-list';const [rootNodes,fullTree]=await Promise.all([roots(),tree()]),projects=openRootProjects(rootNodes),c=clearShell();c.innerHTML=`<h2>Existing Projects</h2><div id="projectList" class="planner-project-grid"></div><div class="planner-choice-grid"><button id="sortProjects">Sort Projects<span>Use forced choices to set the order.</span></button><button id="addProject">Add New Project</button><button id="combineProjects">Combine Projects</button></div><button id="projectsBack">Back</button>`;const list=el('projectList');if(!projects.length)list.innerHTML='<p>No projects yet.</p>';projects.forEach(item=>{const full=findInTree(fullTree,item.id)||{...item,children:[]},s=leafStats(full),card=document.createElement('div');card.className='planner-project-card';const link=document.createElement('button');link.className='planner-project-card-link';link.textContent=item.name;link.onclick=()=>showSummary(item.id);const meta=document.createElement('span');meta.textContent=`${Math.round(s.ms/60000)} min • ${s.steps} steps`;const del=document.createElement('button');del.className='planner-project-delete';del.textContent='Delete';del.onclick=async e=>{e.stopPropagation();if(!confirm(full?.children?.length?`Delete “${item.name}” and everything inside it?`:`Delete “${item.name}”?`))return;try{await deleteNode(item.id);showProjects();}catch(error){fail(error,showProjects);}};card.append(link,meta,del);list.appendChild(card);});el('sortProjects').disabled=projects.length<2;el('sortProjects').onclick=()=>sortProjects(projects);el('addProject').onclick=()=>{currentProjectId=null;pendingBacklogIds=[];returnTarget='projects-list';showDefineProject();};el('combineProjects').onclick=showCombineProjects;el('projectsBack').onclick=showReviewEntry;saveUi();}catch(error){fail(error,showReviewEntry);}}
+    async function showProjects(){try{view='projects-list';const [rootNodes,fullTree]=await Promise.all([roots(),tree()]),projects=openRootProjects(rootNodes),c=clearShell();c.innerHTML=`<h2>Existing Projects</h2><div id="projectList" class="planner-project-grid"></div><div class="planner-choice-grid"><button id="sortProjects">Sort Projects<span>Use forced choices to set the order.</span></button><button id="addProject">Add New Project</button><button id="combineProjects">Combine Projects</button></div><button id="projectsBack">Back</button>`;const list=el('projectList');if(!projects.length)list.innerHTML='<p>No projects yet.</p>';projects.forEach(item=>{const full=findInTree(fullTree,item.id)||{...item,children:[]},s=leafStats(full),card=document.createElement('div');card.className='planner-project-card';const link=document.createElement('button');link.className='planner-project-card-link';link.textContent=item.name;link.onclick=()=>showSummary(item.id);const meta=document.createElement('span');meta.textContent=`${s.ms/60000} min • ${s.steps} steps`;const del=document.createElement('button');del.className='planner-project-delete';del.textContent='Delete';del.onclick=async e=>{e.stopPropagation();if(!confirm(full?.children?.length?`Delete “${item.name}” and everything inside it?`:`Delete “${item.name}”?`))return;try{await deleteNode(item.id);showProjects();}catch(error){fail(error,showProjects);}};card.append(link,meta,del);list.appendChild(card);});el('sortProjects').disabled=projects.length<2;el('sortProjects').onclick=()=>sortProjects(projects);el('addProject').onclick=()=>{currentProjectId=null;pendingBacklogIds=[];returnTarget='projects-list';showDefineProject();};el('combineProjects').onclick=showCombineProjects;el('projectsBack').onclick=showReviewEntry;saveUi();}catch(error){fail(error,showReviewEntry);}}
 
     async function sortProjects(projects) {
         try {
@@ -261,8 +260,8 @@ window.ProjectPlanner = (() => {
         try {
             view='define-project'; let existing=null; if(currentProjectId) existing=(await getNode(currentProjectId)).node; const c=clearShell();
             c.innerHTML=`<h2>${pendingBacklogIds.length?'These belong together.':'Create a Project'}</h2><label>${pendingBacklogIds.length?'What should we call this project?':'What are you working on?'}<input id="projectName"></label><label>Optional estimate for the whole project<input id="projectEstimate" type="number" min="1" placeholder="Minutes"></label><button id="projectContinue">Continue</button><button id="projectBack">Back</button>`;
-            if(existing){el('projectName').value=existing.name||'';el('projectEstimate').value=existing.estimated_ms?Math.round(existing.estimated_ms/60000):'';}
-            el('projectContinue').onclick=async()=>{try{const name=el('projectName').value.trim();const minutes=parseInt(el('projectEstimate').value,10);if(!name)return alert('Please give the project a name.');if(el('projectEstimate').value && (!Number.isFinite(minutes)||minutes<1))return alert('Enter a positive estimate or leave it blank.');let root;if(currentProjectId)root=await updateNode(currentProjectId,{name,nodeType:'project',estimatedTimeMs:(minutes||0)*60000,independentlyActionable:false});else{root=await createNode({name,nodeType:'project',estimatedTimeMs:(minutes||0)*60000,independentlyActionable:false,sessionId});currentProjectId=root.id;}currentParentId=root.id;if(pendingBacklogIds.length){for(let i=0;i<pendingBacklogIds.length;i++)await reparent(pendingBacklogIds[i],root.id,i+1);pendingBacklogIds=[];}saveUi();showPartsEntry(root.id);}catch(error){fail(error,showDefineProject);}};
+            if(existing){el('projectName').value=existing.name||'';el('projectEstimate').value=existing.estimated_ms?existing.estimated_ms/60000:'';}
+            el('projectContinue').onclick=async()=>{try{const name=el('projectName').value.trim();const minutes=Number(el('projectEstimate').value);if(!name)return alert('Please give the project a name.');if(el('projectEstimate').value && (!Number.isFinite(minutes)||minutes<1))return alert('Enter a positive estimate or leave it blank.');let root;if(currentProjectId)root=await updateNode(currentProjectId,{name,nodeType:'project',estimatedTimeMs:Math.round((minutes||0)*60000),independentlyActionable:false});else{root=await createNode({name,nodeType:'project',estimatedTimeMs:Math.round((minutes||0)*60000),independentlyActionable:false,sessionId});currentProjectId=root.id;}currentParentId=root.id;if(pendingBacklogIds.length){for(let i=0;i<pendingBacklogIds.length;i++)await reparent(pendingBacklogIds[i],root.id,i+1);pendingBacklogIds=[];}saveUi();showPartsEntry(root.id);}catch(error){fail(error,showDefineProject);}};
             el('projectBack').onclick=()=>returnTarget==='backlog-list'?showBacklogList():returnTarget==='projects-list'?showProjects():showPlannerHome(); saveUi();
         } catch(error){fail(error,showPlannerHome);}
     }
@@ -270,7 +269,7 @@ window.ProjectPlanner = (() => {
     async function showPartsEntry(parentId) {
         try {
             currentParentId=parentId;view='parts-entry';const {node:parent,children}=await getNode(parentId);const c=clearShell();
-            c.innerHTML=`<h2>${esc(parent.name)}</h2><p>What are all the parts of this project you can think of?</p><textarea id="partsText" rows="10"></textarea><label class="planner-check"><input id="partsSkipSort" type="checkbox"><span>Keep this order (skip comparison sorting)</span></label><button id="partsContinue">Continue</button><div class="upload-container"><input id="partsUpload" type="file" accept=".txt,.csv,text/plain,text/csv"></div><button id="partsBack">Back</button>`;
+            c.innerHTML=`<h2>${esc(parent.name)}</h2><p>What are all the parts of this project you can think of?</p><textarea id="partsText" rows="10"></textarea><label class="planner-check"><input id="partsSkipSort" type="checkbox"><span>Keep this order (skip comparison sorting)</span></label><label class="planner-check"><input id="partsDeferEstimates" type="checkbox"><span>Add estimates later</span></label><button id="partsContinue">Continue</button><div class="upload-container"><input id="partsUpload" type="file" accept=".txt,.csv,text/plain,text/csv"></div><button id="partsBack">Back</button>`;
             // Existing children are edited by ID in ProjectEditor, never reconstructed from names.
             el('partsText').value='';
             el('partsUpload').onchange=e=>{const file=e.target.files?.[0];if(!file)return;const r=new FileReader();r.onload=x=>{el('partsText').value=String(x.target.result||'').trim();};r.readAsText(file);};
@@ -280,6 +279,7 @@ window.ProjectPlanner = (() => {
                 let entries=resolveDuplicateEntries(parsed.entries).map(entry=>({...entry,id:makeId('task')}));
                 if(!entries.length)return alert('Please add at least one part.');
                 const skip=el('partsSkipSort').checked;
+                const defer=el('partsDeferEstimates').checked;
                 el('partsContinue').disabled=true;
                 if(!skip){
                     clearShell();show(el('taskCompare'));
@@ -288,13 +288,15 @@ window.ProjectPlanner = (() => {
                     hide(el('taskCompare'));
                     if(run!==sortRunId)return;
                 }
-                collectMissingEstimates(entries,async()=>{
+                const persistParts=async()=>{
                     try{
                         clearShell().textContent='Saving project parts…';
                         for(let i=0;i<entries.length;i++) await createNode({...entries[i],nodeType:'task',parentId,sessionId,position:children.length+i+1});
                         await showSummary(currentProjectId);
+                        const offer=document.createElement('p');offer.textContent='You can break down any part further with Edit Project → Edit → Add subtask, or keep it as one task.';el('summaryTree').prepend(offer);
                     }catch(error){fail(error,()=>showPartsEntry(parentId));}
-                },()=>showPartsEntry(parentId));
+                };
+                if(defer)await persistParts();else collectMissingEstimates(entries,persistParts,()=>showPartsEntry(parentId));
             };
             el('partsBack').onclick=()=>showSummary(currentProjectId); saveUi();
         } catch(error){fail(error,showProjects);}
@@ -314,8 +316,8 @@ window.ProjectPlanner = (() => {
         try {
             const {node}=await getNode(nodeId); activeNodeId=nodeId; view='estimate-task'; const c=clearShell();
             c.innerHTML=`<h2>${esc(node.name)}</h2><label>How long do you think this will take?<input id="nodeEstimate" type="number" min="1" placeholder="Minutes"></label><label class="planner-check"><input id="nodeOutOfOrder" type="checkbox"><span>This task is out of order</span></label><label class="planner-check"><input id="nodeHasParts" type="checkbox"><span>This task has parts</span></label><button id="estimateContinue">Continue</button><button id="estimateBack">Back</button>`;
-            if(node.estimated_ms)el('nodeEstimate').value=Math.round(node.estimated_ms/60000);
-            el('estimateContinue').onclick=async()=>{try{const minutes=parseInt(el('nodeEstimate').value,10);if(!Number.isFinite(minutes)||minutes<1)return alert('Enter an estimate in minutes.');const hasParts=el('nodeHasParts').checked;const outOfOrder=el('nodeOutOfOrder').checked;await updateNode(nodeId,{estimatedTimeMs:minutes*60000});pendingHasParts=hasParts;if(outOfOrder)return showReorder(nodeId,hasParts);if(hasParts)return convertToSubproject(nodeId);if(minutes>PROJECT_THRESHOLD_MINUTES)return showSubprojectCallout(nodeId);advanceEstimate(node.parent_id,nodeId);}catch(error){fail(error,()=>showEstimate(nodeId));}};
+            if(node.estimated_ms)el('nodeEstimate').value=node.estimated_ms/60000;
+            el('estimateContinue').onclick=async()=>{try{const minutes=Number(el('nodeEstimate').value);if(!Number.isFinite(minutes)||minutes<1)return alert('Enter an estimate in minutes.');const hasParts=el('nodeHasParts').checked;const outOfOrder=el('nodeOutOfOrder').checked;await updateNode(nodeId,{estimatedTimeMs:Math.round(minutes*60000)});pendingHasParts=hasParts;if(outOfOrder)return showReorder(nodeId,hasParts);if(hasParts)return convertToSubproject(nodeId);if(minutes>PROJECT_THRESHOLD_MINUTES)return showSubprojectCallout(nodeId);advanceEstimate(node.parent_id,nodeId);}catch(error){fail(error,()=>showEstimate(nodeId));}};
             el('estimateBack').onclick=()=>showPartsEntry(node.parent_id); saveUi();
         } catch(error){fail(error,()=>showPartsEntry(currentParentId));}
     }
@@ -326,13 +328,13 @@ window.ProjectPlanner = (() => {
 
     async function showReorder(nodeId,hasParts) {
         try {
-            const {node}=await getNode(nodeId);const {children}=await getNode(node.parent_id);view='reorder-task';const c=clearShell();c.innerHTML=`<h2>Where should this task go?</h2><div id="orderList"></div><div class="planner-moving">${esc(node.name)}</div><button id="orderBack">Back</button>`;const list=el('orderList');const others=children.filter(ch=>ch.id!==nodeId);for(let i=0;i<=others.length;i++){const b=document.createElement('button');b.textContent=i===others.length?'Move to end':`Move before ${others[i].name}`;b.onclick=async()=>{for(let j=0;j<others.length;j++)await updateNode(others[j].id,{position:j+(j>=i?2:1)});await updateNode(nodeId,{position:i+1});if(hasParts)return convertToSubproject(nodeId);const mins=Math.round(Number(node.estimated_ms||0)/60000);if(mins>PROJECT_THRESHOLD_MINUTES)return showSubprojectCallout(nodeId);advanceEstimate(node.parent_id,nodeId);};list.appendChild(b);}el('orderBack').onclick=()=>showEstimate(nodeId);saveUi();
+            const {node}=await getNode(nodeId);const {children}=await getNode(node.parent_id);view='reorder-task';const c=clearShell();c.innerHTML=`<h2>Where should this task go?</h2><div id="orderList"></div><div class="planner-moving">${esc(node.name)}</div><button id="orderBack">Back</button>`;const list=el('orderList');const others=children.filter(ch=>ch.id!==nodeId);for(let i=0;i<=others.length;i++){const b=document.createElement('button');b.textContent=i===others.length?'Move to end':`Move before ${others[i].name}`;b.onclick=async()=>{for(let j=0;j<others.length;j++)await updateNode(others[j].id,{position:j+(j>=i?2:1)});await updateNode(nodeId,{position:i+1});if(hasParts)return convertToSubproject(nodeId);const mins=Number(node.estimated_ms||0)/60000;if(mins>PROJECT_THRESHOLD_MINUTES)return showSubprojectCallout(nodeId);advanceEstimate(node.parent_id,nodeId);};list.appendChild(b);}el('orderBack').onclick=()=>showEstimate(nodeId);saveUi();
         } catch(error){fail(error,()=>showEstimate(nodeId));}
     }
 
     async function showSubprojectCallout(nodeId) {
         try {
-            const {node}=await getNode(nodeId);view='subproject-callout';const c=clearShell();c.innerHTML=`<div class="planner-callout"><h2>This may be a project</h2><p>${esc(node.name)}</p><p>Estimated time: ${Math.round(node.estimated_ms/60000)} minutes</p><div class="planner-choice-grid"><button id="breakParts">Break Into Parts</button><button id="keepTask">Keep As One Task</button></div></div>`;el('breakParts').onclick=()=>convertToSubproject(nodeId);el('keepTask').onclick=()=>advanceEstimate(node.parent_id,nodeId);saveUi();
+            const {node}=await getNode(nodeId);view='subproject-callout';const c=clearShell();c.innerHTML=`<div class="planner-callout"><h2>This may be a project</h2><p>${esc(node.name)}</p><p>Estimated time: ${node.estimated_ms/60000} minutes</p><div class="planner-choice-grid"><button id="breakParts">Break Into Parts</button><button id="keepTask">Keep As One Task</button></div></div>`;el('breakParts').onclick=()=>convertToSubproject(nodeId);el('keepTask').onclick=()=>advanceEstimate(node.parent_id,nodeId);saveUi();
         } catch(error){fail(error,()=>showEstimate(nodeId));}
     }
 
@@ -340,7 +342,7 @@ window.ProjectPlanner = (() => {
 
     async function showSummary(projectId) {
         try {
-            currentProjectId=projectId;view='summary';const full=findInTree(await tree(),projectId);if(!full)return showProjects();const s=leafStats(full);const c=clearShell();c.innerHTML=`<h2>${esc(full.name)}</h2><p>Planned estimate: ${Math.round(s.ms/60000)} minutes</p><div id="summaryTree"></div><div class="planner-choice-grid"><button id="editProject">Edit Project</button><button id="summaryDone">Done</button></div>`;const render=(node,depth=0)=>{const div=document.createElement('div');div.style.marginLeft=`${depth*20}px`;div.textContent=`${node.name}${node.children?.length?'':` — ${Math.round(Number(node.estimated_ms||0)/60000)} min`}`;el('summaryTree').appendChild(div);(node.children||[]).forEach(ch=>render(ch,depth+1));};(full.children||[]).forEach(ch=>render(ch));el('editProject').onclick=()=>window.ProjectEditor.open(projectId,{origin:showProjects});el('summaryDone').onclick=()=>returnTarget==='backlog-list'?showBacklogList():returnTarget==='projects-list'?showProjects():showPlannerHome();saveUi();
+            currentProjectId=projectId;view='summary';const full=findInTree(await tree(),projectId);if(!full)return showProjects();const s=leafStats(full);const c=clearShell();c.innerHTML=`<h2>${esc(full.name)}</h2><p>Planned estimate: ${s.ms/60000} minutes</p><div id="summaryTree"></div><div class="planner-choice-grid"><button id="editProject">Edit Project</button><button id="summaryDone">Done</button></div>`;const render=(node,depth=0)=>{const div=document.createElement('div');div.style.marginLeft=`${depth*20}px`;div.textContent=`${node.name}${node.children?.length?'':` — ${Number(node.estimated_ms||0)/60000} min`}`;el('summaryTree').appendChild(div);(node.children||[]).filter(ch=>ch.status!=='cancelled').forEach(ch=>render(ch,depth+1));};(full.children||[]).filter(ch=>ch.status!=='cancelled').forEach(ch=>render(ch));el('editProject').onclick=()=>window.ProjectEditor.open(projectId,{origin:showProjects});el('summaryDone').onclick=()=>returnTarget==='backlog-list'?showBacklogList():returnTarget==='projects-list'?showProjects():showPlannerHome();saveUi();
         } catch(error){fail(error,showProjects);}
     }
 

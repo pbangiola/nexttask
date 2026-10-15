@@ -244,7 +244,7 @@ test('add task persists before queue use, Stop checklist ends session with no op
     await page.getByRole('button', { name: 'Add New Task' }).click();
     await page.waitForSelector('#addTaskPage');
     await page.locator('#addTaskPage input').fill('Added, 1m');
-    await page.getByRole('button', { name: 'Choose Priority' }).click();
+    await page.getByRole('button', { name: 'Choose Work Position' }).click();
     await page.getByRole('button', { name: 'Do this next' }).click();
     await page.waitForSelector('#focusScreen'); await idle(page);
     const added = raw.prepare("SELECT * FROM tasks WHERE user_id=? AND name='Added'").get(owner);
@@ -516,7 +516,10 @@ test('reload during sorting retains canonical tasks and acknowledged overhead wi
     await page.waitForSelector('#taskCompare'); await idle(page);
     const original = raw.prepare("SELECT * FROM tasks WHERE user_id=? AND name!='Sort Tasks' ORDER BY position").all(owner);
     const overhead = raw.prepare("SELECT * FROM tasks WHERE user_id=? AND name='Sort Tasks'").get(owner);
-    await page.reload(); await page.waitForSelector('#dashboardScreen'); await idle(page);
+    await page.reload(); await page.waitForSelector('#dashboardScreen').catch(async error=>{
+        console.error('Sorting reload diagnostics',await page.evaluate(()=>({mode:window.taskSorterMode,screen:document.getElementById('dynamicContainer')?.textContent})));
+        throw error;
+    }); await idle(page);
     const recovered = raw.prepare('SELECT * FROM tasks WHERE id=?').get(overhead.id);
     assert.equal(recovered.status, 'completed'); assert.equal(recovered.elapsed_ms, overhead.elapsed_ms);
     assert.equal(recovered.independently_actionable, 0);

@@ -126,7 +126,7 @@ test('B1: sorting tears down an outgoing timing screen and markup has no literal
 });
 test('B2: untimed add and blocker collect estimates before durable insertion, cancel resumes safely',async t=>{
     const {page,owner}=await pageFor(t); await newList(page); await idle(page);
-    await page.getByRole('button',{name:'Add New Task'}).click(); await page.locator('#addTaskPage input').fill('Untimed'); await page.getByRole('button',{name:'Choose Priority'}).click();
+    await page.getByRole('button',{name:'Add New Task'}).click(); await page.locator('#addTaskPage input').fill('Untimed'); await page.getByRole('button',{name:'Choose Work Position'}).click();
     await page.waitForSelector('#timingEntryScreen'); assert.equal(raw.prepare("SELECT COUNT(*) n FROM tasks WHERE user_id=? AND name='Untimed'").get(owner).n,0);
     await page.getByRole('button',{name:'Cancel',exact:true}).click(); await page.waitForSelector('#focusScreen'); await idle(page);
     await page.getByRole('button',{name:'Blocked',exact:true}).click(); await page.locator('#blockedTaskScreen input').fill('Prerequisite'); await page.getByRole('button',{name:'Add Blocker and Requeue Both'}).click();
@@ -173,7 +173,7 @@ test('B8: project context never follows a standalone active task, including reco
     const {page,owner}=await pageFor(t); await fixture(owner);
     await page.getByRole('button',{name:'Work',exact:true}).click(); await page.locator('#resumeExistingListBtn').click(); await page.getByRole('button',{name:"No, I don't have a set stop time."}).click(); await page.getByRole('button',{name:'Oars —',exact:false}).click(); await page.getByRole('button',{name:'Start This Project'}).click(); await page.waitForSelector('#focusScreen'); await idle(page);
     assert.match(await page.locator('.project-work-toolbar').textContent(),/Oars/);
-    await page.getByRole('button',{name:'Add New Task'}).click(); await page.locator('#addTaskPage input').fill('Standalone, 1m'); await page.getByRole('button',{name:'Choose Priority'}).click(); await page.getByRole('button',{name:'Do this next'}).click(); await page.waitForSelector('#focusScreen'); await idle(page);
+    await page.getByRole('button',{name:'Add New Task'}).click(); await page.locator('#addTaskPage input').fill('Standalone, 1m'); await page.getByRole('button',{name:'Choose Work Position'}).click(); await page.getByRole('button',{name:'Do this next'}).click(); await page.waitForSelector('#focusScreen'); await idle(page);
     await page.getByRole('button',{name:'Done, Next!'}).click(); await page.waitForFunction(()=>document.querySelector('#focusScreen h2')?.textContent.includes('Standalone')); await idle(page);
     assert.equal(await page.locator('.project-work-toolbar').count(),0);
     await page.reload(); await page.waitForSelector('#dashboardScreen'); await idle(page); await page.getByRole('button',{name:'Get to Work',exact:true}).click(); await page.waitForSelector('#focusScreen'); assert.equal(await page.locator('.project-work-toolbar').count(),0);
@@ -193,7 +193,7 @@ test('B1/B3 full untimed work journey sorts one screen, estimates only missing e
 });
 test('B2 untimed Add Task and project Add Task await the shared estimate continuation',async t=>{
     const {page,owner}=await pageFor(t);await newList(page);await idle(page);
-    await page.getByRole('button',{name:'Add New Task'}).click();await page.locator('#addTaskPage input').fill('Inserted');await page.getByRole('button',{name:'Choose Priority'}).click();await page.locator('#timingEntryScreen input').fill('4');await page.getByRole('button',{name:'Save & Continue'}).click();
+    await page.getByRole('button',{name:'Add New Task'}).click();await page.locator('#addTaskPage input').fill('Inserted');await page.getByRole('button',{name:'Choose Work Position'}).click();await page.locator('#timingEntryScreen input').fill('4');await page.getByRole('button',{name:'Save & Continue'}).click();
     assert.equal(raw.prepare("SELECT COUNT(*) n FROM tasks WHERE user_id=? AND name='Inserted'").get(owner).n,0);
     await page.getByRole('button',{name:'Do this next'}).click();await page.waitForSelector('#focusScreen');await idle(page);assert.equal(raw.prepare("SELECT estimated_ms FROM tasks WHERE user_id=? AND name='Inserted'").get(owner).estimated_ms,240000);
     await page.locator('#stopWorkingBtn').click();await page.getByRole('button',{name:'End Work Session'}).click();await page.waitForSelector('#dashboardScreen');await idle(page);

@@ -153,7 +153,7 @@ function renderFocus(task){
     if (hasHardStop() && Date.now() >= hardStopAtMs) { handleHardStop(); return; }
     startHardStopWatch();
     ensureTask(task); hideStaticScreens(); hide(el('startOverBtn')); show(el('stopWorkingBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='focusScreen';
-    appendProjectToolbar(screen, task); const heading=document.createElement('h2'); heading.textContent=`Current Task: ${task.name}`; const timer=document.createElement('p'); timer.id='timer'; timer.style.fontSize='24px'; timer.style.fontWeight='bold';
+    appendProjectToolbar(screen, task); appendParentSnooze(screen,true); const heading=document.createElement('h2'); heading.textContent=`Current Task: ${task.name}`; const timer=document.createElement('p'); timer.id='timer'; timer.style.fontSize='24px'; timer.style.fontWeight='bold';
     function renderTimer(){checkpointTask(task);const remaining=task.estimatedTimeMs-task.actualTimeMs;timer.style.color=remaining>=0?'green':'red';timer.textContent=remaining>=0?`${formatDuration(remaining)} remaining`:`${formatDuration(remaining)} overdue`;saveLocal('focus');}
     const done=document.createElement('button'); done.textContent='Done, Next!'; done.onclick=()=>{const action=window.FocusDurability.done(task);if(action)done.disabled=true;};
     const blocked=document.createElement('button'); blocked.textContent='Blocked'; blocked.onclick=()=>{window.FocusDurability.pause(task,()=>showBlockedFlow(task));};
@@ -177,7 +177,7 @@ function showBlockedFlow(blockedTask){
 function showAddTask(activeTask){
     hideStaticScreens(); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='addTaskPage';
     const heading=document.createElement('h2'); heading.textContent='Add a Task'; const input=document.createElement('input'); input.placeholder='Task name; optional time, e.g. Call Sam, 10m';
-    const choose=document.createElement('button'); choose.textContent='Choose Priority'; choose.onclick=()=>{
+    const choose=document.createElement('button'); choose.textContent='Choose Work Position'; choose.onclick=()=>{
         const parsed=parseTaskEntries(input.value);
         if(parsed.invalid.length||parsed.entries.length!==1)return alert('Enter one task.');
         const entry=parsed.entries[0], task=createTask(entry.name,entry);
@@ -335,8 +335,39 @@ function showSequentialTiming(startIndex = 0) {
     saveLocal('timing-entry');
 }
 
-function appendProjectToolbar(screen, task = currentTask()){const ctx=window.currentWorkProjectContext;if(!ctx||!screen||!task?.projectAncestorIds?.includes(ctx.id))return;const bar=document.createElement('div');bar.className='project-work-toolbar';const elapsed=Math.max(0,Date.now()-Number(ctx.startedAtMs||Date.now())),remaining=Math.max(0,Number(ctx.estimatedMs||0)-elapsed),deadline=Number(ctx.deadlineAtMs||0),deadlineText=deadline?formatDuration(deadline-Date.now(),true)+(deadline>=Date.now()?' until deadline':' past deadline'):'No project deadline';bar.textContent=`${ctx.name} • elapsed ${formatDuration(elapsed,true)} • remaining ${formatDuration(remaining,true)} • ${deadlineText} • ${new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}`;screen.appendChild(bar);}
-function showDashboard(){hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic(),screen=document.createElement('div');screen.id='dashboardScreen';const heading=document.createElement('h2');heading.textContent='Your Task List';screen.appendChild(heading);appendProjectToolbar(screen);const list=document.createElement('ol');let lastPath=null;sortedTasks.forEach(task=>{ensureTask(task);if(task.projectPath&&task.projectPath!==lastPath){const h=document.createElement('li');h.className='project-list-header';h.textContent=task.projectPath;list.appendChild(h);lastPath=task.projectPath;}const item=document.createElement('li'),estimate=task.estimatedTimeMs?` — ${Math.round(task.estimatedTimeMs/60000)} min`:'',state=task.completed?' ✓':task.status==='blocked'?' — blocked':'';item.textContent=`${task.name}${estimate}${state}`+(task.status==='blocked'?' — prerequisite must finish before Focus':'');list.appendChild(item);});screen.appendChild(list);const capacity=document.createElement('p');capacity.textContent=`Allocated: ${Math.round(allocatedTimeMs()/60000)} minutes`+(totalAvailableTimeMs?` of ${Math.round(totalAvailableTimeMs/60000)} available`:'');screen.appendChild(capacity);const b=document.createElement('button');b.textContent='Get to Work';b.onclick=beginWork;if(incompleteTasks().length&&!firstIncompleteTask()){b.disabled=true;const note=document.createElement('p');note.id='blockedOnlyState';note.textContent='No executable work: remaining tasks are blocked or not independently actionable. Finish the prerequisite or select a backlog containing it.';screen.appendChild(note);}const ex=document.createElement('button');ex.textContent='Download Task List';ex.onclick=exportCsv;screen.append(b,ex);container.appendChild(screen);save('dashboard');}
+function appendParentSnooze(screen,resume=false) {
+    const parents=(window.ProjectQueue?.parents(sortedTasks)||[]).filter(parent=>!resume||currentTask()?.projectAncestorIds?.includes(parent.id));
+    if(!parents.length)return;
+    const controls=document.createElement('div');controls.className='parent-snooze-controls';
+    for(const parent of parents){
+        const button=document.createElement('button');button.textContent=`Snooze ${parent.name}`;
+        button.dataset.snoozeParent=parent.id;button.disabled=!parent.canSnooze||!window.activeWorkSessionId;
+        button.title='Move this parent and its remaining children one peer later in the Work queue. Importance and child order stay unchanged.';
+        button.onclick=()=>{const action=window.FocusDurability.snooze(parent.id,resume);if(action)button.disabled=true;};controls.appendChild(button);
+    }
+    screen.appendChild(controls);
+}
+function appendProjectToolbar(screen, task = currentTask()) {
+    const ctx=window.currentWorkProjectContext;
+    if(!ctx||!screen||!task?.projectAncestorIds?.includes(ctx.id))return;
+    const bar=document.createElement('div');bar.className='project-work-toolbar';
+    bar.textContent=`${ctx.name} • Loading saved project timing…`;screen.appendChild(bar);
+    // A project wall clock includes pauses/navigation and is not acknowledged
+    // actual. Read the same backend aggregate used by the editor; do not create
+    // a second project timer or block the existing task clock on this read.
+    (async()=>{
+        try {
+            if(window.TaskGraph.pending())await window.TaskGraph.flush();
+            const {node,progress}=await window.TaskGraph.request(`/users/${encodeURIComponent(userId)}/nodes/${encodeURIComponent(ctx.id)}`);
+            if(!bar.isConnected||window.currentWorkProjectContext!==ctx)return;
+            bar.dataset.estimatedMs=String(node.estimated_ms);bar.dataset.elapsedMs=String(node.elapsed_ms);
+            const remaining=progress.remainingEstimateMs==null?'Unestimated':formatDuration(progress.remainingEstimateMs,true);
+            bar.textContent=`${node.name} • planned ${formatDuration(node.estimated_ms,true)} • saved actual ${formatDuration(node.elapsed_ms,true)} • saved remaining ${remaining}`;
+        } catch(_) { if(bar.isConnected)bar.textContent=`${ctx.name} • Saved project timing unavailable.`; }
+    })();
+}
+
+function showDashboard(){hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic(),screen=document.createElement('div');screen.id='dashboardScreen';const heading=document.createElement('h2');heading.textContent='Your Task List';screen.appendChild(heading);appendProjectToolbar(screen);appendParentSnooze(screen);const list=document.createElement('ol');let lastPath=null;sortedTasks.forEach(task=>{ensureTask(task);if(task.projectPath&&task.projectPath!==lastPath){const h=document.createElement('li');h.className='project-list-header';h.textContent=task.projectPath;list.appendChild(h);lastPath=task.projectPath;}const item=document.createElement('li'),estimate=task.estimatedTimeMs?` — ${Math.round(task.estimatedTimeMs/60000)} min`:'',state=task.completed?' ✓':task.status==='blocked'?' — blocked':'';item.textContent=`${task.name}${estimate}${state}`+(task.status==='blocked'?' — prerequisite must finish before Focus':'');list.appendChild(item);});screen.appendChild(list);const capacity=document.createElement('p');capacity.textContent=`Allocated: ${Math.round(allocatedTimeMs()/60000)} minutes`+(totalAvailableTimeMs?` of ${Math.round(totalAvailableTimeMs/60000)} available`:'');screen.appendChild(capacity);const b=document.createElement('button');b.textContent='Get to Work';b.onclick=beginWork;if(incompleteTasks().length&&!firstIncompleteTask()){b.disabled=true;const note=document.createElement('p');note.id='blockedOnlyState';note.textContent='No executable work: remaining tasks are blocked or not independently actionable. Finish the prerequisite or select a backlog containing it.';screen.appendChild(note);}const ex=document.createElement('button');ex.textContent='Download Task List';ex.onclick=exportCsv;screen.append(b,ex);container.appendChild(screen);save('dashboard');}
 
 function showCompletion(){
     hideStaticScreens();hide(el('stopWorkingBtn'));show(el('startOverBtn'));const container=clearDynamic();const screen=document.createElement('div');screen.id='completionScreen';

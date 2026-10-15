@@ -51,7 +51,7 @@ for (const hasResetMarker of [true,false]) {
             assert.deepEqual(migrated.tasks,before.tasks);
             assert.deepEqual(migrated.sessions,before.sessions);
             assert.deepEqual(migrated.markers,before.markers);
-            assert.deepEqual(migrated.schema,[{version:2},{version:3}]);
+            assert.deepEqual(migrated.schema,[{version:2},{version:3},{version:5}]);
             assert.deepEqual(migrated.violations,[]);
             const restarted = run(directory, `
                 require('./backend/database');require('./backend/user-store');
