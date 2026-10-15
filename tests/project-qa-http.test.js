@@ -150,3 +150,24 @@ test('editing active work cannot silently abandon its interval; paused decomposi
     // Acknowledged actual is canonical; do not infer an extra second from audit intervals.
     raw.prepare('UPDATE tasks SET elapsed_ms=5000 WHERE id=?').run('guard-leaf');await create(owner,'guard-child','task','guard-leaf',1);assert.equal(node('guard-leaf').elapsed_ms,5000);assert.equal(node('guard-leaf').own_elapsed_ms,5000);
 });
+test('parent ranking compares siblings only, preserves child rankings, and keeps deadlines independent',async()=>{
+    const owner='parent_rank';await create(owner,'rank-parent','project');await create(owner,'rank-peer','task',null,2);
+    await create(owner,'rank-child-a','task','rank-parent',5);await create(owner,'rank-child-b','task','rank-parent',10);
+    const roots=await json('/priorities','GET',undefined,owner);assert.deepEqual(roots.items.map(n=>n.id),['rank-parent','rank-peer']);
+    await json('/priorities/rank','PUT',{parentId:'rank-parent',taskIds:['rank-child-b','rank-child-a']},owner);
+    const before=raw.prepare('SELECT * FROM task_priorities WHERE task_id IN (?,?) ORDER BY task_id').all('rank-child-a','rank-child-b');
+    await json('/priorities/rank','PUT',{taskIds:['rank-peer','rank-parent']},owner);await json('/priorities/rank-parent','PUT',{dueAt:1234567890000},owner);
+    assert.deepEqual(raw.prepare('SELECT * FROM task_priorities WHERE task_id IN (?,?) ORDER BY task_id').all('rank-child-a','rank-child-b'),before);
+    const ranked=await json('/priorities','GET',undefined,owner);assert.equal(ranked.items.find(n=>n.id==='rank-parent').importance_rank,2);assert.equal(ranked.items.find(n=>n.id==='rank-parent').due_at,1234567890000);
+    const invalid=await request('/api/users/'+owner+'/priorities/rank',owner,'PUT',{taskIds:['rank-child-a','rank-peer']});assert.equal(invalid.status,400);
+    const foreign=await request('/api/users/'+owner+'/priorities?parentId=rank-parent','other');assert.equal(foreign.status,403);
+});
+test('never-parent nodes stay pending until explicit completion; last completed child completes ancestors, deletion alone does not',async()=>{
+    const owner='parent_completion';await create(owner,'never-parent','project');await create(owner,'plain-leaf','task',null,1);
+    raw.prepare('UPDATE tasks SET elapsed_ms=99999999 WHERE id=?').run('plain-leaf');await json('/nodes','GET',undefined,owner);
+    assert.equal(node('never-parent').status,'pending');assert.equal(node('plain-leaf').status,'pending');
+    await create(owner,'complete-top','project');await create(owner,'complete-nested','project','complete-top');await create(owner,'complete-last','task','complete-nested',1);
+    await json('/nodes/complete-last','PUT',{status:'completed'},owner);assert.equal(node('complete-nested').status,'completed');assert.equal(node('complete-top').status,'completed');
+    await create(owner,'delete-only-parent','project');await create(owner,'delete-only-child','task','delete-only-parent',1);await json('/nodes/delete-only-child','DELETE',undefined,owner);
+    assert.equal(node('delete-only-parent').status,'pending','removing all children is not marking the last child complete');
+});

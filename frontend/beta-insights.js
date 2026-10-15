@@ -7,7 +7,7 @@ window.BetaInsights = (() => {
     let generation = 0;
     const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
     function flatten(tree,out=[]) {for(const row of tree){out.push(row);flatten(row.children||[],out);}return out;}
-    function remaining(row) {const estimate=Number(row.estimated_ms);return Number.isFinite(estimate)&&estimate>0?Math.max(0,estimate-Number(row.elapsed_ms||0)):null;}
+    function remaining(row) {if(row.node_type==='project'&&'remaining_estimate_ms' in row)return row.remaining_estimate_ms;const estimate=Number(row.estimated_ms);return Number.isFinite(estimate)&&estimate>0?Math.max(0,estimate-Number(row.elapsed_ms||0)):null;}
     function slack(row,now=Date.now()) {const duration=remaining(row);return row.due_at == null || duration == null ? null : row.due_at - duration - now;}
     function labelItems(items,tree) {
         const nodes=new Map(flatten(tree).map(row=>[row.id,row]));
@@ -25,7 +25,7 @@ window.BetaInsights = (() => {
         if(window.taskSorterMode==='guest') {
             const {nodes}=await window.TaskGraph.request(`/users/${encode(userId)}/nodes?tree=1`);
             const metadata=JSON.parse(localStorage.getItem('nexttaskGuestPriorities_v1')||'{}');
-            return {tree:nodes,items:labelItems(flatten(nodes).filter(row=>row.independently_actionable===1 && ['pending','active','blocked'].includes(row.status)).map(row=>({...row,...metadata[row.id]})),nodes)};
+            return {tree:nodes,items:labelItems(nodes.filter(row=>(row.node_type==='project'||row.independently_actionable===1)&&['pending','active','blocked'].includes(row.status)).map(row=>({...row,...metadata[row.id]})),nodes)};
         }
         const [tree,priorities]=await Promise.all([window.TaskGraph.request(`/users/${encode(userId)}/nodes?tree=1`),window.TaskGraph.request(`/users/${encode(userId)}/priorities`)]);
         return {tree:tree.nodes,items:labelItems(priorities.items,tree.nodes)};
@@ -81,7 +81,7 @@ window.BetaInsights = (() => {
         try {
             const {items}=await load();if(current!==generation)return;container.lastChild.remove();
             const ordered=[...items].sort((a,b)=>(a.importance_rank??Infinity)-(b.importance_rank??Infinity));
-            const note=document.createElement('p');note.textContent=`Proposal scope: open independently actionable tasks, including blocked tasks. No inferred project importance. Remaining = max(estimate − acknowledged actual, 0). Latest start = due − remaining; slack = latest start − now. Timezone: ${zone()}. Missing dates, estimates or ranks stay unspecified; zero estimate means unestimated. This view does not change Focus order.`;container.appendChild(note);
+            const note=document.createElement('p');note.textContent=`Scope: open root tasks and parents, including blocked tasks. Compare parents with their peers; their children keep their own order and are not re-ranked. No inferred parent importance. Remaining = max(estimate − acknowledged actual, 0). Latest start = due − remaining; slack = latest start − now. Timezone: ${zone()}. Missing dates, estimates or ranks stay unspecified; zero estimate means unestimated. This view does not change Focus order.`;container.appendChild(note);
             const compare=document.createElement('button');compare.textContent='Rank importance pairwise';compare.id='rankImportance';compare.disabled=ordered.length<2;
             compare.onclick=async()=>{let cancel;const header=el('taskCompare').querySelector('h2');try{const comparison=shell('Choose the more important task');header.textContent='Which task is more important?';const run=++sortRunId;cancel=document.createElement('button');cancel.id='cancelImportance';cancel.textContent='Cancel importance ranking';cancel.onclick=()=>{++sortRunId;hide(el('taskCompare'));header.textContent='Which task comes first?';matrix();};comparison.appendChild(cancel);const ranked=await interactiveMergeSort(ordered.map(row=>({...row,name:row.displayName||row.name})),run);if(run!==sortRunId)return;hide(el('taskCompare'));header.textContent='Which task comes first?';await rank(ranked.map(row=>row.id));await matrix();}catch(error){hide(el('taskCompare'));header.textContent='Which task comes first?';alert(error.message);matrix();}finally{cancel?.remove();}};
             container.appendChild(compare);

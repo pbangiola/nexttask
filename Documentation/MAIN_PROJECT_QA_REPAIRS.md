@@ -58,8 +58,10 @@ from remaining executable work. Reconciliation is the single backend aggregate
 writer, in the same transaction as graph mutation. No independent frontend
 project-total calculation is introduced.
 
-Parent completion: preserve automatic completion when historical children have
-no open descendants. A newly added/reopened open child reopens completed
+Parent completion (approved follow-up): a node that has never had children stays
+pending until explicitly completed. A parent completes when all of its non-deleted
+children are completed; completion propagates through ancestors. Deleting every
+child does not itself mark a pending parent complete. A newly added/reopened open child reopens completed
 ancestors, not siblings. Explicit completion of a parent with open descendants
 is rejected instead of silently cascading. Cancelled parents must be restored
 before adding work. Timing-active leaf conversion/completion/deletion requires
@@ -77,9 +79,9 @@ remaining decisions are recorded below as the run completes. No automatic merge.
 | Project discovery (query + UI) | Open-only roots, frontend completed filtering and a DOM observer removed empty/completed project cards. Work selection relied on open-project filtering. | Non-deleted root projects, including empty and completed, are discoverable. Resume reads the authenticated tree afresh. Completed projects remain manageable while Start is disabled when there is no unfinished work. |
 | Recursive editing (UI + validation) | Only project nodes could own children; leaf editor had no route to decomposition. | Every canonical editor exposes Add subtask. First-child insertion promotes the same task ID inside the insertion transaction. Repeated nesting uses the same editor, with existing children visible. A nonblocking opportunity after insertion offers further decomposition or Keep as one task. |
 | Estimate edit/delete (aggregate + UI) | Cancelled estimates were included; no-child containers skipped rollup; leaf editor rejected missing estimates and some minute inputs truncated decimals. | Non-deleted children determine derived estimates, including zero after the last removal/move. All ancestors update before acknowledgment. Optional zero/untimed estimates can be edited and deferred; input converts once to integer ms without whole-minute truncation. |
-| Child completion (API + discovery) | Canonical edit ignored status; child queries hid completed rows; completed ancestors were never reopened on new work. | Explicit Complete/Reopen writes one node. Siblings stay unchanged. Completed children remain visible; progress/remaining estimates are read from the backend. Existing automatic parent completion is retained, and new open descendants reopen completed ancestors. |
+| Child completion (API + discovery) | Canonical edit ignored status; child queries hid completed rows; completed ancestors were never reopened on new work. | Explicit Complete/Reopen writes one node. Siblings stay unchanged. Completed children remain visible; progress/remaining estimates are read from the backend. Last-child completion propagates to ancestors, empty nodes never auto-complete, and new open descendants reopen completed ancestors. |
 | Cross-project editing (graph mutation) | UI multi-selection/group/insertion/sorting performed independent requests; source-empty totals and completed-child ungrouping were incorrect. | Shared editor uses transactional batch operations. Move preserves subtree IDs, relationships, estimates, actuals and completion. Group/ungroup/undo retain completed history. Invalid/cyclic/foreign operations roll back, including earlier steps in a batch. |
-| Priority dimensions (labels + formula) | Choose Priority meant insertion position; missing duration was treated as zero in urgency. | Label is Choose Work Position; legacy root grouping metadata is named projectRootId. Importance remains user pairwise ordinal order. Urgency uses due − max(estimate − acknowledged actual, 0) − now only when date and estimate exist. No third independent input, score, weighting formula or automatic queue replacement. |
+| Priority dimensions (labels + formula) | Choose Priority meant insertion position; missing duration was treated as zero in urgency. | Label is Choose Work Position; legacy root grouping metadata is named projectRootId. Importance remains user pairwise ordinal order of sibling tasks/parents; parent comparisons never expose their descendants. Urgency uses due − max(estimate − acknowledged actual, 0) − now only when date and estimate exist. No third independent input, score, weighting formula or automatic queue replacement. |
 
 Implementation files:
 - `backend/database.js`: additive schema 5, shared internal SQLite connection,
@@ -92,11 +94,11 @@ Implementation files:
   `frontend/project-editor.js`, `frontend/project-queue-filter.js`: consistent
   discovery, recursive editing, optional estimates, completed history and backend
   totals. The old filter asset remains as a harmless compatibility stub.
-- `frontend/ui.js`, `frontend/beta-insights.js`: position label, explicit missing
+- `frontend/ui.js`, `frontend/beta-insights.js`: parent Snooze controls, position label, explicit missing
   urgency inputs, and CSV summary that counts retained former-leaf actual once
   while excluding deleted estimates.
 - `frontend/auth.js`, `index.html`: shared cache release identifier only,
-  `20261015-project-qa-1`; authentication/credentials/routing are unchanged.
+  `20261015-project-qa-2`; authentication/credentials/routing are unchanged.
 - New project QA HTTP/browser/migration tests; inherited browser selectors updated
   solely for the position label, and the schema-version assertion includes 5.
   No inherited test is skipped or removed.
@@ -207,7 +209,7 @@ No credential changes or Docker steps are needed.
    Try moving into itself/descendants or another account: fail without partial edits.
    Group, ungroup, multi-select move, delete a subtree, and Undo; inspect both sides.
 6. Complete Fifteen from its parent editor. It remains visible as completed;
-   containers auto-complete only when no open descendants remain. Unrelated Ten
+   containers complete when all remaining non-deleted children are completed. Never-parent nodes remain pending until explicitly completed. Unrelated Ten
    stays pending. Reopen/add a child: ancestors reopen, siblings remain unchanged.
    Refresh and restart the local server; verify estimates/progress/status again.
 7. A project with all children completed and a newly created empty project must
@@ -236,9 +238,10 @@ No credential changes or Docker steps are needed.
 - Completed estimates stay in planned totals; deleted/cancelled estimates are
   excluded, while acknowledged deleted actual remains history. Cancellation and
   arbitrary multiple prerequisites retain their existing product-policy limits.
-- A decomposed node retains its priority/deadline record, but the existing optional
-  ranking scope remains open independently actionable leaves. No parent-importance
-  or deadline inheritance, optimizer, or weighting policy is introduced. Queue and
+- A decomposed node retains its priority/deadline record, but the approved optional
+  ranking scope is now sibling tasks and parents (roots by default). Children are
+  excluded from their parent's comparisons and retain their own order/metadata.
+  No deadline inheritance, optimizer, or weighting policy is introduced. Queue and
   hierarchy positions are user execution/structural intent, not a third score.
 - Destructive edits/completion/decomposition of a currently timed leaf/subtree
   require Pause/Stop first. This prevents abandoned intervals and does not alter
@@ -267,3 +270,72 @@ in isolation. A later verification exposed and fixed the toolbar's empty-journal
 integration issue. No failing tests were disabled, no timeouts were raised, and
 no timing/ordering assertions were removed. The final clean full run is the
 acceptance evidence; earlier failures are not presented as successful checks.
+
+## Approved follow-up: parent completion, peer ranking and Snooze
+
+The user resolved parent semantics after the initial repair PR:
+
+- Leaves and empty containers that never had children do not auto-complete from
+  estimates, elapsed time, a deadline or reconciliation. Running leaves may use
+  the existing `active` execution state; only a completion action marks them done.
+- Completing the last unfinished non-deleted child completes its parent and
+  ancestors whose own children are now all completed. Deleting all children from
+  a pending parent does not mark that parent complete. Adding/reopening work still
+  reopens ancestors and does not alter siblings.
+- Importance compares a parent with sibling parents/tasks, never that parent's
+  descendants. The optional view shows root peers by default. The owned API also
+  accepts an explicit `parentId` for one sibling scope; updates cannot include a
+  child from a different scope. Existing child importance metadata is untouched
+  by parent ranking, and legacy choices remain readable within their peer scope.
+- Optional Work sorting now compares selected peer roots as whole units, then
+  expands their children in canonical order for execution. Selecting just one
+  parent does not start another merge sort of its children. Explicit creation or
+  editor **Sort This Level** remains a direct user request to order that sibling
+  level; no recursive/global child reranking is performed.
+- **Snooze Parent** moves its whole block after exactly one next unfinished peer
+  task/parent. Child order, canonical positions, completion, estimates, deadlines,
+  and importance are unchanged. The final peer's button is disabled; no timestamp,
+  waiting period, numeric priority, or scheduling formula is added.
+- Work → Resume → **Review queue before starting** prepares a durable paused queue
+  with parent Snooze buttons before any interval starts. The project overview also
+  offers **Review this project's queue**. The existing immediate Start/Entire Task
+  List behavior stays available. Nested parents snooze among their own siblings.
+- During Focus, Snooze is offered for the current task's parent/ancestors. It stops
+  the captured current interval at the click boundary without completing the task,
+  persists the new queue through the existing action journal, then starts the next
+  eligible task only after acknowledgment. Review-screen Snooze stays paused.
+  Reload/lost-response retry reuses the captured mutation and restores paused.
+
+Additional changed files: `backend/task-priorities.js` and its owned routes;
+`frontend/project-queue.js` (pure queue projection, not another store), Work and
+Focus integration, UI/importance view, loader and public-asset allowlist. No new
+schema migration is required: the existing `task_priorities` table already keys
+all canonical node IDs and has `importance_scope`; work-session items persist
+queue rank independently. Existing data is neither reset nor reranked implicitly.
+
+Added regression coverage: sibling-only parent ranking and retained child ranks;
+never-parent pending status and last-child cascading completion; pure root/nested
+Snooze and final-peer handling; browser comparisons containing only peers; durable
+one-peer moves, active interval boundaries, unchanged importance/child completion,
+reload persistence, and lost-response replay. The prior optional-view test now
+uses two parent peers instead of treating one project's children as global peers.
+
+Follow-up manual QA: create parents P and Q with two children each, plus a root
+leaf R. Rank P/Q/R and confirm child names never appear as comparisons. Review
+queue P,Q,R; Snooze P gives Q,P,R, a second Snooze P gives Q,R,P, then P is disabled.
+Refresh and verify that order. Start Q and Snooze Q: R starts, Q's child remains
+unfinished with its actual time retained. Complete R, then both Q children; only
+then does Q complete, while P remains unfinished. Repeat with nested sibling
+parents and verify a lost save/reload recovers paused without duplicate intervals.
+
+Snooze counts executable peer units in the actual Work queue: completed history
+and blocked-only peers are retained but do not count as the one queued item to
+move past. A blocked-only or final parent cannot snooze until it has a next
+executable peer. Empty never-decomposed parents also have explicit Mark complete /
+Reopen controls in their shared editor; reconciliation alone leaves them pending.
+
+Follow-up local acceptance: **88/88 tests passed, zero failures and zero skips**
+on Node22.23.3/system Chromium154.0.8037.57, including the 78 earlier protections
+and 10 new parent/completion/queue regressions. The shared editor now exposes
+explicit empty-parent completion as well. Final syntax and whitespace checks pass;
+matched-browser CI for the follow-up commit is recorded in PR #77.

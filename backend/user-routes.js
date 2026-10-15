@@ -16,8 +16,8 @@ router.use('/users/:userId', (req, res, next) => {
 function badRequest(res,error){const message=error?.message||'Invalid request';const notFound=message.startsWith('Task node not found');return res.status(notFound?404:400).json({error:message});}
 
 const priorities = require('./task-priorities');
-router.get('/users/:userId/priorities',(req,res)=>{try{res.json(priorities.list(req.params.userId));}catch(error){badRequest(res,error);}});
-router.put('/users/:userId/priorities/rank',(req,res)=>{try{res.json(priorities.rank(req.params.userId,req.body?.taskIds));}catch(error){badRequest(res,error);}});
+router.get('/users/:userId/priorities',(req,res)=>{try{res.json(priorities.list(req.params.userId,req.query.parentId??null));}catch(error){badRequest(res,error);}});
+router.put('/users/:userId/priorities/rank',(req,res)=>{try{res.json(priorities.rank(req.params.userId,req.body?.taskIds,req.body?.parentId??null));}catch(error){badRequest(res,error);}});
 router.put('/users/:userId/priorities/:taskId',(req,res)=>{try{res.json({priority:priorities.setDue(req.params.userId,req.params.taskId,req.body?.dueAt)});}catch(error){badRequest(res,error);}});
 
 router.put('/users/:userId',(req,res)=>{try{userStore.ensureUser(req.params.userId);res.json({success:true,userId:req.params.userId});}catch(error){console.error('Failed to ensure user:',error);res.status(500).json({error:'Failed to save user',detail:error.message});}});

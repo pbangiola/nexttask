@@ -15,7 +15,7 @@
         return Number(ms || 0) / 60000;
     }
 
-    function taskFromLeaf(row, displayName, rootId, ancestorIds) {
+    function taskFromLeaf(row, displayName, rootId, ancestorIds, ancestorNames) {
         const task = createTask(displayName, {
             id: row.id,
             estimatedTimeMs: row.estimated_ms,
@@ -28,6 +28,7 @@
             blockedByTaskId: row.blocked_by_task_id
         });
         task.projectAncestorIds = [...ancestorIds];
+        task.projectAncestorNames = [...ancestorNames];
         task.canonicalName = row.name;
         task.parentId = row.parent_id ?? null;
         task.nodeType = row.node_type || 'task';
@@ -38,7 +39,7 @@
         return task;
     }
 
-    function flattenTree(nodes, prefix = '', rootId = null, out = [], ancestorIds = []) {
+    function flattenTree(nodes, prefix = '', rootId = null, out = [], ancestorIds = [], ancestorNames = []) {
         for (const node of nodes || []) {
             if (!isOpen(node)) continue;
             const displayName = prefix ? `${prefix}: ${node.name}` : node.name;
@@ -46,12 +47,12 @@
             const nodeRootId = rootId || node.id;
 
             if (children.length) {
-                flattenTree(children, displayName, nodeRootId, out, node.node_type==='project' ? [...ancestorIds,node.id] : ancestorIds);
+                flattenTree(children, displayName, nodeRootId, out, node.node_type==='project' ? [...ancestorIds,node.id] : ancestorIds,node.node_type==='project' ? [...ancestorNames,node.name] : ancestorNames);
                 continue;
             }
 
             if (node.node_type === 'project' || node.independently_actionable !== 1) continue;
-            out.push(taskFromLeaf(node, displayName, nodeRootId, ancestorIds));
+            out.push(taskFromLeaf(node, displayName, nodeRootId, ancestorIds, ancestorNames));
         }
         return out;
     }
@@ -118,18 +119,18 @@
         return label;
     }
 
-    async function orderSelectedWork() {
+    async function orderSelectedWork(nodes) {
         window.FocusDurability.newWork();
         if (!sortSelectedWork) return;
-        const executable = sortedTasks.filter(window.FocusDurability.eligible);
+        const executable = nodes.filter(node=>flattenTree([node]).some(window.FocusDurability.eligible));
         if (executable.length < 2) return;
-        const other = sortedTasks.filter(task => !window.FocusDurability.eligible(task));
+        const other = nodes.filter(node=>!executable.includes(node));
         const at = Date.now();
         const sorting = createTask('Sort Tasks', { estimatedTimeMs: estimatedSortingTimeMs(executable.length), status: 'active', started: at, lastChanged: at });
         sorting.isSortingOverhead = true;
         sorting.independentlyActionable = false;
         window.currentExistingSort = sorting;
-        sortedTasks = [sorting, ...executable, ...other];
+        sortedTasks = [sorting, ...flattenTree([...executable,...other])];
         const runId = ++sortRunId;
         clearDynamic(); hideStaticScreens(); show(el('startOverBtn'));
         prepareSortingDisplay(sorting);
@@ -138,12 +139,12 @@
         if (runId !== sortRunId) return false;
         clearInterval(timerInterval); completeTask(sorting, Date.now());
         window.currentExistingSort = null;
-        sortedTasks = [sorting, ...ordered, ...other];
+        sortedTasks = [sorting, ...flattenTree([...ordered,...other])];
         hide(el('taskCompare'));
         await save('dashboard');
     }
 
-    async function startNodes(nodes) {
+    async function startNodes(nodes,startImmediately=true) {
         const root=nodes?.length===1?nodes[0]:null; window.currentWorkProjectContext=root?.node_type==='project'?{id:root.id,name:root.name,estimatedMs:leafStats(root).ms,startedAtMs:Date.now(),deadlineAtMs:Number(root.deadline_at||root.due_at||root.deadline||0)}:null;
         sortedTasks = flattenTree(nodes);
         activeTaskId = firstIncompleteTask()?.id || null;
@@ -151,9 +152,9 @@
             alert('There are no unfinished executable tasks here.');
             return false;
         }
-        if (await orderSelectedWork() === false) return false;
+        if (await orderSelectedWork(nodes) === false) return false;
         await window.FocusDurability.prepare();
-        beginWork();
+        if(startImmediately)beginWork();else showDashboard();
         return true;
     }
 
@@ -175,7 +176,7 @@
                 return;
             }
 
-            if (await orderSelectedWork() === false) return;
+            if (await orderSelectedWork(tree) === false) return;
             await window.FocusDurability.prepare();
             if (startImmediately) beginWork();
             else showDashboard();
@@ -204,6 +205,7 @@
         all.textContent = 'Entire Task List';
         all.onclick = () => loadFlattenedBacklog(true);
         list.appendChild(all);
+        const review=document.createElement('button');review.id='reviewExistingQueue';review.textContent='Review queue before starting';review.onclick=()=>loadFlattenedBacklog(false);list.appendChild(review);
 
         const roots = (workTreeCache || []).filter(node=>node.status!=='cancelled');
         const projects = roots.filter(isProjectLike);
@@ -296,7 +298,8 @@
         const manage = document.createElement('button');
         manage.textContent = 'Manage';
         manage.onclick = () => window.ProjectEditor.open(node.id, { origin: async()=>{await loadTree();showProjectOverview(node.id,false);} });
-        controls.append(sortingChoice(), start, manage);
+        const review=document.createElement('button');review.textContent='Review this project’s queue';review.disabled=start.disabled;review.onclick=()=>startNodes([node],false).catch(()=>{});
+        controls.append(sortingChoice(), start, review, manage);
         screen.appendChild(controls);
 
         const back = document.createElement('button');

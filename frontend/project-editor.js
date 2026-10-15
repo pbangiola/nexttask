@@ -60,7 +60,7 @@ window.ProjectEditor = (() => {
             const tasks=children.filter(c=>c.node_type!=='project');
             const projects=children.filter(c=>c.node_type==='project');
             const c=shell();
-            c.innerHTML=`<h2>${esc(node.name)}</h2><p>${minutes(node.estimated_ms)} min planned estimate${node.estimated_from_children ? " (calculated from non-deleted children; completed estimates retained)" : ""}</p><span>Progress: ${progress.completedTasks}/${progress.totalTasks} tasks completed; remaining estimate ${progress.remainingEstimateMs==null?'Unestimated':Number(progress.remainingEstimateMs)/60000+' min'}.</span><button id="projectEditorMetadata">Edit Project Details</button>
+            c.innerHTML=`<h2>${esc(node.name)}</h2><p>${minutes(node.estimated_ms)} min planned estimate${node.estimated_from_children ? " (calculated from non-deleted children; completed estimates retained)" : ""}</p><span>Progress: ${progress.completedTasks}/${progress.totalTasks} tasks completed; remaining estimate ${progress.remainingEstimateMs==null?'Unestimated':Number(progress.remainingEstimateMs)/60000+' min'}.</span><button id="projectEditorMetadata">Edit Project Details</button><button id="projectEditorCompletion">${node.status==='completed'?'Reopen':'Mark complete'}</button>
                 <button id="projectEditorBackTop" class="projectEditorBack hidden">Back</button>
                 <h3 id="projectEditorTasksHeading">Tasks</h3><div id="projectEditorTasks"></div>
                 <h3>Projects</h3><div id="projectEditorProjects"></div>
@@ -74,6 +74,11 @@ window.ProjectEditor = (() => {
             el('projectEditorSortLevel').disabled=children.length<2;el('projectEditorSortLevel').onclick=()=>sortCurrentLevel(node,children);el('projectEditorGroup').onclick=()=>showGroup(node);
             el('projectEditorMoveSelected').onclick=()=>showMoveSelected(node);
             el('projectEditorMetadata').onclick=()=>showEdit(node,node,true);
+            const completion=el('projectEditorCompletion');
+            completion.disabled=node.status==='completed'?children.length>0:children.some(child=>['pending','active','blocked'].includes(child.status));
+            completion.title=completion.disabled?'Complete or reopen the relevant child; parent completion follows its children.':'Explicitly mark this empty parent complete or pending.';
+            completion.onclick=async()=>{completion.disabled=true;try{await updateNode(node.id,{status:node.status==='completed'?'pending':'completed'});await open(node.id,{push:false});}catch(error){alert(error.message);completion.disabled=false;}};
+
             el('projectEditorAddTask').onclick=()=>showAddTask(node);
             el('projectEditorAddProject').onclick=()=>showAddProject(node);
             if(el('projectEditorUndo'))el('projectEditorUndo').onclick=undoLast;

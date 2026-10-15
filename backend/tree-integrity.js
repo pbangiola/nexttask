@@ -166,7 +166,7 @@ function auditRows(rows) {
             if (isClosed(node) && descendantIsOpen(node.id, childrenByParent)) {
                 issues.push({ type: 'closed_project_with_open_descendant', nodeId: node.id, status: node.status });
             }
-            if (isOpen(node) && directChildren.length && !descendantIsOpen(node.id, childrenByParent)) {
+            if (isOpen(node) && directChildren.some(child=>child.status!=='cancelled') && !descendantIsOpen(node.id, childrenByParent)) {
                 issues.push({ type: 'open_project_without_open_descendants', nodeId: node.id });
             }
         }
@@ -223,7 +223,7 @@ const reconcileTransaction = db.transaction(userId => {
     }
 
     // Preserve every project node. Projects are completed in place only when
-    // they have historical children and no open descendants. Repeat so nested
+    // they have non-deleted children all marked completed and no open descendants. Repeat so nested
     // project completion can cascade upward without flattening the branch.
     let changed = true;
     while (changed) {
@@ -233,8 +233,8 @@ const reconcileTransaction = db.transaction(userId => {
         const now = Date.now();
 
         for (const project of rows.filter(row => row.node_type === 'project' && isOpen(row))) {
-            const directChildren = childrenByParent.get(String(project.id)) || [];
-            if (!directChildren.length) continue;
+            const directChildren = (childrenByParent.get(String(project.id)) || []).filter(child=>child.status!=='cancelled');
+            if (!directChildren.length || directChildren.some(child=>child.status!=='completed')) continue;
             if (descendantIsOpen(project.id, childrenByParent)) continue;
 
             completeProjectStmt.run(now, now, uid, project.id);

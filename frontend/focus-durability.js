@@ -159,6 +159,20 @@ window.FocusDurability = (() => {
             });
         });
     }
+    function snooze(parentId, resume=false, at=Date.now()) {
+        if(!window.activeWorkSessionId||!window.ProjectQueue?.snoozed(sortedTasks,parentId))return;
+        return guard(release=>{
+            const stoppedAt=boundary(at);clearInterval(timerInterval);
+            const active=currentTask();if(active)pauseTaskClock(active,stoppedAt);
+            const projected=window.ProjectQueue.snoozed(sortedTasks,parentId).map(task=>({...task}));
+            saveLocal('dashboard');
+            return submit('parent snooze',[...stopSteps(stoppedAt),snapshot(projected),items(projected)],()=>{
+                sortedTasks=projected;activeTaskId=firstIncompleteTask()?.id||null;
+                window.TaskGraphTiming.clear();release();
+                if(resume&&firstIncompleteTask())beginWork();else showDashboard();
+            });
+        });
+    }
     function add(newTask, insertIndex, activeTask) {
         return guard(release => {
             const projected = sortedTasks.map(row => ({ ...row }));
@@ -224,7 +238,7 @@ window.FocusDurability = (() => {
             status: row.status, completed: row.status === 'completed', completedTime: row.completed,
             created: row.created, started: row.started, lastChanged: null, blockedByTaskId: row.blocked_by_task_id
         });
-        Object.assign(task, { projectAncestorIds, canonicalName: row.name, parentId: row.parent_id, nodeType: row.node_type,
+        Object.assign(task, { projectAncestorIds, projectAncestorNames:path, canonicalName: row.name, parentId: row.parent_id, nodeType: row.node_type,
             nodePosition: row.position, independentlyActionable: row.independently_actionable === 1, projectPath: path.join(' › ') });
         return task;
     }
@@ -338,5 +352,5 @@ window.FocusDurability = (() => {
     window.addEventListener('pagehide', () => {
         if (el('focusScreen') && !busy) pause(currentTask());
     });
-    return { init, recover, prepare, newWork() { needsPreparation = true; }, enter, done, pause, add, blocker, finish, hardStop, snapshot, payload, eligible };
+    return { init, recover, prepare, newWork() { needsPreparation = true; }, enter, done, pause, add, blocker, finish, hardStop, snapshot, payload, eligible, snooze };
 })();

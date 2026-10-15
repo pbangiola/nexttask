@@ -162,6 +162,7 @@ test('guest and authenticated account storage remain separate with no automatic 
 });
 test('optional pairwise importance/deadline matrix persists owned fields without changing canonical structure or Work order',async t=>{
     const {page,owner}=await pageFor(t);await fixture(owner);
+    await api(owner,`/users/${owner}/nodes`,'POST',{id:owner+'_priority_peer',name:'Peer parent',nodeType:'project',estimatedTimeMs:60000});
     const before=raw.prepare('SELECT id,parent_id,position,estimated_ms,elapsed_ms FROM tasks WHERE user_id=? ORDER BY id').all(owner);
     await page.locator('#insightsBtn').click();await page.waitForSelector('#priorityTable');assert.match(await page.locator('#dynamicContainer').textContent(),/Timezone:/);assert.match(await page.locator('#priorityTable').textContent(),/Unspecified/);
     await page.locator('#rankImportance').click();await page.locator('#cancelImportance').click();await page.waitForSelector('#priorityTable');assert.match(await page.locator('#priorityTable').textContent(),/Unspecified/);
