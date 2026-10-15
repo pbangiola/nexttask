@@ -1,10 +1,4 @@
-const Database = require('better-sqlite3');
-const path = require('path');
-
-const dataDir = process.env.RAILWAY_VOLUME_MOUNT_PATH || __dirname;
-const dbPath = path.join(dataDir, 'task_sorter.db');
-const db = new Database(dbPath);
-db.pragma('foreign_keys = ON');
+const db = require('./database').connection;
 
 const getUserNodesStmt = db.prepare(`
     SELECT * FROM tasks
@@ -109,22 +103,23 @@ function rollupProjectMetrics(rows, uid, repairs) {
 
     for (const project of projects) {
         const children = childrenByParent.get(String(project.id)) || [];
-        if (!children.length) continue;
+        if (!children.length && !project.estimated_from_children) continue;
 
         let estimatedMs = 0;
-        let elapsedMs = 0;
+        let elapsedMs = Number(project.own_elapsed_ms || 0);
 
         for (const child of children) {
             if (child.node_type === 'project') {
                 const childTotals = totals.get(String(child.id));
-                estimatedMs += childTotals ? childTotals.estimatedMs : Number(child.estimated_ms || 0);
+                if (child.status !== 'cancelled') estimatedMs += childTotals ? childTotals.estimatedMs : Number(child.estimated_ms || 0);
                 elapsedMs += childTotals ? childTotals.elapsedMs : Number(child.elapsed_ms || 0);
             } else {
-                estimatedMs += Number(child.estimated_ms || 0);
+                if (child.status !== 'cancelled') estimatedMs += Number(child.estimated_ms || 0);
                 elapsedMs += Number(child.elapsed_ms || 0);
             }
         }
 
+        if (children.length && !project.estimated_from_children) db.prepare('UPDATE tasks SET estimated_from_children=1 WHERE id=? AND user_id=?').run(project.id,uid);
         totals.set(String(project.id), { estimatedMs, elapsedMs });
 
         if (Number(project.estimated_ms || 0) !== estimatedMs || Number(project.elapsed_ms || 0) !== elapsedMs) {
@@ -215,6 +210,17 @@ const reconcileTransaction = db.transaction(userId => {
     // project once and never double-counts descendant tasks.
     rows = getUserNodesStmt.all(uid);
     rollupProjectMetrics(rows, uid, repairs);
+
+    // Reopen completed ancestors when editing adds/reopens executable descendants.
+    // Cancelled branches are never resurrected implicitly.
+    rows = getUserNodesStmt.all(uid);
+    const reopenIndex = indexNodes(rows);
+    for (const project of rows.filter(row => row.node_type === 'project' && row.status === 'completed')) {
+        if (descendantIsOpen(project.id, reopenIndex.childrenByParent)) {
+            db.prepare("UPDATE tasks SET status='pending',completed=NULL,updated_at=? WHERE id=? AND user_id=?").run(Date.now(), project.id, uid);
+            repairs.push({type:'reopen_project',nodeId:project.id});
+        }
+    }
 
     // Preserve every project node. Projects are completed in place only when
     // they have historical children and no open descendants. Repeat so nested

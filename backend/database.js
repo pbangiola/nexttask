@@ -75,6 +75,18 @@ addColumnIfMissing('tasks', 'project_id', 'TEXT');
 addColumnIfMissing('tasks', 'node_type', "TEXT NOT NULL DEFAULT 'task' CHECK(node_type IN ('task', 'project'))");
 addColumnIfMissing('tasks', 'independently_actionable', 'INTEGER NOT NULL DEFAULT 1 CHECK(independently_actionable IN (0, 1))');
 
+// Additive project-metrics bookkeeping. Do not rewrite historical row values.
+db.transaction(() => {
+    const migrated = db.prepare('SELECT 1 FROM schema_migrations WHERE version=5').get();
+    addColumnIfMissing('tasks', 'estimated_from_children', 'INTEGER NOT NULL DEFAULT 0');
+    addColumnIfMissing('tasks', 'own_elapsed_ms', 'INTEGER NOT NULL DEFAULT 0');
+    if (!migrated) {
+        db.exec(`UPDATE tasks SET estimated_from_children=1 WHERE node_type='project'
+            AND EXISTS(SELECT 1 FROM tasks child WHERE child.parent_id=tasks.id AND child.user_id=tasks.user_id)`);
+        db.prepare('INSERT INTO schema_migrations(version,applied_at) VALUES(5,?)').run(Date.now());
+    }
+})();
+
 db.exec(`
     CREATE INDEX IF NOT EXISTS idx_tasks_session_position
         ON tasks(session_id, position);
@@ -211,10 +223,13 @@ const replaceTaskList = db.transaction((sessionId, tasks, session) => {
     });
 
     // Main's tree-integrity reconciliation remains the owner of project rollups.
-    // Do not infer empty-project or elapsed-time policy from a Focus snapshot.
+    // Use the same connection so completion and ancestor metrics commit together.
+    require('./tree-integrity').reconcile(String(sessionId));
 });
 
 module.exports = {
+    // Internal shared connection for atomic canonical graph/rollup operations.
+    connection: db,
     ensureSession(sessionId, session = {}) {
         ensureSessionStmt.run({
             id: sessionId,

@@ -12,7 +12,7 @@
     }
 
     function minutes(ms) {
-        return Math.round(Number(ms || 0) / 60000);
+        return Number(ms || 0) / 60000;
     }
 
     function taskFromLeaf(row, displayName, rootId, ancestorIds) {
@@ -33,7 +33,7 @@
         task.nodeType = row.node_type || 'task';
         task.nodePosition = Number(row.position || 0);
         task.independentlyActionable = row.independently_actionable === 1;
-        task.priorityRootId = rootId || row.id;
+        task.projectRootId = rootId || row.id;
         task.projectPath = displayName.includes(': ') ? displayName.split(': ').slice(0,-1).join(' › ') : '';
         return task;
     }
@@ -78,22 +78,13 @@
     }
 
     function isProjectLike(node) {
-        return isOpen(node) && (node.node_type === 'project' || hasOpenChildren(node));
+        return node && node.status!=='cancelled' && (node.node_type === 'project' || hasOpenChildren(node));
     }
 
     function leafStats(node) {
-        if (!isOpen(node)) return { parts: 0, ms: 0 };
-        const children = (node.children || []).filter(isOpen);
-        if (!children.length) {
-            if (node.node_type === 'project') return { parts: 0, ms: 0 };
-            return { parts: 1, ms: Number(node.estimated_ms || 0) };
-        }
-        return children.reduce((sum, child) => {
-            const stats = leafStats(child);
-            sum.parts += stats.parts;
-            sum.ms += stats.ms;
-            return sum;
-        }, { parts: 0, ms: 0 });
+        const progress=node?.progress;
+        if(progress)return {parts:progress.totalTasks-progress.completedTasks,ms:progress.remainingEstimateMs};
+        return {parts:isOpen(node)&&node.node_type==='task'?1:0,ms:isOpen(node)?Number(node.estimated_ms||0):0};
     }
 
     async function fetchTaskTree() {
@@ -214,12 +205,12 @@
         all.onclick = () => loadFlattenedBacklog(true);
         list.appendChild(all);
 
-        const roots = (workTreeCache || []).filter(isOpen);
+        const roots = (workTreeCache || []).filter(node=>node.status!=='cancelled');
         const projects = roots.filter(isProjectLike);
         projects.forEach(project => {
             const stats = leafStats(project);
             const button = document.createElement('button');
-            button.textContent = `${project.name} — ${stats.parts} part${stats.parts === 1 ? '' : 's'} • ${minutes(stats.ms)} min`;
+            button.textContent = `${project.name} — ${stats.parts} part${stats.parts === 1 ? '' : 's'} • ${stats.ms==null?'Unestimated':minutes(stats.ms)+' min'}`;
             button.onclick = () => {
                 projectHistory.length = 0;
                 showProjectOverview(project.id, false);
@@ -263,10 +254,10 @@
         const heading = document.createElement('h2');
         heading.textContent = `Overview: ${node.name}`;
         const meta = document.createElement('p');
-        meta.textContent = `Total parts: ${stats.parts}. Total estimated time: ${minutes(stats.ms)} minutes.`;
+        meta.textContent = `Total parts: ${stats.parts}. Total estimated time: ${minutes(node.estimated_ms)} minutes. Completed: ${node.progress?.completedTasks||0}. Remaining estimate: ${stats.ms==null?'Unestimated':minutes(stats.ms)+' minutes'}.`;
         screen.append(heading, meta);
 
-        const directChildren = (node.children || []).filter(isOpen);
+        const directChildren = (node.children || []).filter(child=>child.status!=='cancelled');
         const subprojects = directChildren.filter(isProjectLike);
         const subheading = document.createElement('h3');
         subheading.textContent = 'Subprojects';
@@ -289,7 +280,7 @@
             const row = document.createElement('div');
             row.className = 'planner-project-row';
             const details = document.createElement('span');
-            details.textContent = `${substats.parts} part${substats.parts === 1 ? '' : 's'} • ${minutes(substats.ms)} min`;
+            details.textContent = `${substats.parts} part${substats.parts === 1 ? '' : 's'} • ${substats.ms==null?'Unestimated':minutes(substats.ms)+' min'}`;
             row.append(link, details);
             list.appendChild(row);
         });
@@ -299,6 +290,8 @@
         controls.className = 'planner-choice-grid';
         const start = document.createElement('button');
         start.textContent = 'Start This Project';
+        start.disabled = !flattenTree([node]).length;
+        if(start.disabled){const reason=document.createElement('p');reason.textContent='No unfinished tasks in this project. You can still manage and edit its history.';screen.appendChild(reason);}
         start.onclick = () => startNodes([node]).catch(() => {});
         const manage = document.createElement('button');
         manage.textContent = 'Manage';
@@ -351,7 +344,7 @@
             row.parentId = task.parentId ?? null;
             row.nodeType = task.nodeType || 'task';
             row.position = Number(task.nodePosition || row.position || index + 1);
-            row.priorityRootId = task.priorityRootId || task.id;
+            row.projectRootId = task.projectRootId || task.id;
         });
         return payload;
     };
