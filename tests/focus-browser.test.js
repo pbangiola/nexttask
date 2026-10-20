@@ -385,7 +385,7 @@ test('failed replacement queue cannot hide the old session; retry uses the same 
     assert.equal(sessionRows(owner).find(row => row.id === oldId).status, 'ended');
 });
 
-test('server-only recovery of an expired hard stop closes at its recorded deadline without elapsed reconciliation', async t => {
+test('server-only recovery of an expired hard stop closes at its recorded deadline and preserves elapsed time', async t => {
     const { page, owner } = await pageFor(t);
     const now = Date.now(), deadline = now - 1000;
     await api(owner, `/users/${owner}/nodes`, 'POST', { id: `${owner}_expired_task`, name: 'Expired task', estimatedTimeMs: 60000 });
@@ -394,10 +394,25 @@ test('server-only recovery of an expired hard stop closes at its recorded deadli
     await page.reload(); await page.waitForSelector('#sessionEndedScreen'); await idle(page);
     assert.equal(intervalRows(owner)[0].ended_at, deadline);
     assert.equal(sessionRows(owner)[0].ended_at, deadline);
-    assert.equal(raw.prepare('SELECT elapsed_ms FROM tasks WHERE id=?').get(`${owner}_expired_task`).elapsed_ms, 0);
+    assert.equal(raw.prepare('SELECT elapsed_ms FROM tasks WHERE id=?').get(`${owner}_expired_task`).elapsed_ms, 1000);
     await page.reload(); await page.waitForSelector('#dashboardScreen'); await idle(page);
     assert.equal(intervalRows(owner).length, 1); assert.equal(sessionRows(owner).length, 1);
     assert.equal(sessionRows(owner)[0].status, 'ended');
+});
+
+test('server-only recovery retains running time and repeated reload does not count it twice', async t => {
+    const { page, owner } = await pageFor(t);
+    const now = Date.now();
+    const taskId = `${owner}_running_task`;
+    const sessionId = `${owner}_running_session`;
+    await api(owner, `/users/${owner}/nodes`, 'POST', { id: taskId, name: 'Running task', estimatedTimeMs: 60000, actualTimeMs: 4000 });
+    await api(owner, '/work-sessions/prepare', 'POST', { id: sessionId, startedAt: now - 5000, taskIds: [taskId] });
+    await api(owner, '/work-intervals', 'POST', { id: `${owner}_running_run`, taskId, workSessionId: sessionId, startedAt: now - 2000 });
+    await page.reload(); await page.waitForSelector('#dashboardScreen'); await idle(page);
+    const elapsed = raw.prepare('SELECT elapsed_ms FROM tasks WHERE id=?').get(taskId).elapsed_ms;
+    assert.ok(elapsed >= 6000);
+    await page.reload(); await page.waitForSelector('#dashboardScreen'); await idle(page);
+    assert.equal(raw.prepare('SELECT elapsed_ms FROM tasks WHERE id=?').get(taskId).elapsed_ms, elapsed);
 });
 
 test('discovery failure provides retry and cannot replace recoverable server work with an empty snapshot', async t => {

@@ -134,7 +134,7 @@ async function entry(page,text,sort=false) {
 test('shared parser supports structured mixed compact/multiline records without consuming duration tokens as names',async t=>{
     const {page}=await pageFor(t);
     const parsed=await page.evaluate(()=>parseTaskEntries('Alpha, 5m, Beta\nSame, 2m\nSame\nDiscuss X, Y\n0m'));
-    assert.deepEqual(parsed,{entries:[{name:'Alpha',estimatedTimeMs:300000},{name:'Beta',estimatedTimeMs:0},{name:'Same',estimatedTimeMs:120000},{name:'Same',estimatedTimeMs:0},{name:'Discuss X, Y',estimatedTimeMs:0}],invalid:['0m']});
+    assert.deepEqual(parsed,{entries:[{name:'Alpha',estimatedTimeMs:300000},{name:'Beta',estimatedTimeMs:0},{name:'Same',estimatedTimeMs:120000},{name:'Same',estimatedTimeMs:0},{name:'Discuss X',estimatedTimeMs:0},{name:'Y',estimatedTimeMs:0}],invalid:['0m']});
     page.on('dialog',dialog=>dialog.accept());await entry(page,'Repeat, 1m\nRepeat, 3m',true);await page.waitForSelector('#dashboardScreen');await idle(page);
     const rows=raw.prepare("SELECT * FROM tasks WHERE user_id=? AND name LIKE 'Repeat%' ORDER BY position").all((await page.evaluate(()=>userId)));
     assert.deepEqual(rows.map(row=>[row.name,row.estimated_ms]),[['Repeat',60000],['Repeat again',180000]]);assert.notEqual(rows[0].id,rows[1].id);

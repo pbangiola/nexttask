@@ -321,16 +321,29 @@ window.FocusDurability = (() => {
         window.currentWorkProjectContext = project?.node_type === 'project' ? { id: project.id, name: project.name, estimatedMs: project.estimated_ms, startedAtMs: workSession.started_at } : null;
         totalAvailableTimeMs = workSession.available_ms; sessionStartedAtMs = workSession.started_at;
         hardStopAtMs = workSession.hard_stop_at || 0; endConstraint = workSession.end_constraint; hardStopHandled = false;
-        // Browser/server elapsed totals are not reconciled with intervals (D4).
-        // Recovery pauses the recorded run at discovery (or the expired deadline).
+        // Recover uncheckpointed clock time before closing the open intervals.
+        // Save the checkpoint first in the immutable journal: if recovery is
+        // interrupted, replay cannot add this same interval segment twice.
         const at = boundary(Date.now());
-        await submit('recovery pause', intervals.map(row => step(`/work-intervals/${encode(row.id)}/stop`, { endedAt: at })));
+        for (const interval of intervals) {
+            const task = sortedTasks.find(row => row.id === interval.task_id);
+            if (!task || task.completed) continue;
+            const row = nodes.get(task.id);
+            const checkpoint = Math.max(interval.started_at, row?.last_changed ?? interval.started_at);
+            task.actualTimeMs += Math.max(0, at - checkpoint);
+            task.lastChanged = Math.max(checkpoint, at);
+        }
+        await submit('recovery pause', [snapshot(), ...intervals.map(row => step(`/work-intervals/${encode(row.id)}/stop`, { endedAt: at }))]);
+        for (const task of sortedTasks) {
+            task.lastChanged = null;
+            if (task.status === 'active') task.status = 'pending';
+        }
         window.TaskGraphTiming.clear();
         if (hasHardStop() && Date.now() >= hardStopAtMs) { await hardStop(); return; }
         const unfinished = sortedTasks.some(task => !task.completed && task.status !== 'cancelled');
         if (!unfinished) { await finish(); return; }
         showDashboard(); startHardStopWatch();
-        recoveryNote('Saved work recovered and paused. Get to Work resumes. Time shows the last saved total.');
+        recoveryNote('Saved work recovered and paused. Get to Work resumes. Elapsed time includes the recovered running interval.');
     }
     async function init() {
         if (initialized) return;

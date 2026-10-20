@@ -1,6 +1,6 @@
 'use strict';
 // Structured occurrences stay attached to their estimates through review/sorting.
-// Commas in plain names remain names; explicit duration tokens enable compact pairs.
+// Commas separate tasks; duration tokens stay attached to the preceding task.
 window.TaskEntry = {
     parse(text) {
         const entries = [], invalid = [];
@@ -16,6 +16,8 @@ window.TaskEntry = {
                     records.push({ name: tokens[i], estimatedTimeMs: duration || 0 });
                     if (duration) i++;
                 }
+            } else if (tokens.length > 1) {
+                records.push(...tokens.filter(Boolean).map(name => parseTimedTaskChunk(name) || { name, estimatedTimeMs: 0 }));
             } else {
                 const parsed = parseTimedTaskChunk(line);
                 if (durationToken(line) || /(?:,\s*|\s+)[+-]?\d+(?:\.\d+)?\s*(?:m|min|mins|minutes?|h|hours?)\s*$/i.test(line) && !parsed) invalid.push(original);
