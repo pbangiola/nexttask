@@ -358,12 +358,15 @@ window.FocusDurability = (() => {
             saving('Recovery pending. Retry to continue.', true);
         }
     }
+    // Losing visibility is not a pause action. Keep the clock anchor and the
+    // durable interval open; wall-clock time includes time spent away.
+    function preserveRunningFocus() {
+        if (el('focusScreen')) saveLocal('focus');
+    }
     document.addEventListener('visibilitychange', () => {
-        if (document.hidden && el('focusScreen') && !busy) pause(currentTask(), () => { showDashboard(); saving('Work paused while away. Get to Work resumes.'); });
+        if (document.hidden) preserveRunningFocus();
         if (!document.hidden && hasHardStop() && Date.now() >= hardStopAtMs) hardStop();
     });
-    window.addEventListener('pagehide', () => {
-        if (el('focusScreen') && !busy) pause(currentTask());
-    });
+    window.addEventListener('pagehide', preserveRunningFocus);
     return { init, recover, prepare, newWork() { needsPreparation = true; }, enter, done, pause, add, blocker, finish, hardStop, snapshot, payload, eligible, snooze };
 })();
