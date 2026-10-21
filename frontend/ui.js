@@ -4,7 +4,7 @@
 function el(id) { return document.getElementById(id); }
 function show(element) { element?.classList.remove('hidden'); }
 function hide(element) { element?.classList.add('hidden'); }
-function clearDynamic() { clearInterval(timerInterval); const c = el('dynamicContainer'); if (c) c.innerHTML = ''; return c; }
+function clearDynamic() { window.FocusAlarm?.stop(); if (window.focusNormalTitle != null) { document.title = window.focusNormalTitle; window.focusNormalTitle = null; } document.body.classList.remove('focus-expanded'); clearInterval(timerInterval); const c = el('dynamicContainer'); if (c) c.innerHTML = ''; return c; }
 function hideStaticScreens() { ['modeSelect','workChoiceStep','timeConstraintInput','taskInput','taskCompare'].forEach(id => hide(el(id))); }
 
 //mode selection functions
@@ -153,12 +153,31 @@ function renderFocus(task){
     if (hasHardStop() && Date.now() >= hardStopAtMs) { handleHardStop(); return; }
     startHardStopWatch();
     ensureTask(task); hideStaticScreens(); hide(el('startOverBtn')); show(el('stopWorkingBtn')); const container=clearDynamic(); const screen=document.createElement('div'); screen.id='focusScreen';
-    appendProjectToolbar(screen, task); appendParentSnooze(screen,true); const heading=document.createElement('h2'); heading.textContent=`Current Task: ${task.name}`; const timer=document.createElement('p'); timer.id='timer'; timer.style.fontSize='24px'; timer.style.fontWeight='bold';
-    function renderTimer(){checkpointTask(task);const remaining=task.estimatedTimeMs-task.actualTimeMs;timer.style.color=remaining>=0?'green':'red';timer.textContent=remaining>=0?`${formatDuration(remaining)} remaining`:`${formatDuration(remaining)} overdue`;saveLocal('focus');}
-    const done=document.createElement('button'); done.textContent='Done, Next!'; done.onclick=()=>{const action=window.FocusDurability.done(task);if(action)done.disabled=true;};
-    const blocked=document.createElement('button'); blocked.textContent='Blocked'; blocked.onclick=()=>{window.FocusDurability.pause(task,()=>showBlockedFlow(task));};
-    const add=document.createElement('button'); add.textContent='Add New Task'; add.onclick=()=>{window.FocusDurability.pause(task,()=>showAddTask(task));};
-    screen.append(heading,timer,done,blocked,add); container.appendChild(screen); renderTimer(); clearInterval(timerInterval); timerInterval=setInterval(renderTimer,1000);
+    window.focusNormalTitle = document.title;
+    screen.setAttribute('aria-label', 'Task focus');
+    const heading=document.createElement('h2'); heading.textContent=task.name;
+    const timer=document.createElement('p'); timer.id='timer'; timer.setAttribute('role','timer'); timer.setAttribute('aria-live','off');
+    const label=document.createElement('p'); label.id='focusTimeLabel';
+    const progress=document.createElement('progress'); progress.max=100; progress.setAttribute('aria-label','Proportion of task estimate remaining');
+    const alarm=document.createElement('section'); alarm.id='focusAlarm'; alarm.hidden=true; alarm.setAttribute('aria-label','Task alarm');
+    const message=document.createElement('p'); message.id='focusAlarmMessage'; message.setAttribute('role','status');
+    function button(text, action, id) { const b=document.createElement('button'); b.textContent=text; b.onclick=action; if(id)b.id=id; return b; }
+    alarm.append(message,button('Turn Off Alarm',()=>window.FocusAlarm.dismiss(),'alarmOff'),button('Snooze 5 Minutes',()=>window.FocusAlarm.snooze(),'alarmSnooze'));
+    const done=button('Done, Next!',()=>{const action=window.FocusDurability.done(task);if(action)done.disabled=true;},'focusDone');
+    const toolbar=document.createElement('div'); toolbar.className='focus-toolbar'; toolbar.setAttribute('role','group'); toolbar.setAttribute('aria-label','Work controls');
+    toolbar.append(button('Blocked',()=>window.FocusDurability.pause(task,()=>showBlockedFlow(task))),button('Add New Task',()=>window.FocusDurability.pause(task,()=>showAddTask(task))),button('Pause / Session Controls',()=>el('stopWorkingBtn')?.click()));
+    appendProjectToolbar(toolbar,task); appendParentSnooze(toolbar,true);
+    const expanded=button('Expand Focus',()=>{const on=document.body.classList.toggle('focus-expanded');expanded.textContent=on?'Exit Expanded Focus':'Expand Focus';expanded.setAttribute('aria-pressed',String(on));}); expanded.setAttribute('aria-pressed','false'); toolbar.append(expanded);
+    if(screen.requestFullscreen) toolbar.append(button('Fullscreen',async()=>{try { if(document.fullscreenElement)await document.exitFullscreen();else await screen.requestFullscreen(); }catch(_){audioStatus.textContent='Fullscreen is unavailable. Use Expand Focus.';}}));
+    const sound=document.createElement('details'); const summary=document.createElement('summary'); summary.textContent='Sound Settings';
+    const soundLabel=document.createElement('label'), enabled=document.createElement('input'); enabled.type='checkbox'; enabled.checked=window.FocusAlarm.settings().enabled; enabled.onchange=()=>window.FocusAlarm.configure({enabled:enabled.checked}); soundLabel.append(enabled,' Sound on');
+    const volumeLabel=document.createElement('label'), volume=document.createElement('input'); volume.type='range';volume.min='0';volume.max='1';volume.step='.05';volume.value=window.FocusAlarm.settings().volume;volume.oninput=()=>window.FocusAlarm.configure({volume:Number(volume.value)});volumeLabel.append('Volume ',volume);
+    const audioStatus=document.createElement('p');audioStatus.id='audioStatus';audioStatus.setAttribute('role','status');
+    const limitation=document.createElement('p');limitation.textContent='Browsers may silence audio in the background or on a locked phone. The clock keeps running.';
+    sound.append(summary,soundLabel,volumeLabel,button('Test Sound',()=>window.FocusAlarm.test()),audioStatus,limitation);
+    screen.append(heading,timer,label,progress,alarm,done,toolbar,sound); container.appendChild(screen);
+    function renderTimer(){checkpointTask(task);const remaining=task.estimatedTimeMs-task.actualTimeMs;const overtime=remaining<=0;timer.textContent=(overtime?'+':'')+formatDuration(remaining);label.textContent=overtime?'Over estimate':'Remaining';screen.classList.toggle('over-estimate',overtime);progress.value=Math.max(0,Math.min(100,remaining/task.estimatedTimeMs*100));document.title=`${overtime?'+':''}${formatDuration(remaining)} ${overtime?'over estimate':'remaining'} · ${task.name}`;window.FocusAlarm.check();saveLocal('focus');}
+    renderTimer(); clearInterval(timerInterval); timerInterval=setInterval(renderTimer,1000);
 }
 
 function showBlockedFlow(blockedTask){

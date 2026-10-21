@@ -61,7 +61,7 @@ test.after(async () => {
     raw.close();
     fs.rmSync(directory, { recursive: true, force: true });
 });
-async function pageFor(t, existingOwner) {
+async function pageFor(t, existingOwner, fakeClock = false) {
     const owner = existingOwner || `browser_${++counter}`;
     const context = await browser.newContext();
     await context.addInitScript(() => {
@@ -74,6 +74,7 @@ async function pageFor(t, existingOwner) {
     });
     t.after(() => context.close());
     const page = await context.newPage();
+    if (fakeClock) await page.clock.install();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     t.after(() => assert.deepEqual(errors, [], 'no uncaught browser errors'));
@@ -331,22 +332,28 @@ test('account switch while obtaining a token rejects old actions before dispatch
     assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM tasks WHERE user_id='other_account'").get().n, 0);
 });
 
-test('background boundary pauses, explicit resume creates one new run and audio bootstrap stays singular', async t => {
-    const { page, owner } = await pageFor(t);
+test('background preserves clock and interval; rendering and visibility keep one repeating alarm', async t => {
+    const { page, owner } = await pageFor(t, undefined, true);
     await newList(page); await idle(page);
-    await page.evaluate(() => { currentTask().estimatedTimeMs=50; currentTask().lastChanged=Date.now()-100; });
-    await page.waitForFunction(() => window.audioPulses === 2);
+    await page.evaluate(() => { currentTask().actualTimeMs=60000; currentTask().lastChanged=Date.now(); window.FocusAlarm.check(); });
+    const pulses=await page.evaluate(()=>window.audioPulses);
     await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); });
-    await page.waitForSelector('#dashboardScreen'); await idle(page);
-    assert.equal(intervalRows(owner).length, 1); assert.ok(intervalRows(owner)[0].ended_at);
-    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
-    await page.getByRole('button', { name: 'Get to Work', exact: true }).click();
-    await page.waitForSelector('#focusScreen'); await idle(page);
-    assert.equal(intervalRows(owner).length, 2);
-    assert.equal(intervalRows(owner).filter(row => row.ended_at === null).length, 1);
-    assert.equal(await page.locator('script[src*="deadline-audio.js"]').count(), 1);
-    await new Promise(resolve => setTimeout(resolve, 300));
-    assert.equal(await page.evaluate(() => window.audioPulses), 2, 'deadline cue is not repeated on resume');
+    await page.clock.runFor(3000);
+    assert.equal(await page.locator('#focusScreen').count(),1);
+    assert.equal(intervalRows(owner).length,1);assert.equal(intervalRows(owner)[0].ended_at,null);
+    assert.ok(await page.evaluate(()=>currentTask().actualTimeMs+Date.now()-currentTask().lastChanged)>=63000);
+    const beforeRender=await page.evaluate(()=>window.audioPulses);
+    await page.evaluate(()=>{renderFocus(currentTask());for(let i=0;i<10;i++)document.dispatchEvent(new Event('visibilitychange'));});
+    assert.equal(await page.evaluate(()=>window.audioPulses),beforeRender,'rendering and visibility must not beep again');
+    await page.clock.runFor(1750);
+    const after=await page.evaluate(()=>window.audioPulses);
+    assert.ok(after>beforeRender && after<=beforeRender+2,'one repeating scheduler continues');
+    assert.ok(after>pulses);
+    assert.equal(await page.locator('script[src*="deadline-audio.js"]').count(),1);
+    await page.getByRole('button',{name:'Turn Off Alarm',exact:true}).click();
+    await page.clock.runFor(5000);
+    const silenced=await page.evaluate(()=>window.audioPulses);
+    await page.clock.runFor(5000);assert.equal(await page.evaluate(()=>window.audioPulses),silenced);
 });
 
 test('failed replacement queue cannot hide the old session; retry uses the same prepared ID', async t => {
@@ -405,7 +412,9 @@ test('server-only recovery retains running time and repeated reload does not cou
     const now = Date.now();
     const taskId = `${owner}_running_task`;
     const sessionId = `${owner}_running_session`;
-    await api(owner, `/users/${owner}/nodes`, 'POST', { id: taskId, name: 'Running task', estimatedTimeMs: 60000, actualTimeMs: 4000 });
+    await api(owner, `/users/${owner}/nodes`, 'POST', { id: taskId, name: 'Running task', estimatedTimeMs: 60000 });
+    // Node creation starts at zero; seed the saved checkpoint explicitly.
+    raw.prepare('UPDATE tasks SET elapsed_ms=4000 WHERE id=?').run(taskId);
     await api(owner, '/work-sessions/prepare', 'POST', { id: sessionId, startedAt: now - 5000, taskIds: [taskId] });
     await api(owner, '/work-intervals', 'POST', { id: `${owner}_running_run`, taskId, workSessionId: sessionId, startedAt: now - 2000 });
     await page.reload(); await page.waitForSelector('#dashboardScreen'); await idle(page);
@@ -544,4 +553,37 @@ test('reload during sorting retains canonical tasks and acknowledged overhead wi
     assert.deepEqual(items.map(row => row.id), original.map(row => row.id));
     assert.equal(intervalRows(owner).length, 1);
     assert.notEqual(intervalRows(owner)[0].task_id, overhead.id);
+});
+
+test('focus alarm snooze and dismissal survive reload without changing accounting; desktop and mobile controls fit', async t => {
+    const {page,owner}=await pageFor(t, undefined, true);
+    await newList(page);await idle(page);
+    await page.evaluate(()=>{currentTask().actualTimeMs=61000;currentTask().lastChanged=Date.now();saveLocal('focus');window.FocusAlarm.check();});
+    const accounting=()=>page.evaluate(()=>JSON.stringify({tasks:sortedTasks,session:activeWorkSessionId,runs:window.TaskGraph.runs()}));
+    const before=await accounting();
+    await page.getByRole('button',{name:'Snooze 5 Minutes',exact:true}).click();
+    assert.equal(await accounting(),before);
+    assert.match(await page.locator('#focusAlarmMessage').textContent(),/snoozed/);
+    await page.reload();await page.waitForSelector('#dashboardScreen');await idle(page);
+    await page.getByRole('button',{name:'Get to Work',exact:true}).click();await page.waitForSelector('#focusScreen');await idle(page);
+    assert.match(await page.locator('#focusAlarmMessage').textContent(),/snoozed/);
+    await page.clock.fastForward(300000);
+    await page.waitForSelector('#alarmOff:visible');
+    const beforeOff=await accounting();await page.locator('#alarmOff').click();assert.equal(await accounting(),beforeOff);
+    await page.reload();await page.waitForSelector('#dashboardScreen');await idle(page);
+    await page.getByRole('button',{name:'Get to Work',exact:true}).click();await page.waitForSelector('#focusScreen');await idle(page);
+    assert.match(await page.locator('#focusAlarmMessage').textContent(),/turned off/);
+    await page.setViewportSize({width:1280,height:900});
+    await page.getByRole('button',{name:'Expand Focus',exact:true}).click();
+    await page.screenshot({path:'/tmp/nexttask-focus-desktop.png',fullPage:true});
+    await page.setViewportSize({width:390,height:844});await page.emulateMedia({reducedMotion:'reduce'});
+    await page.screenshot({path:'/tmp/nexttask-focus-mobile.png',fullPage:true});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    await page.locator('#focusDone').focus();await page.keyboard.press('Enter');
+    await page.waitForFunction(()=>document.querySelector('#focusScreen h2')?.textContent==='Beta');await idle(page);
+    assert.match(await page.title(),/Beta/);
+    assert.equal(await page.locator('#focusAlarm:visible').count(),0);
+    await page.getByRole('button',{name:'Pause / Session Controls',exact:true}).click();
+    await page.waitForSelector('#stopChecklistScreen');assert.equal(await page.title(),'Task Sorter');
+    assert.ok(intervalRows(owner).every(row=>row.ended_at!==null));
 });

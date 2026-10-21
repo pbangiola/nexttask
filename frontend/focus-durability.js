@@ -124,7 +124,7 @@ window.FocusDurability = (() => {
     function done(task, at = Date.now()) {
         return guard(release => {
             const stoppedAt = boundary(at);
-            clearInterval(timerInterval);
+            clearInterval(timerInterval); window.FocusAlarm?.stop();
             pauseTaskClock(task, stoppedAt);
             saveLocal('focus');
             const projected = sortedTasks.map(row => ({ ...row }));
@@ -138,6 +138,7 @@ window.FocusDurability = (() => {
             const steps = [...stopSteps(stoppedAt), snapshot(projected), items(projected)];
             if (finished) steps.push(end(stoppedAt));
             return submit('task completion', steps, () => {
+                window.FocusAlarm?.cancel(task);
                 sortedTasks = projected;
                 window.TaskGraphTiming.forget(task.id);
                 activeTaskId = firstIncompleteTask()?.id || null;
@@ -151,7 +152,7 @@ window.FocusDurability = (() => {
     function pause(task, after, at = Date.now()) {
         return guard(release => {
             const stoppedAt = boundary(at);
-            clearInterval(timerInterval);
+            clearInterval(timerInterval); window.FocusAlarm?.stop();
             if (task) pauseTaskClock(task, stoppedAt);
             saveLocal('dashboard');
             return submit('task pause', [...stopSteps(stoppedAt), snapshot()], () => {
@@ -162,7 +163,7 @@ window.FocusDurability = (() => {
     function snooze(parentId, resume=false, at=Date.now()) {
         if(!window.activeWorkSessionId||!window.ProjectQueue?.snoozed(sortedTasks,parentId))return;
         return guard(release=>{
-            const stoppedAt=boundary(at);clearInterval(timerInterval);
+            const stoppedAt=boundary(at);clearInterval(timerInterval); window.FocusAlarm?.stop();
             const active=currentTask();if(active)pauseTaskClock(active,stoppedAt);
             const projected=window.ProjectQueue.snoozed(sortedTasks,parentId).map(task=>({...task}));
             saveLocal('dashboard');
@@ -195,7 +196,7 @@ window.FocusDurability = (() => {
     function finish(completedIds = [], at = Date.now(), hard = false, reset = false) {
         return guard(release => {
             const stoppedAt = boundary(at);
-            clearInterval(timerInterval); clearInterval(hardStopInterval);
+            clearInterval(timerInterval); window.FocusAlarm?.stop(); clearInterval(hardStopInterval);
             const task = currentTask();
             if (task?.lastChanged !== null && task) pauseTaskClock(task, stoppedAt);
             const projected = sortedTasks.map(row => ({ ...row }));

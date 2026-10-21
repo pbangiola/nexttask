@@ -11,11 +11,11 @@
         'frontend/task-graph.js?v=20261015-project-qa-2',
         'frontend/task-graph-timing.js?v=20261015-project-qa-2',
         'frontend/persistence.js?v=20261015-project-qa-2',
-        'frontend/ui.js?v=20261015-project-qa-2',
+        'frontend/ui.js?v=20261021-focus-1',
         'frontend/core.js?v=20261015-project-qa-2',
         'frontend/timing.js?v=20261015-project-qa-2',
         'frontend/project-queue.js?v=20261015-project-qa-2',
-        'frontend/focus-durability.js?v=20261015-project-qa-2',
+        'frontend/focus-durability.js?v=20261021-focus-1',
         'frontend/work-planner.js?v=20261015-project-qa-2',
         'frontend/planner.js?v=20261015-project-qa-2',
         'frontend/project-queue-filter.js?v=20261015-project-qa-2',
@@ -143,6 +143,8 @@
             clerk.addListener(() => {
                 if (sameAccount()) return;
                 window.taskSorterAuth = null;
+                window.FocusAlarm?.stop();
+                if (window.focusNormalTitle != null) { document.title = window.focusNormalTitle; window.focusNormalTitle = null; }
                 abort.abort();
                 window.TaskGraph?.invalidate();
                 clearInterval(typeof timerInterval === 'undefined' ? null : timerInterval);

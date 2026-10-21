@@ -54,6 +54,28 @@
         .planner-insert { display: block; margin: 7px 0; padding: 5px 8px; font-size: 12px; }
         .planner-order-row { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
         .planner-moving { margin-top: 12px; padding: 10px; background: #f1f8e9; border-radius: 4px; }
+
+        #focusScreen { width:100%; max-width:960px; margin:auto; text-align:center; padding:clamp(12px,3vw,36px); box-sizing:border-box; color:#17233a; background:#fff; }
+        #focusScreen h2 { font-size:clamp(1.4rem,4vw,2.5rem); overflow-wrap:anywhere; }
+        #focusScreen #timer { font-size:clamp(3.5rem,15vw,9rem); line-height:1.1; font-weight:750; font-variant-numeric:tabular-nums; margin:.25em 0; }
+        #focusTimeLabel { font-size:1.3rem; font-weight:bold; }
+        #focusScreen progress { display:block; width:100%; height:24px; accent-color:#15633c; margin:24px 0; }
+        #focusScreen.over-estimate #timer, #focusScreen.over-estimate #focusTimeLabel { color:#a51c25; }
+        #focusDone { display:block; margin:24px auto; font-size:1.6rem; min-height:64px; background:#174d95; color:white; }
+        .focus-toolbar { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; }
+        #focusScreen button, #focusScreen summary { min-height:44px; cursor:pointer; }
+        #focusScreen :focus-visible { outline:3px solid #185cc5; outline-offset:3px; }
+        #focusAlarm { border:3px solid #a51c25; background:#fff3df; color:#66131a; padding:12px; }
+        #focusAlarm[hidden], #focusAlarm button[hidden] { display:none; }
+        #focusScreen details { margin-top:20px; text-align:left; }
+        #focusScreen label { display:inline-flex; align-items:center; gap:8px; padding:12px; }
+        body.focus-expanded #taskSorterApp > :not(#dynamicContainer):not(#durabilityStatus) { display:none; }
+        body.focus-expanded { max-width:none; margin:0; }
+        #focusScreen input[type=checkbox] { width:auto; }
+        body.focus-expanded #taskSorterApp { max-width:none; width:100%; margin:0; padding:0; }
+        body.focus-expanded #focusScreen, #focusScreen:fullscreen { max-width:none; min-height:100dvh; overflow:auto; }
+        @media(max-width:480px) { .focus-toolbar > button { flex:1 1 45%; } #focusScreen label { display:flex; } }
+        @media(prefers-reduced-motion:reduce) { #focusScreen * { animation:none!important; transition:none!important; } }
     </style>
 </head>
 <body>
@@ -109,7 +131,7 @@
     <div id="dynamicContainer"></div>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.3/papaparse.min.js" onerror="console.warn('CSV helper unavailable; using built-in parser.')"></script>
     </div>
-    <script src="frontend/auth.js?v=20261015-project-qa-2"></script>
-    <script src="frontend/deadline-audio.js?v=20261012-1"></script>
+    <script src="frontend/auth.js?v=20261021-focus-1"></script>
+    <script src="frontend/deadline-audio.js?v=20261021-focus-1"></script>
 </body>
 </html>
