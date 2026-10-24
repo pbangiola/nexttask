@@ -4,7 +4,7 @@
   "description": "Task Sorter application with a static frontend and persistent Node/SQLite backend.",
   "main": "backend/server.js",
   "engines": {
-    "node": "22.x"
+    "node": ">=22.23.4 <23"
   },
   "scripts": {
     "start": "node backend/server.js",

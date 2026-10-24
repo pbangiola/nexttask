@@ -1,7 +1,29 @@
 # Railway deployment setup — integrated beta
 
-Use Node 22.23.3 (`.nvmrc`; engines 22.x), frozen `npm ci`, and
+Use Node 22.23.4 (`.nvmrc`; engines >=22.23.4 <23), frozen `npm ci`, and
 `npm start` (`node backend/server.js`). No Docker is required.
+
+## October 2026 security update
+
+Node 22.23.4 is the minimum patched Node 22 release for the October 21
+TLS/Brotli fixes and eMudhra certificate compromise. `.nvmrc` pins that release;
+`package.json` and the lockfile require `>=22.23.4 <23`. CI reads `.nvmrc`.
+Advisory: https://render.com/docs/advisory-emudhra
+
+Rebuild and redeploy every backend service from the patched commit; a repository
+change alone does not update a running process. Check hosting-level Node version
+overrides too. On Render, `NODE_VERSION` overrides `.node-version`, `.nvmrc`, and
+`package.json`, in that order. Update any override to 22.23.4 (or a later Node 22
+patch) before rebuilding. On Railway, confirm the selected runtime in build logs.
+Preserve the existing persistent volume and secrets.
+
+Verify `node --version` in the deployed service, then check `/api/health` and
+sign-in/task synchronization. To verify certificate rejection, use the running
+service's Node HTTP client against both test endpoints listed in the advisory;
+each must fail with a certificate verification error. A proxy/network error is
+inconclusive. This repository contains no PHP application or Docker image.
+
+## Service configuration
 
 The current frontend loader is `frontend/auth.js`, with application API setup in
 `frontend/initialization.js`. GitHub Pages uses the existing backend fallback

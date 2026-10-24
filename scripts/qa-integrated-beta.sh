@@ -38,7 +38,7 @@ fi
 cd "$CHECKOUT"
 printf 'Checkout: %s\n' "$CHECKOUT"; git status --short --branch; git log -1 --format='%h %s'
 if [[ "$MODE" == status ]]; then printf 'QA data: %s/data\n' "$QA_ROOT"; exit 0; fi
-[[ "$(node -p 'process.versions.node')" == "$(tr -d '\r\n' < .nvmrc)" ]] || { printf 'Use Node 22.23.3: nvm install && nvm use\n' >&2; exit 1; }
+[[ "$(node -p 'process.versions.node')" == "$(tr -d '\r\n' < .nvmrc)" ]] || { printf 'Use Node %s: nvm install && nvm use\n' "$(tr -d '\r\n' < .nvmrc)" >&2; exit 1; }
 export PLAYWRIGHT_BROWSERS_PATH="$QA_ROOT/browsers"
 if [[ "$MODE" == setup ]]; then
   npm ci
