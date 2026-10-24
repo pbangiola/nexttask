@@ -6,7 +6,7 @@ local changes and never resets another checkout.
 
 ## Current checkout
 
-Install/use Node 22.23.3 (with nvm: `nvm install && nvm use`), then:
+Install/use Node 22.23.4 (with nvm: `nvm install && nvm use`), then:
 
 ```bash
 git clone --branch codex/integrated-beta https://github.com/pbangiola/nexttask.git nexttask-beta
