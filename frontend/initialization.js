@@ -2,7 +2,7 @@
 
 //load and set global variables
 
-const API_BASE_URL = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+const API_BASE_URL = window.location.hostname !== 'pbangiola.github.io'
     ? window.location.origin
     : 'https://nexttask-production.up.railway.app';
 const DECOMPOSITION_PROMPT_MINUTES = 20;

@@ -9,7 +9,9 @@
   "scripts": {
     "start": "node backend/server.js",
     "dev": "node --watch backend/server.js",
-    "test": "node --test"
+    "test": "node --test --test-concurrency=1",
+    "demo": "node scripts/demo.js",
+    "seed:dev": "node scripts/seed-vnext.js"
   },
   "keywords": [],
   "author": "",

@@ -104,6 +104,7 @@
     }
 
     async function loadTree() {
+        await window.PlanExecution?.refresh();
         await ensureUser();
         workTreeCache = await fetchTaskTree();
         return workTreeCache;
@@ -115,7 +116,7 @@
         checkbox.type = 'checkbox'; checkbox.checked = sortSelectedWork;
         checkbox.style.width = 'auto';
         checkbox.onchange = () => { sortSelectedWork = checkbox.checked; };
-        label.append(checkbox, document.createTextNode(' Sort selected work before Focus'));
+        label.append(checkbox, document.createTextNode(' Sort selected work by importance before Focus'));
         return label;
     }
 
@@ -142,6 +143,7 @@
         sortedTasks = [sorting, ...flattenTree([...ordered,...other])];
         hide(el('taskCompare'));
         await save('dashboard');
+        await window.NextPlan?.recordImportance(ordered);
     }
 
     async function startNodes(nodes,startImmediately=true) {

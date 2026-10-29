@@ -9,8 +9,9 @@ window.FocusDurability = (() => {
     const encode = encodeURIComponent;
     const step = (path, body, method = 'POST') => ({ path, method, body });
     const eligible = task => !task.completed && ['pending', 'active'].includes(task.status)
-        && (task.nodeType || 'task') === 'task' && task.independentlyActionable !== false;
-    const queue = tasks => tasks.filter(eligible).map(task => task.id);
+        && (task.nodeType || 'task') === 'task' && task.independentlyActionable !== false
+        && (!window.PlanExecution || window.PlanExecution.allowed(task));
+    const queue = tasks => tasks.filter(task => !task.completed && ['pending','active'].includes(task.status) && (task.nodeType || 'task') === 'task' && task.independentlyActionable !== false).map(task => task.id);
     const boundary = now => hasHardStop() ? Math.min(now, hardStopAtMs) : now;
 
     function payload(tasks = sortedTasks) {

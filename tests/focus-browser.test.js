@@ -335,6 +335,9 @@ test('account switch while obtaining a token rejects old actions before dispatch
 test('background preserves clock and interval; rendering and visibility keep one repeating alarm', async t => {
     const { page, owner } = await pageFor(t, undefined, true);
     await newList(page); await idle(page);
+    // Freeze autonomous clock advancement so a legitimate scheduled pulse
+    // cannot race the assertion about rendering/visibility side effects.
+    await page.clock.pauseAt(await page.evaluate(()=>Date.now()+100));
     await page.evaluate(() => { currentTask().actualTimeMs=60000; currentTask().lastChanged=Date.now(); window.FocusAlarm.check(); });
     const pulses=await page.evaluate(()=>window.audioPulses);
     await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); });
@@ -483,14 +486,14 @@ test('confirmed server closure cancels stale journaled starts on reload', async 
     assert.equal(await page.locator('#focusScreen').count(), 0);
 });
 
-test('sorting an existing backlog keeps canonical IDs, estimates, names and sibling positions while changing only queue rank', async t => {
+test('sorting an existing backlog keeps canonical IDs, estimates, names and sibling positions while recording importance separately from queue rank', async t => {
     const { page, owner } = await pageFor(t);
     const { node: first } = await api(owner, `/users/${owner}/nodes`, 'POST', { id: `${owner}_one`, name: 'Existing One', estimatedTimeMs: 60000 });
     const { node: second } = await api(owner, `/users/${owner}/nodes`, 'POST', { id: `${owner}_two`, name: 'Existing Two', estimatedTimeMs: 120000 });
     await page.getByRole('button', { name: 'Work', exact: true }).click();
     await page.locator('#resumeExistingListBtn').click();
     await page.getByRole('button', { name: "No, I don't have a set stop time." }).click();
-    await page.getByLabel('Sort selected work before Focus').check();
+    await page.getByLabel('Sort selected work by importance before Focus').check();
     await page.getByRole('button', { name: 'Entire Task List', exact: true }).click();
     await page.locator('#task2').click();
     await page.waitForSelector('#focusScreen'); await idle(page);
@@ -498,6 +501,7 @@ test('sorting an existing backlog keeps canonical IDs, estimates, names and sibl
     const session = sessionRows(owner)[0];
     const { items } = await api(owner, `/work-sessions/${session.id}`);
     assert.deepEqual(items.map(row => row.id), [second.id, first.id]);
+    const comparisons=raw.prepare('SELECT * FROM plan_comparisons WHERE user_id=?').all(owner);assert.ok(comparisons.some(c=>c.higher_id===second.id&&c.lower_id===first.id));
     for (const before of [first, second]) {
         const after = raw.prepare('SELECT * FROM tasks WHERE id=?').get(before.id);
         for (const field of ['id', 'session_id', 'user_id', 'name', 'parent_id', 'position', 'estimated_ms']) assert.equal(after[field], before[field], field);

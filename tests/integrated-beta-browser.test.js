@@ -107,7 +107,7 @@ function intervalRows(owner) { return raw.prepare('SELECT * FROM work_intervals 
 function sessionRows(owner) { return raw.prepare('SELECT * FROM work_sessions WHERE user_id=?').all(owner); }
 
 async function planProjects(page) {
-    await page.getByRole('button',{name:'Plan',exact:true}).click();
+    await page.evaluate(()=>window.ProjectPlanner.open());
     await page.locator('#plannerReview').click(); await page.locator('#reviewProjects').click();
 }
 async function fixture(owner) {
@@ -164,12 +164,12 @@ test('optional pairwise importance/deadline matrix persists owned fields without
     const {page,owner}=await pageFor(t);await fixture(owner);
     await api(owner,`/users/${owner}/nodes`,'POST',{id:owner+'_priority_peer',name:'Peer parent',nodeType:'project',estimatedTimeMs:60000});
     const before=raw.prepare('SELECT id,parent_id,position,estimated_ms,elapsed_ms FROM tasks WHERE user_id=? ORDER BY id').all(owner);
-    await page.locator('#insightsBtn').click();await page.waitForSelector('#priorityTable');assert.match(await page.locator('#dynamicContainer').textContent(),/Timezone:/);assert.match(await page.locator('#priorityTable').textContent(),/Unspecified/);
+    await page.evaluate(()=>window.BetaInsights.matrix());await page.waitForSelector('#priorityTable');assert.match(await page.locator('#dynamicContainer').textContent(),/Timezone:/);assert.match(await page.locator('#priorityTable').textContent(),/Unspecified/);
     await page.locator('#rankImportance').click();await page.locator('#cancelImportance').click();await page.waitForSelector('#priorityTable');assert.match(await page.locator('#priorityTable').textContent(),/Unspecified/);
     await page.locator('#rankImportance').click();while(await page.locator('#taskCompare:not(.hidden)').count())await page.locator('#task1').click();await page.waitForSelector('#priorityTable');
     const first=page.locator('#priorityTable tr[data-task-id]').first();const firstId=await first.getAttribute('data-task-id');await first.locator('input[type=datetime-local]').fill('2020-01-01T12:00');await first.getByRole('button',{name:'Save due'}).click();await page.waitForFunction(()=>document.querySelector('#priorityTable')?.textContent.includes('latest-start overdue'));
     const saved=raw.prepare('SELECT * FROM task_priorities WHERE task_id=?').get(firstId);assert.ok(saved.due_at);assert.equal(saved.importance_rank,1);
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.locator('#insightsBtn').click();await page.waitForSelector('#priorityTable');assert.equal(await page.locator(`[data-task-id="${firstId}"] input`).inputValue(),'2020-01-01T12:00');
+    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>window.BetaInsights.matrix());await page.waitForSelector('#priorityTable');assert.equal(await page.locator(`[data-task-id="${firstId}"] input`).inputValue(),'2020-01-01T12:00');
     assert.deepEqual(raw.prepare('SELECT id,parent_id,position,estimated_ms,elapsed_ms FROM tasks WHERE user_id=? ORDER BY id').all(owner),before);
     assert.equal(intervalRows(owner).length,0);assert.equal(sessionRows(owner).length,0);
     await page.getByRole('button',{name:'Back',exact:true}).click();await page.getByRole('button',{name:'Work',exact:true}).click();await page.locator('#resumeExistingListBtn').click();await page.getByRole('button',{name:"No, I don't have a set stop time."}).click();await page.getByRole('button',{name:'Entire Task List',exact:true}).click();await page.waitForSelector('#focusScreen');await idle(page);
@@ -178,7 +178,7 @@ test('optional pairwise importance/deadline matrix persists owned fields without
 test('hierarchy metrics export canonical IDs/minute units without double counting; direct root edit persists its ID',async t=>{
     const {page,owner}=await pageFor(t);await fixture(owner);await api(owner,`/users/${owner}/nodes`,'POST',{id:owner+'_loose',name:'Loose, quoted "task"',estimatedTimeMs:60000});
     raw.prepare('UPDATE tasks SET elapsed_ms=? WHERE id=?').run(30000,owner+'_loose');
-    await page.locator('#metricsBtn').click();await page.waitForSelector('#metricsExport');
+    await page.evaluate(()=>window.BetaInsights.metrics());await page.waitForSelector('#metricsExport');
     const csv=await page.evaluate(async()=>window.BetaInsights.csv((await window.TaskGraph.request(`/users/${userId}/nodes?tree=1`)).nodes.flatMap(function flatten(row){return [row,...(row.children||[]).flatMap(flatten)];})));
     assert.match(csv,/Canonical ID,Parent ID,Node type/);assert.match(csv,/"Loose, quoted ""task"""/);assert.match(csv,/summary-leaves,Leaf totals including retained history,,361\.00,0\.50,-360\.50/);
     const row=page.locator(`[data-node-id="${owner}_loose"]`);await row.getByRole('button',{name:'Edit / Move task',exact:true}).click();await page.locator('#projectEditorEditName').fill('Loose edited');await page.locator('#projectEditorEditMinutes').fill('2');await page.locator('#projectEditorEditSave').click();await page.waitForSelector('#metricsExport');
@@ -188,7 +188,7 @@ test('hierarchy metrics export canonical IDs/minute units without double countin
 test('complete beta session: local guest, untimed project/nesting/edit, Work blocker/add/reload/Done/Stop and clean standalone context',async t=>{
     const {page:guestPage,privateRequests}=await guestFor(t);await entry(guestPage,'Guest first, 1m');await guestPage.waitForSelector('#dashboardScreen');assert.deepEqual(privateRequests,[]);
     const {page,owner}=await pageFor(t);page.on('dialog',d=>d.accept());
-    await page.getByRole('button',{name:'Plan',exact:true}).click();await page.locator('#plannerCreate').click();await page.locator('#projectName').fill('Journey');await page.locator('#projectContinue').click();await page.locator('#partsText').fill('First\nSecond, 2m');await page.locator('#partsSkipSort').check();await page.locator('#partsContinue').click();await page.locator('#timingEntryScreen input').fill('1');await page.getByRole('button',{name:'Save & Continue'}).click();await page.locator('#editProject').click();
+    await page.evaluate(()=>window.ProjectPlanner.open());await page.locator('#plannerCreate').click();await page.locator('#projectName').fill('Journey');await page.locator('#projectContinue').click();await page.locator('#partsText').fill('First\nSecond, 2m');await page.locator('#partsSkipSort').check();await page.locator('#partsContinue').click();await page.locator('#timingEntryScreen input').fill('1');await page.getByRole('button',{name:'Save & Continue'}).click();await page.locator('#editProject').click();
     const root=raw.prepare("SELECT * FROM tasks WHERE user_id=? AND name='Journey'").get(owner);
     await page.locator('#projectEditorAddProject').click();await page.locator('#projectEditorProjectName').fill('Inner');await page.locator('#projectEditorProjectSave').click();await page.locator('#projectEditorAddTask').click();await page.locator('#projectEditorTaskName').fill('Nested');await page.locator('#projectEditorTaskNext').click();await page.locator('#timingEntryScreen input').fill('3');await page.getByRole('button',{name:'Save & Continue'}).click();await page.getByRole('button',{name:'Add at end'}).click();await page.waitForSelector('#projectEditorTasks');
     const nested=raw.prepare("SELECT * FROM tasks WHERE user_id=? AND name='Nested'").get(owner);

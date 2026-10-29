@@ -1,0 +1,14 @@
+'use strict';
+const express=require('express');
+const store=require('./plan-store');
+const router=express.Router();
+const handle=fn=>(req,res)=>{try{res.json(fn(req.clerkUserId,req));}catch(error){res.status(error.status||(/not found/i.test(error.message)?404:400)).json({error:error.message});}};
+router.get('/plan',handle((owner)=>store.snapshot(owner)));
+router.post('/plan/tasks',handle((owner,req)=>store.create(owner,req.body||{})));
+router.put('/plan/tasks/:id',handle((owner,req)=>store.update(owner,req.params.id,req.body||{})));
+router.post('/plan/tasks/:id/delete',handle((owner,req)=>store.remove(owner,req.params.id,req.body||{})));
+router.post('/plan/tasks/:id/restore',handle((owner,req)=>store.restore(owner,req.params.id,req.body||{})));
+router.post('/plan/bulk',handle((owner,req)=>store.bulk(owner,req.body||{})));
+router.post('/plan/rank',handle((owner,req)=>store.rank(owner,req.body||{})));
+router.put('/plan/settings',handle((owner,req)=>store.settings(owner,req.body||{})));
+module.exports=router;
