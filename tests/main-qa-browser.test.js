@@ -107,7 +107,7 @@ function intervalRows(owner) { return raw.prepare('SELECT * FROM work_intervals 
 function sessionRows(owner) { return raw.prepare('SELECT * FROM work_sessions WHERE user_id=?').all(owner); }
 
 async function planProjects(page) {
-    await page.getByRole('button',{name:'Plan',exact:true}).click();
+    await page.evaluate(()=>window.ProjectPlanner.open());
     await page.locator('#plannerReview').click(); await page.locator('#reviewProjects').click();
 }
 async function fixture(owner) {
@@ -137,7 +137,7 @@ test('B2: untimed add and blocker collect estimates before durable insertion, ca
 test('B3: mixed project entry, both sort choices, optional container estimate and duplicate occurrences',async t=>{
     for(const skip of [true,false]) {
         const {page,owner}=await pageFor(t); page.on('dialog',d=>d.accept());
-        await page.getByRole('button',{name:'Plan',exact:true}).click(); await page.locator('#plannerCreate').click(); await page.locator('#projectName').fill('qa'); await page.locator('#projectContinue').click();
+        await page.evaluate(()=>window.ProjectPlanner.open()); await page.locator('#plannerCreate').click(); await page.locator('#projectName').fill('qa'); await page.locator('#projectContinue').click();
         await page.waitForSelector('#partsText'); await page.locator('#partsText').fill('Plain\nTimed, 2m\nTimed, 3m'); await page.locator('#partsSkipSort').setChecked(skip); await page.locator('#partsContinue').click();
         if(!skip) {while(await page.locator('#taskCompare:not(.hidden)').count()) await page.locator('#task1').click();}
         await page.waitForSelector('#timingEntryScreen'); await page.locator('#timingEntryScreen input').fill('1'); await page.getByRole('button',{name:'Save & Continue'}).click(); await page.waitForSelector('#editProject');

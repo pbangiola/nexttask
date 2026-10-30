@@ -96,7 +96,8 @@ async function startSorting() {
     sortedTasks = [sortTask, ...sortedWorkTasks];
     activeTaskId = firstIncompleteTask()?.id || null;
     hide(el('taskCompare'));
-    save('dashboard');
+    await save('dashboard');
+    if(!el('skipSortCheckbox').checked)await window.NextPlan?.recordImportance(sortedWorkTasks);
     collectMissingEstimates(sortedWorkTasks, () => showDashboard(), () => showTaskInput());
 }
 

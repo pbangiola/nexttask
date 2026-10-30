@@ -107,7 +107,7 @@ function intervalRows(owner) { return raw.prepare('SELECT * FROM work_intervals 
 function sessionRows(owner) { return raw.prepare('SELECT * FROM work_sessions WHERE user_id=?').all(owner); }
 
 async function planProjects(page) {
-    await page.getByRole('button',{name:'Plan',exact:true}).click();
+    await page.evaluate(()=>window.ProjectPlanner.open());
     await page.waitForFunction(()=>document.querySelector('#plannerReview,#summaryDone,#projectList,#reviewProjects'));
     if(await page.locator('#summaryDone').count())await page.locator('#summaryDone').click();
     if(await page.locator('#plannerReview').count())await page.locator('#plannerReview').click();
@@ -142,7 +142,7 @@ test('importance and Work comparisons expose only parent peers; child order and 
     const {page,owner}=await pageFor(t);await parentsFixture(owner);
     await api(owner,`/users/${owner}/priorities/rank`,'PUT',{parentId:owner+'_P',taskIds:ids(owner,['p2','p1'])});
     const childRanks=raw.prepare('SELECT * FROM task_priorities WHERE task_id IN (?,?) ORDER BY task_id').all(...ids(owner,['p1','p2']));
-    await page.locator('#insightsBtn').click();await page.waitForSelector('#priorityTable');assert.equal(await page.locator('#priorityTable tr[data-task-id]').count(),3);
+    await page.evaluate(()=>window.BetaInsights.matrix());await page.waitForSelector('#priorityTable');assert.equal(await page.locator('#priorityTable tr[data-task-id]').count(),3);
     await page.locator('#rankImportance').click();const importance=await comparePeers(page);assert.ok(importance.length>0);
     assert.ok(importance.flat().every(name=>['Parent P','Parent Q','Root peer'].includes(name)));await page.waitForSelector('#priorityTable');
     assert.deepEqual(raw.prepare('SELECT * FROM task_priorities WHERE task_id IN (?,?) ORDER BY task_id').all(...ids(owner,['p1','p2'])),childRanks);

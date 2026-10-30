@@ -1,7 +1,7 @@
 'use strict';
 
 (() => {
-    const API_BASE_URL = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+    const API_BASE_URL = window.location.hostname !== 'pbangiola.github.io'
         ? window.location.origin
         : 'https://nexttask-production.up.railway.app';
     const APP_SCRIPTS = [
@@ -23,7 +23,9 @@
         'frontend/duplicate-review.js?v=20261015-project-qa-2',
         'frontend/project-csv.js?v=20261015-project-qa-2',
         'frontend/planner-bridge.js?v=20261015-project-qa-2',
-        'frontend/beta-insights.js?v=20261015-project-qa-2'
+        'frontend/beta-insights.js?v=20261015-project-qa-2',
+        'frontend/plan-domain.js?v=vnext1',
+        'frontend/plan.js?v=vnext1'
     ];
 
     const nativeFetch = window.fetch.bind(window);
@@ -115,6 +117,11 @@
             const configResponse = await nativeFetch(`${API_BASE_URL}/api/config`);
             if (!configResponse.ok) throw new Error(`Authentication configuration failed (${configResponse.status}).`);
             const config = await configResponse.json();
+            if (config.localDemo) {
+                clearTimeout(fallback); applicationStarted=true;window.taskSorterMode='authenticated';window.taskSorterAuth={userId:'local_demo'};
+                document.getElementById('guestEntryBtn')?.classList.add('hidden');document.getElementById('signInBtn')?.classList.add('hidden');
+                await loadApplication();document.getElementById('taskSorterApp').classList.remove('hidden');document.getElementById('authLoading')?.classList.add('hidden');return;
+            }
             const clerk = await loadClerk(config.clerkPublishableKey);
 
             document.getElementById('authLoading')?.classList.add('hidden');
