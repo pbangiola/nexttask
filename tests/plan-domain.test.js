@@ -60,3 +60,28 @@ test('preferred due dates flow through projects and prerequisites without becomi
  const r=plan(nodes,[edge('source','a')],[],options),a=r.items.find(i=>i.id==='a'),source=r.items.find(i=>i.id==='source');
  assert.equal(a.dueAt,3*H);assert.equal(a.deadlineAt,null);assert.equal(source.latestStart,H);assert.equal(r.hardConstraintsSatisfied,true);
 });
+
+test('calendar planning starts now without availability or importance comparisons',()=>{
+ const now=Date.parse('2026-10-29T15:00:00Z'),nodes=[task('alpha'),task('beta',{estimated_ms:2*H})];
+ for(const extra of [{},{windows:[]}]){
+  const result=plan(nodes,[],[],{now,reserve:0.2,...extra});
+  assert.equal(result.availabilityMode,'continuous');
+  assert.equal(result.schedule[0].start,now);
+  assert.equal(result.schedule.at(-1).end,now+3*H);
+  assert.ok(result.items.every(i=>i.importanceRank===null&&i.ready));
+  assert.deepEqual(result.warnings,[]);
+ }
+});
+test('explicit task starts and working intervals override the present-time default',()=>{
+ const now=Date.parse('2026-10-29T15:00:00Z');
+ const nodes=[task('later',{earliest_start_at:now+2*H}),task('ready')];
+ const evidence=[{higher_id:'later',lower_id:'ready',created_at:1}];
+ const result=plan(nodes,[],evidence,{now,windows:[]});
+ assert.deepEqual(result.schedule.map(i=>i.id),['ready','later']);
+ assert.equal(result.schedule[0].start,now);assert.equal(result.schedule[1].start,now+2*H);
+ assert.equal(result.items.find(i=>i.id==='later').ready,false);
+ const explicit=plan([task('a')],[],[],{now,windows:[{start:now+4*H,end:now+6*H}]});
+ assert.equal(explicit.availabilityMode,'specified');assert.equal(explicit.schedule[0].start,now+4*H);
+ const expired=plan([task('a')],[],[],{now,windows:[{start:now-2*H,end:now-H}]});
+ assert.equal(expired.schedule.length,0,'expired explicit windows must not silently become continuous availability');
+});

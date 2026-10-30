@@ -91,8 +91,12 @@
         return null;
     }
     function plan(nodes, dependencies, comparisons, options) {
-        const {now, windows:rawWindows, reserve=0} = options;
-        const windows=intervals(rawWindows,now,reserve), g=graph(nodes,dependencies), ranks=importance(nodes,comparisons);
+        const {now, windows:rawWindows=[], reserve=0} = options;
+        // Missing working hours are not a release constraint. Forecast from now
+        // on an open timeline until the user supplies explicit availability.
+        const availabilityMode=rawWindows.length?'specified':'continuous';
+        const windows=rawWindows.length?intervals(rawWindows,now,reserve):[{start:now,end:Number.MAX_SAFE_INTEGER}];
+        const g=graph(nodes,dependencies), ranks=importance(nodes,comparisons);
         const work=nodes.filter(n=>n.node_type==='task'&&n.independently_actionable!==0&&!closed(n));
         const remaining = n => n.remaining_ms ?? (n.estimated_ms>0?Math.max(0,n.estimated_ms-(n.actual_ms??n.elapsed_ms??0)):null);
         const duration = new Map(work.map(n=>[n.id,remaining(n)]));
@@ -163,13 +167,14 @@
                 if(!segments || segments.at(-1).end>deadlines.get(n.id))continue;
                 const nextDone=new Set([...done,n.id]);
                 if(hardBaseline.ok&&!simulate(nextDone,segments.at(-1).end,null,true).ok)continue;
-                selected={id:n.id,segments,start:segments[0].start,end:segments.at(-1).end};break;
+                const placement={id:n.id,segments,start:segments[0].start,end:segments.at(-1).end};
+                if(!selected || (placement.start<selected.start && placement.end<=selected.start))selected=placement;
+                if(selected.start===cursor)break;
             }
             if(!selected)break;
             done.add(selected.id);cursor=selected.end;schedule.push(selected);
         }
         const warnings=[];
-        if(!rawWindows.length)warnings.push('Add available working intervals to obtain a timing forecast.');
         if(!hardBaseline.ok)warnings.push(hardBaseline.reason+'. No feasible schedule found by this planner; review capacity and constraints.');
         for(const n of work)if(!done.has(n.id))warnings.push(`${n.name}: ${unavailable.has(n.id)?'unknown estimate, closed parent, or unresolved prerequisite':'no placement found within available time'}.`);
         const items=work.map(n=>{
@@ -182,7 +187,7 @@
                 parentPath:ancestors.reverse().map(n=>n.name)};
         });
         for(const item of items){const node=g.byId.get(item.id);if(item.end&&Number.isFinite(targets.get(item.id))&&item.end>targets.get(item.id))warnings.push(`${node.name}: preferred due date missed.`);}
-        return {now,schedule,items,warnings,hardConstraintsSatisfied:hardBaseline.ok&&work.filter(n=>Number.isFinite(deadlines.get(n.id))).every(n=>done.has(n.id)),provisional:true,importanceOrder:ranks.order};
+        return {now,schedule,items,warnings,availabilityMode,hardConstraintsSatisfied:hardBaseline.ok&&work.filter(n=>Number.isFinite(deadlines.get(n.id))).every(n=>done.has(n.id)),provisional:true,importanceOrder:ranks.order};
     }
     return {graph,importance,plan,fit,intervals};
 });

@@ -19,7 +19,7 @@ window.NextPlan=(()=>{
         catch(error){
             if(error.status===409){await load();render();throw new Error('The plan changed elsewhere. Your change was not applied. Review the refreshed plan and try again.');}
             else if(error.status)throw error;
-            else {let retries=0;while(retries++<2){try{await request(path,method,payload);await load();render();return;}catch(next){if(next.status)throw next;}}throw new Error('Connection lost. Your change may have saved. Refresh before making another change.');}
+            else {let retries=0;while(retries++<2){try{await request(path,method,payload);await load();selected.clear();render();return;}catch(next){if(next.status)throw next;}}throw new Error('Connection lost. Your change may have saved. Refresh before making another change.');}
         }
     }
     function shell(){
@@ -72,10 +72,17 @@ window.NextPlan=(()=>{
     }
     function renderBulk(){
         const target=document.getElementById('planBulk');if(!target)return;target.replaceChildren();
+        const visible=list(),selectLabel=document.createElement('label'),selectAll=document.createElement('input');
+        selectAll.type='checkbox';selectAll.setAttribute('aria-label','Select all visible items');
+        selectAll.checked=visible.length>0&&visible.every(n=>selected.has(n.id));
+        selectAll.indeterminate=!selectAll.checked&&visible.some(n=>selected.has(n.id));
+        selectAll.disabled=!visible.length;
+        selectAll.onchange=()=>{for(const n of visible)selectAll.checked?selected.add(n.id):selected.delete(n.id);renderContent();};
+        selectLabel.className='plan-select-all';selectLabel.append(selectAll,document.createTextNode('Select all visible'));target.append(selectLabel);
         if(!selected.size)return;
         target.append(document.createTextNode(selected.size+' selected '));
         const ids=[...selected];
-        target.append(btn('Complete',()=>change('/bulk','POST',{ids,changes:{status:'completed'}})),btn('Archive',()=>change('/bulk','POST',{ids,changes:{archived:true}})),btn('Move',()=>move(ids)),btn('Clear',()=>{selected.clear();render();}));
+        target.append(btn('Edit selected',()=>bulkEdit(ids)),btn('Complete',()=>change('/bulk','POST',{ids,changes:{status:'completed'}})),btn('Reopen',()=>change('/bulk','POST',{ids,changes:{status:'pending'}})),btn('Archive',()=>change('/bulk','POST',{ids,changes:{archived:true}})),btn('Move',()=>move(ids)),btn('Delete selected',()=>bulkDelete(ids)),btn('Clear',()=>{selected.clear();render();}));
     }
     function render(){
         shell();
@@ -101,11 +108,11 @@ window.NextPlan=(()=>{
         const bulk=document.createElement('div');bulk.id='planBulk';bulk.className='plan-actions';panel.append(bulk);renderBulk();
         const warnings=state.forecast.warnings;
         if(warnings.length){const warning=document.createElement('details');warning.className='plan-warnings';const summary=document.createElement('summary');summary.textContent=warnings.length+' planning notes';warning.append(summary);for(const text of warnings){const p=document.createElement('p');p.textContent=text;warning.append(p);}panel.append(warning);}
-        const note=document.createElement('p');note.className='plan-toolbar-note';note.textContent=`Forecast uses ${Math.round(state.settings.reserve*100)}% reserve for unrecorded obligations. Importance comes from your comparisons. Time sequence also respects prerequisites, available intervals, and deadlines. Dates displayed in ${Intl.DateTimeFormat().resolvedOptions().timeZone}.`;panel.append(note);
+        const note=document.createElement('p');note.className='plan-toolbar-note';note.textContent=(state.forecast.availabilityMode==='continuous'?'Forecast starts now unless a task has a later start constraint. Working hours are optional; add availability to restrict the timeline. ':`Forecast uses your working intervals with ${Math.round(state.settings.reserve*100)}% reserve for unrecorded obligations. `)+`Importance comes from your comparisons. Time sequence also respects prerequisites and deadlines. Dates displayed in ${Intl.DateTimeFormat().resolvedOptions().timeZone}.`;panel.append(note);
         const content=document.createElement('div');content.id='planContent';panel.append(content);renderContent();
     }
     function renderContent(){
-        const content=document.getElementById('planContent');if(!content)return;content.replaceChildren();const rows=list();
+        const content=document.getElementById('planContent');if(!content)return;content.replaceChildren();const rows=list();renderBulk();
         if(view==='matrix'){
             const grid=document.createElement('div');grid.className='plan-grid';
             const labels=['More important · little freedom','More important · time remains','Less important · little freedom','Less important · time remains','Importance or timing uncertain'];
@@ -127,6 +134,45 @@ window.NextPlan=(()=>{
     }
     function field(form,label,type,value,name){const wrap=document.createElement('label');wrap.textContent=label;const input=document.createElement(type==='textarea'?'textarea':type==='select'?'select':'input');if(!['textarea','select'].includes(type))input.type=type;input.name=name;input.value=value??'';wrap.append(input);form.append(wrap);return input;}
     function parentOptions(select,current,exclude){select.append(new Option('No project / Inbox',''));for(const n of state.nodes.filter(n=>n.node_type==='project'&&n.status!=='cancelled'&&n.id!==exclude)){const o=new Option([path(n),n.name].filter(Boolean).join(' / '),n.id);o.selected=current===n.id;select.append(o);}}
+    function bulkEdit(ids){
+        const d=dialog('Edit '+ids.length+' selected items'),form=document.createElement('form');d.append(form);
+        const note=document.createElement('p');note.className='muted';note.textContent='Only checked fields change. A checked field left blank clears that value. Estimates apply to tasks; project totals stay derived from their components.';form.append(note);
+        const rows=ids.map(node),controls=[];
+        const common=key=>rows.every(n=>n[key]===rows[0][key])?rows[0][key]:null;
+        function add(key,label,type,value,convert){
+            const group=document.createElement('div');group.className='plan-bulk-field';
+            const applyLabel=document.createElement('label'),apply=document.createElement('input');apply.type='checkbox';apply.setAttribute('aria-label','Change '+label);applyLabel.className='plan-bulk-apply';applyLabel.append(apply,document.createTextNode('Change '+label));group.append(applyLabel);
+            const input=field(group,label,type,value,key);input.disabled=true;
+            if(type==='number'){input.min=0;input.step='any';}
+            if(type==='checkbox')input.checked=value===true;
+            apply.onchange=()=>{input.disabled=!apply.checked;};
+            controls.push({key,apply,input,convert});form.append(group);
+        }
+        const ms=input=>input.value===''?null:Math.round(Number(input.value)*60000);
+        const timestamp=input=>input.value?new Date(input.value).getTime():null;
+        add('estimatedTimeMs','Estimated total minutes','number',common('estimated_ms')>0?common('estimated_ms')/60000:'',input=>ms(input)??0);
+        add('remaining_ms','Remaining minutes override','number',common('remaining_ms')==null?'':common('remaining_ms')/60000,ms);
+        for(const [key,label]of [['due_at','Preferred due date'],['deadline_at','Hard deadline'],['earliest_start_at','Earliest start'],['scheduled_start_at','Scheduled start']])add(key,label,'datetime-local',local(common(key)),timestamp);
+        add('tags','Tags (comma separated)','text',rows.every(n=>JSON.stringify(n.tags)===JSON.stringify(rows[0].tags))?rows[0].tags.join(', '):'',input=>input.value.split(',').map(s=>s.trim()).filter(Boolean));
+        for(const [key,label,type]of [['location','Location','text'],['assignee','Assignee','text'],['description','Description','textarea'],['notes','Notes','textarea'],['success_criteria','Success criteria','textarea']])add(key,label,type,common(key)||'',input=>input.value);
+        add('splittable','Allow work across multiple intervals','checkbox',common('splittable'),input=>input.checked);
+        const error=document.createElement('p');error.className='plan-error';error.setAttribute('role','alert');form.append(error);
+        const actions=document.createElement('div');actions.className='plan-actions';const save=btn('Apply changes',()=>{},true);save.type='submit';actions.append(save,btn('Cancel',()=>d.close()));form.append(actions);
+        form.onsubmit=async e=>{
+            e.preventDefault();const changes={};for(const {key,apply,input,convert}of controls)if(apply.checked)changes[key]=convert(input);
+            if(!Object.keys(changes).length){error.textContent='Choose at least one field to change.';return;}
+            save.disabled=true;try{await change('/bulk','POST',{ids,changes});d.close();}catch(reason){error.textContent=reason.message;save.disabled=false;}
+        };
+    }
+    function bulkDelete(ids){
+        const g=window.PlanDomain.graph(state.nodes,state.dependencies),selection=new Set(ids);
+        const affected=state.nodes.filter(n=>selection.has(n.id)||g.ancestors(n.id).some(parent=>selection.has(parent.id)));
+        const d=dialog('Delete selected items?'),form=document.createElement('form');d.append(form);
+        const note=document.createElement('p');note.textContent=`Delete ${ids.length} selected item${ids.length===1?'':'s'} (${affected.length} item${affected.length===1?'':'s'} including project children)? You can restore deleted work from Archive; recorded work history is kept.`;form.append(note);
+        const error=document.createElement('p');error.className='plan-error';error.setAttribute('role','alert');form.append(error);
+        const actions=document.createElement('div');actions.className='plan-actions';const remove=btn('Delete items',()=>{});remove.type='submit';remove.className='danger';actions.append(btn('Cancel',()=>d.close()),remove);form.append(actions);
+        form.onsubmit=async e=>{e.preventDefault();remove.disabled=true;try{await change('/bulk','POST',{ids,action:'delete'});d.close();}catch(reason){error.textContent=reason.message;remove.disabled=false;}};
+    }
     async function edit(id,type='task'){
         const n=id?node(id):{node_type:type,name:'',parent_id:view==='project'?project:null,tags:[]},d=dialog(id?'Edit '+(n.node_type==='project'?'project':'task'):'New '+type),form=document.createElement('form');d.append(form);
         const title=field(form,'Title','text',n.name,'title');title.required=true;title.maxLength=1000;
@@ -168,12 +214,12 @@ window.NextPlan=(()=>{
     function move(ids){const d=dialog('Move selected work'),form=document.createElement('form');d.append(form);const parent=field(form,'Destination project','select','','parent');parentOptions(parent,null,null);const error=document.createElement('p');error.className='plan-error';form.append(error);const save=btn('Move',()=>{},true);save.type='submit';form.append(save,btn('Cancel',()=>d.close()));form.onsubmit=async e=>{e.preventDefault();try{await change('/bulk','POST',{ids,changes:{parentId:parent.value||null}});d.close();}catch(reason){error.textContent=reason.message;}};}
     function availability(){
         const d=dialog('Available working time'),form=document.createElement('form');d.append(form);
-        const note=document.createElement('p');note.className='muted';note.textContent='List available intervals after fixed obligations. Reserve leaves room for work you have not recorded. Past intervals do not create future capacity.';form.append(note);
+        const note=document.createElement('p');note.className='muted';note.textContent='Optional: restrict the calendar to available working intervals. With no intervals, planning begins now unless a task has a later start. Reserve applies to explicit intervals. Past intervals do not create future capacity.';form.append(note);
         const timezone=field(form,'Calendar timezone','text',state.settings.timezone,'timezone');
         const reserve=field(form,'Reserve for unrecorded work (%)','number',Math.round(state.settings.reserve*100),'reserve');reserve.min=0;reserve.max=80;
         const windows=[...state.windows];const list=document.createElement('div');form.append(list);
         function draw(){list.replaceChildren();windows.forEach((w,index)=>{const group=document.createElement('div');group.className='plan-fields';const start=field(group,'Available from','datetime-local',local(w.start),'start'+index),end=field(group,'Until','datetime-local',local(w.end),'end'+index);start.onchange=()=>w.start=new Date(start.value).getTime();end.onchange=()=>w.end=new Date(end.value).getTime();list.append(group,btn('Remove interval',()=>{windows.splice(index,1);draw();}));});}
-        draw();form.append(btn('Add interval',()=>{const start=Date.now()+3600000;windows.push({start,end:start+2*3600000});draw();}),btn('Next 7 weekdays, 9–5',()=>{windows.length=0;for(let i=0;i<10&&windows.length<7;i++){const start=new Date();start.setDate(start.getDate()+i);start.setHours(9,0,0,0);if([0,6].includes(start.getDay()))continue;windows.push({start:start.getTime(),end:start.getTime()+8*3600000});}draw();}));
+        draw();form.append(btn('Add interval',()=>{const start=Date.now();windows.push({start,end:start+2*3600000});draw();}),btn('Next 7 weekdays, 9–5',()=>{windows.length=0;for(let i=0;i<10&&windows.length<7;i++){const start=new Date();start.setDate(start.getDate()+i);start.setHours(9,0,0,0);if([0,6].includes(start.getDay()))continue;windows.push({start:start.getTime(),end:start.getTime()+8*3600000});}draw();}));
         const error=document.createElement('p');error.className='plan-error';form.append(error);const save=btn('Save availability',()=>{},true);save.type='submit';form.append(save,btn('Cancel',()=>d.close()));form.onsubmit=async e=>{e.preventDefault();save.disabled=true;try{await change('/settings','PUT',{timezone:timezone.value,reserve:Number(reserve.value)/100,windows});d.close();}catch(reason){error.textContent=reason.message;save.disabled=false;}};
     }
     async function rank(){

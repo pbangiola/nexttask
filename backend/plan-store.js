@@ -126,6 +126,14 @@ function update(owner,id,input){
     if(Object.keys(core).length)users.updateNode(owner,id,core);
     details(owner,id,input);return {id};
 }
+function remove(owner,id){
+    const current=owned(owner,id);
+    // A second delete must not replace the original restoration snapshot with
+    // an already deleted subtree, even when submitted with a new request ID.
+    if(current.status==='cancelled')return;
+    const result=users.deleteNode(owner,id,'subtree');
+    db.prepare('INSERT INTO plan_deletions VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET snapshot=excluded.snapshot').run(owner,id,JSON.stringify(result.undo));
+}
 module.exports={
     snapshot(owner,now){return db.transaction(()=>{materializeRecurrences(owner);return snapshot(owner,now);})();},
     create(owner,input){return mutate(owner,input,()=>{
@@ -136,10 +144,26 @@ module.exports={
     update(owner,id,input){return mutate(owner,input,()=>update(owner,id,input));},
     bulk(owner,input){return mutate(owner,input,()=>{
         if(!Array.isArray(input.ids)||!input.ids.length||input.ids.length>300)throw new Error('Select 1–300 tasks');
-        for(const id of new Set(input.ids))update(owner,id,input.changes||{});return {ids:input.ids};
+        const ids=[...new Set(input.ids)];
+        ids.forEach(id=>owned(owner,id));
+        if(input.action==='delete'){
+            const g=policy.validate(owner),selected=new Set(ids);
+            const roots=ids.filter(id=>!g.ancestors(id).some(parent=>selected.has(parent.id)));
+            for(const id of roots)remove(owner,id);
+            return {ids,deletedIds:roots};
+        }
+        if(input.action!==undefined)throw new Error('Unknown bulk action');
+        if(!input.changes||typeof input.changes!=='object'||Array.isArray(input.changes)||!Object.keys(input.changes).length)throw new Error('Choose at least one field to change');
+        for(const id of ids){
+            const changes={...input.changes};
+            // Container estimates remain derived from their executable children.
+            if(owned(owner,id).node_type==='project'){delete changes.estimatedTimeMs;delete changes.remaining_ms;}
+            update(owner,id,changes);
+        }
+        return {ids};
     });},
     remove(owner,id,input){return mutate(owner,input,()=>{
-        owned(owner,id);const result=users.deleteNode(owner,id,'subtree');db.prepare('INSERT INTO plan_deletions VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET snapshot=excluded.snapshot').run(owner,id,JSON.stringify(result.undo));return {id};
+        remove(owner,id);return {id};
     });},
     restore(owner,id,input){return mutate(owner,input,()=>{
         owned(owner,id);const saved=db.prepare('SELECT snapshot FROM plan_deletions WHERE user_id=? AND task_id=?').get(owner,id);

@@ -122,3 +122,83 @@ test('Work-created blocker relationships remain durable after Plan completes and
  store.update(owner,'wb-source',{status:'pending'});assert.equal(store.snapshot(owner).forecast.items.find(i=>i.id==='wb-main').ready,false);
  assert.throws(()=>graph.startInterval(owner,{id:'wb-rejected',taskId:'wb-main'}),/blocked/);
 });
+
+test('new accounts receive calendar placements immediately without setting dates or sorting',async()=>{
+ const owner='plan_now';
+ const created=await api(owner,'/tasks','POST',{tasks:[{id:'now-a',name:'Start now',estimatedTimeMs:60000},{id:'now-b',name:'Next task',estimatedTimeMs:120000}]});
+ assert.equal(created.status,200);
+ const {result:state}=await api(owner);
+ assert.equal(state.windows.length,0);assert.equal(state.comparisons.length,0);
+ assert.equal(state.forecast.schedule.length,2);assert.equal(state.forecast.schedule[0].start,state.forecast.now);
+ assert.equal(state.forecast.availabilityMode,'continuous');assert.ok(state.nodes.every(n=>n.earliest_start_at==null));
+});
+test('bulk edits apply chosen metadata atomically and preserve other fields and ownership',async()=>{
+ const owner='bulk_edit';
+ store.create(owner,{tasks:[{id:'be-p',name:'Project',nodeType:'project'},{id:'be-a',name:'A',parentId:'be-p',estimatedTimeMs:60000,notes:'Keep notes',due_at:1000,tags:['old']},{id:'be-b',name:'B',estimatedTimeMs:120000,description:'Keep description',due_at:2000,tags:['other']},{id:'be-unselected',name:'Unselected',estimatedTimeMs:180000}]});
+ store.create('bulk_foreign',{tasks:[{id:'be-foreign',name:'Foreign'}]});
+ let state=store.snapshot(owner),version=state.version;
+ const edits={ids:['be-p','be-a','be-b'],version,requestId:'bulk-metadata',changes:{estimatedTimeMs:720000,tags:['review'],due_at:null,location:'Office'}};
+ const edited=await api(owner,'/bulk','POST',edits);assert.equal(edited.status,200);
+ assert.deepEqual((await api(owner,'/bulk','POST',edits)).result,edited.result,'a retried edit must acknowledge the original write');
+ state=store.snapshot(owner);const a=state.nodes.find(n=>n.id==='be-a'),b=state.nodes.find(n=>n.id==='be-b');
+ assert.equal(a.estimated_ms,720000);assert.equal(b.estimated_ms,720000);assert.equal(a.notes,'Keep notes');assert.equal(b.description,'Keep description');
+ assert.equal(a.parent_id,'be-p');assert.equal(a.due_at,null);assert.equal(b.due_at,null);assert.deepEqual(a.tags,['review']);assert.equal(b.location,'Office');
+ assert.equal(state.nodes.find(n=>n.id==='be-p').estimated_ms,720000,'the project total is derived, not directly assigned');
+ assert.equal(state.nodes.find(n=>n.id==='be-unselected').estimated_ms,180000);
+ assert.equal((await api(owner,'/bulk','POST',{ids:['be-a'],version,changes:{notes:'Stale'}})).status,409);
+ const denied=await api(owner,'/bulk','POST',{ids:['be-a','be-foreign'],changes:{notes:'Wrong owner'}});assert.equal(denied.status,404);
+ assert.equal(store.snapshot(owner).nodes.find(n=>n.id==='be-a').notes,'Keep notes');
+ const invalid=await api(owner,'/bulk','POST',{ids:['be-a','be-b'],changes:{location:'Must roll back',tags:[null]}});assert.equal(invalid.status,400);
+ assert.ok(store.snapshot(owner).nodes.filter(n=>['be-a','be-b'].includes(n.id)).every(n=>n.location==='Office'));
+});
+test('bulk deletion deduplicates selected subtrees, is retry-safe, and restores recorded history',async()=>{
+ const owner='bulk_delete',now=Date.now();
+ store.create(owner,{tasks:[{id:'bd-p',name:'Parent',nodeType:'project'},{id:'bd-child',name:'Child',parentId:'bd-p',estimatedTimeMs:60000},{id:'bd-other',name:'Other',estimatedTimeMs:60000},{id:'bd-keep',name:'Keep',estimatedTimeMs:60000}]});
+ graph.startInterval(owner,{id:'bd-history',taskId:'bd-child',startedAt:now-3000});graph.stopInterval(owner,'bd-history',now-1000);
+ store.update(owner,'bd-child',{status:'completed'});
+ const request={ids:['bd-p','bd-child','bd-other'],action:'delete',requestId:'delete-selection',version:store.snapshot(owner).version};
+ const deleted=await api(owner,'/bulk','POST',request);assert.equal(deleted.status,200);assert.deepEqual(deleted.result.deletedIds,['bd-p','bd-other']);
+ assert.deepEqual((await api(owner,'/bulk','POST',request)).result,deleted.result);
+ assert.equal(store.snapshot(owner).nodes.find(n=>n.id==='bd-keep').status,'pending');
+ assert.ok(store.snapshot(owner).nodes.filter(n=>['bd-p','bd-child','bd-other'].includes(n.id)).every(n=>n.status==='cancelled'));
+ await api(owner,'/bulk','POST',{ids:request.ids,action:'delete',requestId:'delete-already-deleted'});
+ await api(owner,'/tasks/bd-p/restore','POST',{});const restored=store.snapshot(owner);
+ assert.equal(restored.nodes.find(n=>n.id==='bd-child').status,'completed');assert.equal(restored.nodes.find(n=>n.id==='bd-child').actual_ms,2000);
+ assert.equal(restored.nodes.find(n=>n.id==='bd-p').status,'completed');assert.equal(restored.nodes.find(n=>n.id==='bd-other').status,'cancelled');
+});
+test('bulk deletion rolls back the whole selection if any task is running or belongs to another owner',async()=>{
+ const owner='bulk_delete_guard';store.create(owner,{tasks:[{id:'bg-a',name:'A',estimatedTimeMs:60000},{id:'bg-running',name:'Running',estimatedTimeMs:60000}]});
+ store.create('bg-other',{tasks:[{id:'bg-foreign',name:'Foreign'}]});
+ assert.equal((await api(owner,'/bulk','POST',{ids:['bg-a','bg-foreign'],action:'delete'})).status,404);
+ graph.startInterval(owner,{id:'bg-interval',taskId:'bg-running'});
+ assert.equal((await api(owner,'/bulk','POST',{ids:['bg-a','bg-running'],action:'delete'})).status,400);
+ assert.equal(users.getNode(owner,'bg-a').status,'pending');assert.equal(users.getNode(owner,'bg-running').status,'pending');
+ graph.stopInterval(owner,'bg-interval');
+});
+test('browser calendar works before setup and selected tasks support bulk metadata edits and deletion',async t=>{
+ const owner='bulk_browser';store.create(owner,{tasks:[{id:'bb-a',name:'Bulk Alpha',estimatedTimeMs:60000,notes:'Keep Alpha',due_at:Date.now()+86400000},{id:'bb-b',name:'Bulk Beta',estimatedTimeMs:120000,notes:'Keep Beta',due_at:Date.now()+2*86400000},{id:'bb-keep',name:'Leave alone',estimatedTimeMs:180000}]});
+ const page=await pageFor(t,owner);
+ await page.getByRole('button',{name:'Calendar',exact:true}).click();await page.waitForSelector('.plan-day');
+ assert.doesNotMatch(await page.locator('#planContent').textContent(),/Unscheduled|No timing placement/);
+ await page.getByRole('button',{name:'Availability',exact:true}).click();await page.locator('dialog').getByRole('button',{name:'Add interval',exact:true}).click();
+ const start=await page.locator('dialog').getByLabel('Available from',{exact:true}).inputValue();
+ assert.ok(await page.evaluate(value=>Math.abs(new Date(value).getTime()-Date.now())<60000,start),'a newly added interval defaults to now, not an hour later');
+ await page.locator('dialog').getByRole('button',{name:'Cancel',exact:true}).click();
+ await page.getByRole('button',{name:'Inbox',exact:true}).click();await page.getByLabel('Select Bulk Alpha',{exact:true}).check();await page.getByLabel('Select Bulk Beta',{exact:true}).check();
+ await page.getByRole('button',{name:'Edit selected',exact:true}).click();
+ const dialog=page.locator('dialog');await dialog.getByLabel('Change Estimated total minutes',{exact:true}).check();await dialog.getByLabel('Estimated total minutes',{exact:true}).fill('12');
+ await dialog.getByLabel('Change Tags (comma separated)',{exact:true}).check();await dialog.getByLabel('Tags (comma separated)',{exact:true}).fill('review, home');
+ await dialog.getByLabel('Change Preferred due date',{exact:true}).check();await dialog.getByLabel('Preferred due date',{exact:true}).fill('');
+ await dialog.getByRole('button',{name:'Apply changes',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('dialog'));
+ let state=store.snapshot(owner);for(const id of ['bb-a','bb-b']){const n=state.nodes.find(n=>n.id===id);assert.equal(n.estimated_ms,720000);assert.equal(n.due_at,null);assert.deepEqual(n.tags,['home','review']);}
+ assert.equal(state.nodes.find(n=>n.id==='bb-a').notes,'Keep Alpha');assert.equal(state.nodes.find(n=>n.id==='bb-keep').estimated_ms,180000);
+ await page.getByLabel('Search tasks').fill('Bulk ');await page.getByLabel('Select all visible items',{exact:true}).check();
+ assert.equal(await page.getByLabel('Select Bulk Alpha',{exact:true}).isChecked(),true);assert.equal(await page.getByLabel('Select Bulk Beta',{exact:true}).isChecked(),true);
+ await page.getByRole('button',{name:'Delete selected',exact:true}).click();await page.locator('dialog').getByRole('button',{name:'Cancel',exact:true}).click();assert.equal(users.getNode(owner,'bb-a').status,'pending');
+ await page.getByRole('button',{name:'Delete selected',exact:true}).click();await page.locator('dialog').getByRole('button',{name:'Delete items',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('dialog'));
+ state=store.snapshot(owner);assert.equal(state.nodes.find(n=>n.id==='bb-a').status,'cancelled');assert.equal(state.nodes.find(n=>n.id==='bb-b').status,'cancelled');assert.equal(state.nodes.find(n=>n.id==='bb-keep').status,'pending');
+ await page.getByLabel('Search tasks').fill('');await page.getByRole('button',{name:'Archive',exact:true}).click();await page.locator('[data-task-id="bb-a"]').getByRole('button',{name:'Restore',exact:true}).click();
+ await page.waitForFunction(()=>!document.querySelector('[data-task-id="bb-a"]'));assert.equal(users.getNode(owner,'bb-a').status,'pending');
+ await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.locator('#planBtn').click();await page.waitForSelector('[data-task-id="bb-a"]');
+ assert.match(await page.locator('[data-task-id="bb-a"]').textContent(),/12 min remaining/);
+});
