@@ -79,6 +79,65 @@
         for (let i=1;i<result.length;i++) if(result[i].start<result[i-1].end) throw new Error('Availability intervals cannot overlap');
         return result.map(w=>({...w,end:w.end-Math.floor((w.end-w.start)*reserve)})).filter(w=>w.end>w.start);
     }
+    const DAY=86400000,MINUTE=60000;
+    function validateWorkingHours(hours){
+        if(!Array.isArray(hours)||hours.length>56)throw new Error('Supply at most 56 weekly working periods');
+        const result=hours.map(period=>{
+            if(!period||!Number.isInteger(period.weekday)||period.weekday<0||period.weekday>6||!Number.isInteger(period.startMinute)||period.startMinute<0||period.startMinute>=1440||!Number.isInteger(period.endMinute)||period.endMinute<=period.startMinute||period.endMinute>period.startMinute+1440)throw new Error('Invalid working period: choose a weekday and a start/end time within a 24-hour shift');
+            return {weekday:period.weekday,startMinute:period.startMinute,endMinute:period.endMinute};
+        }).sort((a,b)=>a.weekday-b.weekday||a.startMinute-b.startMinute);
+        const week=7*1440,segments=[];
+        for(const period of result){
+            const start=period.weekday*1440+period.startMinute,end=period.weekday*1440+period.endMinute;
+            segments.push({start,end:Math.min(end,week)});
+            if(end>week)segments.push({start:0,end:end-week});
+        }
+        segments.sort((a,b)=>a.start-b.start);
+        if(segments.some((s,i)=>i>0&&s.start<segments[i-1].end))throw new Error('Weekly working periods cannot overlap, including overnight shifts');
+        return result;
+    }
+    const zoneFormatters=new Map();
+    function wallEpoch(at,timezone){
+        if(!zoneFormatters.has(timezone)){
+            const formatter=new Intl.DateTimeFormat('en-US',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+            if(zoneFormatters.size>=16)zoneFormatters.delete(zoneFormatters.keys().next().value);
+            zoneFormatters.set(timezone,formatter);
+        }
+        const p=Object.fromEntries(zoneFormatters.get(timezone).formatToParts(at).filter(p=>p.type!=='literal').map(p=>[p.type,Number(p.value)]));
+        return Date.UTC(p.year,p.month-1,p.day,p.hour,p.minute);
+    }
+    function wallInstant(day,minute,timezone,isEnd){
+        const desired=day+minute*MINUTE;
+        const offsets=new Set([-36,0,36].map(hours=>{const at=desired+hours*3600000;return wallEpoch(at,timezone)-at;}));
+        const candidates=[...offsets].map(offset=>({at:desired-offset,wall:wallEpoch(desired-offset,timezone)}));
+        const exact=candidates.filter(c=>c.wall===desired).sort((a,b)=>a.at-b.at);
+        // Repeated times cover both occurrences. A nonexistent time moves
+        // forward by the DST gap, preserving the requested local minutes.
+        if(exact.length)return (isEnd?exact.at(-1):exact[0]).at;
+        const forward=candidates.filter(c=>c.wall>desired).sort((a,b)=>a.wall-b.wall||a.at-b.at);
+        if(!forward.length)throw new Error('Unable to resolve working hours in this timezone');
+        return forward[0].at;
+    }
+    function weeklyWindows(hours,{now,end,timezone}){
+        const periods=validateWorkingHours(hours),local=new Date(wallEpoch(now,timezone));
+        const first=Date.UTC(local.getUTCFullYear(),local.getUTCMonth(),local.getUTCDate())-DAY,result=[];
+        for(let day=first;day<=end+DAY;day+=DAY){
+            for(const period of periods.filter(p=>p.weekday===new Date(day).getUTCDay())){
+                const start=wallInstant(day,period.startMinute,timezone,false),finish=wallInstant(day,period.endMinute,timezone,true);
+                if(finish>now&&start<end&&finish>start)result.push({start:Math.max(start,now),end:Math.min(finish,end)});
+            }
+        }
+        return result;
+    }
+    function mergeWindows(input){
+        const result=[];
+        for(const window of [...input].sort((a,b)=>a.start-b.start)){
+            const last=result.at(-1);
+            if(last&&window.start<=last.end)last.end=Math.max(last.end,window.end);
+            else result.push({...window});
+        }
+        return result;
+    }
     function fit(windows, after, duration, split, before = Infinity, reverse = false) {
         let left=duration; const segments=[];
         for(const w of reverse?[...windows].reverse():windows) {
@@ -91,11 +150,21 @@
         return null;
     }
     function plan(nodes, dependencies, comparisons, options) {
-        const {now, windows:rawWindows=[], reserve=0} = options;
+        const {now, windows:rawWindows=[], reserve=0,workingHoursEnabled=false,workingHours=[],timezone='UTC'} = options;
         // Missing working hours are not a release constraint. Forecast from now
         // on an open timeline until the user supplies explicit availability.
-        const availabilityMode=rawWindows.length?'specified':'continuous';
-        const windows=rawWindows.length?intervals(rawWindows,now,reserve):[{start:now,end:Number.MAX_SAFE_INTEGER}];
+        const availabilityMode=workingHoursEnabled?'weekly':rawWindows.length?'specified':'continuous';
+        let planningWindows=rawWindows,horizonEnd=null;
+        if(workingHoursEnabled){
+            const hours=validateWorkingHours(workingHours);
+            const effort=nodes.filter(n=>n.node_type==='task'&&!closed(n)).reduce((sum,n)=>sum+(n.remaining_ms??Math.max(0,(n.estimated_ms||0)-(n.actual_ms??n.elapsed_ms??0))),0);
+            const weeklyCapacity=hours.reduce((sum,p)=>sum+(p.endMinute-p.startMinute)*MINUTE,0)*(1-reserve);
+            const effortDays=weeklyCapacity>0?Math.ceil(effort/weeklyCapacity)*7+14:56;
+            const latest=nodes.filter(n=>!closed(n)).reduce((last,n)=>Math.max(last,n.earliest_start_at||0,n.scheduled_start_at||0,n.due_at||0,n.deadline_at||0),now);
+            horizonEnd=Math.min(now+366*5*DAY,Math.max(now+Math.max(56,effortDays)*DAY,latest+14*DAY));
+            planningWindows=mergeWindows([...rawWindows,...weeklyWindows(hours,{now,end:horizonEnd,timezone})]);
+        }
+        const windows=availabilityMode==='continuous'?[{start:now,end:Number.MAX_SAFE_INTEGER}]:intervals(planningWindows,now,reserve);
         const g=graph(nodes,dependencies), ranks=importance(nodes,comparisons);
         const work=nodes.filter(n=>n.node_type==='task'&&n.independently_actionable!==0&&!closed(n));
         const remaining = n => n.remaining_ms ?? (n.estimated_ms>0?Math.max(0,n.estimated_ms-(n.actual_ms??n.elapsed_ms??0)):null);
@@ -187,7 +256,7 @@
                 parentPath:ancestors.reverse().map(n=>n.name)};
         });
         for(const item of items){const node=g.byId.get(item.id);if(item.end&&Number.isFinite(targets.get(item.id))&&item.end>targets.get(item.id))warnings.push(`${node.name}: preferred due date missed.`);}
-        return {now,schedule,items,warnings,availabilityMode,hardConstraintsSatisfied:hardBaseline.ok&&work.filter(n=>Number.isFinite(deadlines.get(n.id))).every(n=>done.has(n.id)),provisional:true,importanceOrder:ranks.order};
+        return {now,schedule,items,warnings,availabilityMode,horizonEnd,hardConstraintsSatisfied:hardBaseline.ok&&work.filter(n=>Number.isFinite(deadlines.get(n.id))).every(n=>done.has(n.id)),provisional:true,importanceOrder:ranks.order};
     }
-    return {graph,importance,plan,fit,intervals};
+    return {graph,importance,plan,fit,intervals,validateWorkingHours,weeklyWindows};
 });

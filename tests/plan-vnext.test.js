@@ -202,3 +202,51 @@ test('browser calendar works before setup and selected tasks support bulk metada
  await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.locator('#planBtn').click();await page.waitForSelector('[data-task-id="bb-a"]');
  assert.match(await page.locator('[data-task-id="bb-a"]').textContent(),/12 min remaining/);
 });
+
+test('weekly working hours persist, remain owner-scoped, and preserve dated availability on partial settings updates',async()=>{
+ const owner='weekly_owner',now=Date.parse('2026-10-30T23:00:00Z');
+ store.create(owner,{tasks:[{id:'weekly-task',name:'Next working day',estimatedTimeMs:60000}]});
+ store.settings(owner,{timezone:'America/Chicago',reserve:0,windows:[{start:Date.parse('2026-11-03T21:00:00Z'),end:Date.parse('2026-11-03T22:00:00Z')}]});
+ const workingHours=[1,2,3,4,5].map(weekday=>({weekday,startMinute:540,endMinute:1020}));
+ const body={workingHoursEnabled:true,workingHours,version:store.snapshot(owner).version,requestId:'weekly-once'};
+ const saved=await api(owner,'/settings','PUT',body);assert.equal(saved.status,200);assert.deepEqual((await api(owner,'/settings','PUT',body)).result,saved.result);
+ let state=store.snapshot(owner,now);assert.equal(state.settings.workingHoursEnabled,true);assert.deepEqual(state.settings.workingHours,workingHours);assert.equal(state.windows.length,1);assert.equal(state.forecast.schedule[0].start,Date.parse('2026-11-02T15:00:00Z'));
+ assert.equal(store.snapshot('weekly_other',now).settings.workingHoursEnabled,false);assert.deepEqual(store.snapshot('weekly_other',now).settings.workingHours,[]);
+ store.settings(owner,{timezone:'America/Chicago',reserve:0.1,windows:[]});state=store.snapshot(owner,now);assert.equal(state.settings.workingHoursEnabled,true);assert.deepEqual(state.settings.workingHours,workingHours);
+ const version=state.version;store.settings(owner,{workingHoursEnabled:false});assert.equal((await api(owner,'/settings','PUT',{workingHoursEnabled:true,version})).status,409);
+ state=store.snapshot(owner,now);assert.equal(state.forecast.availabilityMode,'continuous');assert.equal(state.settings.workingHours.length,5);
+ const {spawnSync}=require('node:child_process'),result=spawnSync(process.execPath,['-e',"console.log(JSON.stringify(require('./backend/plan-store').snapshot('weekly_owner').settings))"],{cwd:path.resolve(__dirname,'..'),env:process.env,encoding:'utf8'});assert.equal(result.status,0,result.stderr);assert.deepEqual(JSON.parse(result.stdout).workingHours,workingHours);
+});
+test('invalid weekly working hours roll back all settings and all days off never falls back to unrestricted time',async()=>{
+ const owner='weekly_invalid';store.create(owner,{tasks:[{id:'wi-task',name:'Work',estimatedTimeMs:60000}]});
+ store.settings(owner,{timezone:'UTC',reserve:0,workingHoursEnabled:true,workingHours:[{weekday:1,startMinute:540,endMinute:1020}]});
+ for(const body of [
+  {reserve:0.5,workingHours:[{weekday:1,startMinute:540,endMinute:1020},{weekday:1,startMinute:600,endMinute:660}]},
+  {workingHoursEnabled:'yes'},
+  {workingHours:null},
+  {timezone:'Invalid/Timezone'}
+ ])assert.equal((await api(owner,'/settings','PUT',body)).status,400);
+ let state=store.snapshot(owner);assert.equal(state.settings.reserve,0);assert.equal(state.settings.workingHours.length,1);
+ store.settings(owner,{workingHours:[],workingHoursEnabled:true});state=store.snapshot(owner);assert.equal(state.forecast.availabilityMode,'weekly');assert.equal(state.forecast.schedule.length,0);
+});
+test('browser saves weekly working hours, supports breaks, validates overlap, reloads, and can turn the schedule off',async t=>{
+ const owner='weekly_browser';store.create(owner,{tasks:[{id:'wh-work',name:'Weekly work',estimatedTimeMs:10*3600000}]});
+ const page=await pageFor(t,owner);await page.getByRole('button',{name:'Working hours',exact:true}).click();
+ const dialog=page.locator('dialog');await dialog.getByLabel('Working-hours timezone',{exact:true}).fill('America/New_York');
+ for(const day of ['Tuesday','Thursday','Friday'])await dialog.getByLabel('Work on '+day,{exact:true}).uncheck();
+ await dialog.getByLabel('Monday end 1',{exact:true}).fill('12:00');
+ await dialog.locator('.working-hours-day').filter({has:page.getByLabel('Work on Monday',{exact:true})}).getByRole('button',{name:'Add period',exact:true}).click();
+ await dialog.getByLabel('Monday start 2',{exact:true}).fill('11:00');await dialog.getByLabel('Monday end 2',{exact:true}).fill('17:00');
+ await dialog.getByRole('button',{name:'Save working hours',exact:true}).click();await page.waitForFunction(()=>document.querySelector('dialog .plan-error')?.textContent.includes('overlap'));
+ assert.equal(store.snapshot(owner).settings.workingHoursEnabled,false);
+ await dialog.getByLabel('Monday start 2',{exact:true}).fill('13:00');await dialog.getByRole('button',{name:'Save working hours',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('dialog'));
+ let state=store.snapshot(owner);assert.equal(state.settings.workingHoursEnabled,true);assert.equal(state.settings.timezone,'America/New_York');assert.equal(state.settings.workingHours.length,3);assert.equal(state.windows.length,0);
+ for(const slot of state.forecast.schedule)for(const segment of slot.segments){
+  const local=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'long',hour:'numeric',hourCycle:'h23'}).formatToParts(segment.start);const parts=Object.fromEntries(local.filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));assert.ok(['Monday','Wednesday'].includes(parts.weekday));assert.ok(Number(parts.hour)>=9&&Number(parts.hour)<17);if(parts.weekday==='Monday')assert.notEqual(Number(parts.hour),12);
+ }
+ await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.locator('#planBtn').click();await page.getByRole('button',{name:'Working hours',exact:true}).click();
+ assert.equal(await page.locator('dialog').getByLabel('Monday start 2',{exact:true}).inputValue(),'13:00');assert.equal(await page.locator('dialog').getByLabel('Work on Tuesday',{exact:true}).isChecked(),false);
+ await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.querySelector('dialog').scrollWidth<=document.querySelector('dialog').clientWidth),true);
+ await page.locator('dialog').getByRole('button',{name:'Turn off weekly hours',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('dialog'));
+ state=store.snapshot(owner);assert.equal(state.forecast.availabilityMode,'continuous');assert.equal(state.settings.workingHours.length,3);
+});

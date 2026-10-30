@@ -88,7 +88,7 @@ window.NextPlan=(()=>{
         shell();
         const heading=document.createElement('header');heading.className='plan-head';
         const title=document.createElement('div');title.innerHTML='<span class="muted">NEXTTASK · PLAN</span><h2>'+esc(view==='project'?node(project)?.name||'Project':({inbox:'Inbox',all:'Your landscape',projects:'Projects',today:'Today',upcoming:'Upcoming',calendar:'Calendar',matrix:'Importance & urgency',completed:'Completed work',archive:'Archived work'})[view])+'</h2>';
-        const actions=document.createElement('div');actions.className='plan-actions';actions.append(btn('Work',()=>work()),btn('Availability',availability),btn('Refresh',()=>open()),btn('Home',()=>{document.body.classList.remove('planning');showModeSelect();}));heading.append(title,actions);panel.append(heading);
+        const actions=document.createElement('div');actions.className='plan-actions';actions.append(btn('Work',()=>work()),btn('Working hours',workingHours),btn('Availability',availability),btn('Refresh',()=>open()),btn('Home',()=>{document.body.classList.remove('planning');showModeSelect();}));heading.append(title,actions);panel.append(heading);
         const nav=document.createElement('nav');nav.className='plan-nav';nav.setAttribute('aria-label','Plan views');
         for(const [key,label]of Object.entries({inbox:'Inbox',all:'All work',projects:'Projects',today:'Today',upcoming:'Upcoming',calendar:'Calendar',matrix:'Matrix',completed:'Completed',archive:'Archive'})){const b=btn(label,()=>{selected.clear();return open(key,null);});if(view===key)b.setAttribute('aria-current','page');nav.append(b);}panel.append(nav);
         const status=document.createElement('p');status.id='planMessage';status.className='plan-error';status.setAttribute('role','status');panel.append(status);
@@ -108,7 +108,7 @@ window.NextPlan=(()=>{
         const bulk=document.createElement('div');bulk.id='planBulk';bulk.className='plan-actions';panel.append(bulk);renderBulk();
         const warnings=state.forecast.warnings;
         if(warnings.length){const warning=document.createElement('details');warning.className='plan-warnings';const summary=document.createElement('summary');summary.textContent=warnings.length+' planning notes';warning.append(summary);for(const text of warnings){const p=document.createElement('p');p.textContent=text;warning.append(p);}panel.append(warning);}
-        const note=document.createElement('p');note.className='plan-toolbar-note';note.textContent=(state.forecast.availabilityMode==='continuous'?'Forecast starts now unless a task has a later start constraint. Working hours are optional; add availability to restrict the timeline. ':`Forecast uses your working intervals with ${Math.round(state.settings.reserve*100)}% reserve for unrecorded obligations. `)+`Importance comes from your comparisons. Time sequence also respects prerequisites and deadlines. Dates displayed in ${Intl.DateTimeFormat().resolvedOptions().timeZone}.`;panel.append(note);
+        const note=document.createElement('p');note.className='plan-toolbar-note';note.textContent=(state.forecast.availabilityMode==='continuous'?'Forecast starts now unless a task has a later start constraint. Set Working hours to follow your usual weekly schedule. ':state.forecast.availabilityMode==='weekly'?`Forecast follows your weekly working hours in ${state.settings.timezone}, plus any dated availability, with ${Math.round(state.settings.reserve*100)}% reserve. `:`Forecast uses your working intervals with ${Math.round(state.settings.reserve*100)}% reserve for unrecorded obligations. `)+`Importance comes from your comparisons. Time sequence also respects prerequisites and deadlines. Dates displayed in ${Intl.DateTimeFormat().resolvedOptions().timeZone}.`;panel.append(note);
         const content=document.createElement('div');content.id='planContent';panel.append(content);renderContent();
     }
     function renderContent(){
@@ -212,9 +212,52 @@ window.NextPlan=(()=>{
     }
     function bulkEntry(){const d=dialog('Capture several tasks'),form=document.createElement('form');d.append(form);const input=field(form,'One task per line; optional “, 15m”','textarea','','tasks');input.rows=8;input.required=true;const error=document.createElement('p');error.className='plan-error';form.append(error);const save=btn('Add tasks',()=>{},true);save.type='submit';form.append(save,btn('Cancel',()=>d.close()));form.onsubmit=async e=>{e.preventDefault();const parsed=window.TaskEntry.parse(input.value);if(parsed.invalid.length||!parsed.entries.length){error.textContent='Check task durations and names.';return;}save.disabled=true;try{await change('/tasks','POST',{tasks:parsed.entries.map(n=>({...n,id:createId('task'),parentId:view==='project'?project:null}))});d.close();}catch(reason){error.textContent=reason.message;save.disabled=false;}};}
     function move(ids){const d=dialog('Move selected work'),form=document.createElement('form');d.append(form);const parent=field(form,'Destination project','select','','parent');parentOptions(parent,null,null);const error=document.createElement('p');error.className='plan-error';form.append(error);const save=btn('Move',()=>{},true);save.type='submit';form.append(save,btn('Cancel',()=>d.close()));form.onsubmit=async e=>{e.preventDefault();try{await change('/bulk','POST',{ids,changes:{parentId:parent.value||null}});d.close();}catch(reason){error.textContent=reason.message;}};}
+    function workingHours(){
+        const d=dialog('Working hours'),form=document.createElement('form');d.append(form);
+        const note=document.createElement('p');note.className='muted';note.textContent='Choose your normal workdays and times. These hours repeat every week in the selected timezone, including daylight-saving changes. Add more periods for breaks. An end at or before the start means the shift ends the next day. No selected days means no regular working time. Save to enable this schedule.';form.append(note);
+        const timezone=field(form,'Working-hours timezone','text',state.settings.timezone,'timezone');timezone.required=true;
+        const zones=document.createElement('datalist');zones.id='workingHoursZones';
+        for(const zone of new Set(['UTC',state.settings.timezone,Intl.DateTimeFormat().resolvedOptions().timeZone,...(Intl.supportedValuesOf?.('timeZone')||[])])){const option=document.createElement('option');option.value=zone;zones.append(option);}
+        timezone.setAttribute('list',zones.id);form.append(zones);
+        const clock=minute=>String(Math.floor(minute%1440/60)).padStart(2,'0')+':'+String(minute%60).padStart(2,'0');
+        const minutes=value=>{const [hour,minute]=value.split(':').map(Number);return hour*60+minute;};
+        const existing=state.settings.workingHours||[],defaults=existing.length||state.settings.workingHoursEnabled?existing:[1,2,3,4,5].map(weekday=>({weekday,startMinute:540,endMinute:1020}));
+        const days=[['Monday',1],['Tuesday',2],['Wednesday',3],['Thursday',4],['Friday',5],['Saturday',6],['Sunday',0]].map(([name,weekday])=>({name,weekday,periods:defaults.filter(p=>p.weekday===weekday).map(p=>({start:clock(p.startMinute),end:clock(p.endMinute)}))}));
+        const list=document.createElement('div');list.className='working-hours-list';form.append(list);
+        function draw(){
+            list.replaceChildren();
+            for(const day of days){
+                const section=document.createElement('section');section.className='working-hours-day';
+                const label=document.createElement('label'),enabled=document.createElement('input');label.className='plan-select-all';enabled.type='checkbox';enabled.checked=day.periods.length>0;enabled.setAttribute('aria-label','Work on '+day.name);label.append(enabled,document.createTextNode(day.name));section.append(label);
+                enabled.onchange=()=>{day.periods=enabled.checked?[{start:'09:00',end:'17:00'}]:[];draw();};
+                day.periods.forEach((period,index)=>{
+                    const row=document.createElement('div');row.className='working-hours-period';
+                    const start=field(row,'From','time',period.start,day.weekday+'-start-'+index),end=field(row,'Until','time',period.end,day.weekday+'-end-'+index);
+                    start.required=end.required=true;start.step=end.step=60;start.setAttribute('aria-label',day.name+' start '+(index+1));end.setAttribute('aria-label',day.name+' end '+(index+1));
+                    start.onchange=()=>period.start=start.value;end.onchange=()=>period.end=end.value;
+                    row.append(btn('Remove period',()=>{day.periods.splice(index,1);draw();}));section.append(row);
+                });
+                if(day.periods.length)section.append(btn('Add period',()=>{const start=minutes(day.periods.at(-1).end);day.periods.push({start:clock(start),end:clock((start+60)%1440)});draw();}));
+                list.append(section);
+            }
+        }
+        draw();
+        const error=document.createElement('p');error.className='plan-error';error.setAttribute('role','alert');form.append(error);
+        const actions=document.createElement('div');actions.className='plan-actions';const save=btn('Save working hours',()=>{},true);save.type='submit';actions.append(save,btn('Cancel',()=>d.close()));
+        if(state.settings.workingHoursEnabled)actions.append(btn('Turn off weekly hours',async()=>{try{await change('/settings','PUT',{workingHoursEnabled:false});d.close();}catch(reason){error.textContent=reason.message;}}));
+        form.append(actions);
+        form.onsubmit=async e=>{
+            e.preventDefault();save.disabled=true;
+            try{
+                const periods=days.flatMap(day=>day.periods.map(period=>{const startMinute=minutes(period.start);let endMinute=minutes(period.end);if(endMinute<=startMinute)endMinute+=1440;return {weekday:day.weekday,startMinute,endMinute};}));
+                window.PlanDomain.validateWorkingHours(periods);
+                await change('/settings','PUT',{timezone:timezone.value,workingHoursEnabled:true,workingHours:periods});d.close();
+            }catch(reason){error.textContent=reason.message;save.disabled=false;}
+        };
+    }
     function availability(){
         const d=dialog('Available working time'),form=document.createElement('form');d.append(form);
-        const note=document.createElement('p');note.className='muted';note.textContent='Optional: restrict the calendar to available working intervals. With no intervals, planning begins now unless a task has a later start. Reserve applies to explicit intervals. Past intervals do not create future capacity.';form.append(note);
+        const note=document.createElement('p');note.className='muted';note.textContent=state.settings.workingHoursEnabled?'Weekly working hours are active. Dated intervals here add one-off working time, including time outside your normal schedule. Overlaps count only once. Reserve applies to all available working time.':'Set recurring days and times with Working hours, or list dated working intervals here. With neither configured, planning begins now unless a task has a later start. Past intervals do not create future capacity.';form.append(note);
         const timezone=field(form,'Calendar timezone','text',state.settings.timezone,'timezone');
         const reserve=field(form,'Reserve for unrecorded work (%)','number',Math.round(state.settings.reserve*100),'reserve');reserve.min=0;reserve.max=80;
         const windows=[...state.windows];const list=document.createElement('div');form.append(list);

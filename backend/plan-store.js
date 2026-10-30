@@ -21,14 +21,16 @@ CREATE TABLE IF NOT EXISTS plan_dependencies(user_id TEXT NOT NULL,task_id TEXT 
 CREATE TABLE IF NOT EXISTS plan_comparisons(sequence INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,higher_id TEXT NOT NULL REFERENCES tasks(id),lower_id TEXT NOT NULL REFERENCES tasks(id),created_at INTEGER NOT NULL,context TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS plan_settings(user_id TEXT PRIMARY KEY,timezone TEXT NOT NULL,reserve REAL NOT NULL DEFAULT 0.2);
 CREATE TABLE IF NOT EXISTS plan_availability(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,start_at INTEGER NOT NULL,end_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS plan_working_hours(user_id TEXT NOT NULL,weekday INTEGER NOT NULL,start_minute INTEGER NOT NULL,end_minute INTEGER NOT NULL,PRIMARY KEY(user_id,weekday,start_minute));
 CREATE TABLE IF NOT EXISTS plan_revisions(user_id TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS plan_deletions(user_id TEXT NOT NULL,task_id TEXT PRIMARY KEY,snapshot TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS plan_requests(user_id TEXT NOT NULL,id TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(user_id,id));
 `);
 if(!db.pragma('table_info(plan_details)').some(c=>c.name==='remaining_base_actual'))db.exec('ALTER TABLE plan_details ADD COLUMN remaining_base_actual INTEGER NOT NULL DEFAULT 0');
+if(!db.pragma('table_info(plan_settings)').some(c=>c.name==='working_hours_enabled'))db.exec('ALTER TABLE plan_settings ADD COLUMN working_hours_enabled INTEGER NOT NULL DEFAULT 0');
 db.exec(`INSERT OR IGNORE INTO plan_dependencies(user_id,task_id,prerequisite_id) SELECT t.user_id,t.id,t.blocked_by_task_id FROM tasks t JOIN tasks p ON p.id=t.blocked_by_task_id AND p.user_id=t.user_id WHERE t.user_id IS NOT NULL`);
 // All legacy and new writers participate in revision checks, including Work.
-for(const table of ['tasks','plan_details','plan_dependencies','plan_comparisons','plan_settings','plan_availability'])for(const op of ['INSERT','UPDATE','DELETE']) {
+for(const table of ['tasks','plan_details','plan_dependencies','plan_comparisons','plan_settings','plan_availability','plan_working_hours'])for(const op of ['INSERT','UPDATE','DELETE']) {
     const row=op==='DELETE'?'OLD':'NEW';
     db.exec(`CREATE TRIGGER IF NOT EXISTS plan_revision_${table}_${op} AFTER ${op} ON ${table} WHEN ${row}.user_id IS NOT NULL BEGIN
     INSERT INTO plan_revisions(user_id,revision) VALUES(${row}.user_id,1) ON CONFLICT(user_id) DO UPDATE SET revision=revision+1; END;`);
@@ -38,7 +40,10 @@ function owned(owner,id) { return users.getNode(owner,id); }
 function revision(owner){return db.prepare('SELECT revision FROM plan_revisions WHERE user_id=?').get(owner)?.revision||0;}
 function integer(value,label,nullable=true){if(value==null&&nullable)return null;if(!Number.isSafeInteger(value)||value<0)throw new Error(label+' must be nonnegative integer milliseconds');return value;}
 function text(value,label){if(typeof value!=='string'||value.length>20000)throw new Error('Invalid '+label);return value;}
-function settings(owner){return db.prepare('SELECT * FROM plan_settings WHERE user_id=?').get(owner)||{timezone:'America/Chicago',reserve:0.2};}
+function settings(owner){
+    const current=db.prepare('SELECT * FROM plan_settings WHERE user_id=?').get(owner)||{timezone:'America/Chicago',reserve:0.2};
+    return {...current,workingHoursEnabled:current.working_hours_enabled===1,workingHours:db.prepare('SELECT weekday,start_minute startMinute,end_minute endMinute FROM plan_working_hours WHERE user_id=? ORDER BY weekday,start_minute').all(owner)};
+}
 function snapshot(owner,now=Date.now()){
     integrity.reconcile(owner);
     const nodes=db.prepare(`SELECT t.*,d.description,d.notes,d.location,d.assignee,d.success_criteria,d.earliest_start_at,d.scheduled_start_at,d.due_at,d.deadline_at,d.remaining_ms,d.remaining_base_actual,d.archived,d.splittable,d.recurrence_days,d.recurrence_zone,d.recurrence_root,d.occurrence
@@ -58,7 +63,7 @@ function snapshot(owner,now=Date.now()){
             actualMs:nodes.filter(candidate=>candidate.id===n.id||g.ancestors(candidate.id).some(a=>a.id===n.id)).reduce((s,l)=>s+l.actual_ms,0),estimatedMs:included.reduce((s,l)=>s+l.estimated_ms,0),
             remainingMs:included.some(l=>l.status!=='completed'&&l.remaining_ms==null&&l.estimated_ms<=0)?null:included.filter(l=>l.status!=='completed').reduce((s,l)=>s+(l.remaining_ms??Math.max(0,l.estimated_ms-l.actual_ms)),0)};
     }
-    return {version:revision(owner),nodes,dependencies,comparisons,windows,settings:config,forecast:domain.plan(nodes,dependencies,comparisons,{now,windows,reserve:config.reserve})};
+    return {version:revision(owner),nodes,dependencies,comparisons,windows,settings:config,forecast:domain.plan(nodes,dependencies,comparisons,{now,windows,reserve:config.reserve,timezone:config.timezone,workingHoursEnabled:config.workingHoursEnabled,workingHours:config.workingHours})};
 }
 function details(owner,id,input){
     db.prepare('INSERT OR IGNORE INTO plan_details(task_id,user_id) VALUES(?,?)').run(id,owner);
@@ -176,14 +181,25 @@ module.exports={
         ids.slice(1).forEach((id,index)=>stmt.run(owner,ids[index],id,now,'backlog-sort'));return {ids};
     });},
     settings(owner,input){return mutate(owner,input,()=>{
-        const zone=input.timezone||settings(owner).timezone;new Intl.DateTimeFormat('en-US',{timeZone:zone});
-        if(typeof input.reserve!=='number'||input.reserve<0||input.reserve>0.8)throw new Error('Reserve must be between 0 and 80%');
-        if(!Array.isArray(input.windows)||input.windows.length>500)throw new Error('Invalid availability');
-        const windows=input.windows.map(w=>({start:integer(w.start,'start',false),end:integer(w.end,'end',false)}));
-        if(windows.some(w=>w.end<=w.start))throw new Error('Availability end must follow start');domain.intervals(windows,0,0);
-        db.prepare('INSERT INTO plan_settings VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET timezone=excluded.timezone,reserve=excluded.reserve').run(owner,zone,input.reserve);
-        db.prepare('DELETE FROM plan_availability WHERE user_id=?').run(owner);
-        for(const w of windows)db.prepare('INSERT INTO plan_availability VALUES(?,?,?,?)').run(randomUUID(),owner,w.start,w.end);return {saved:true};
+        const current=settings(owner),zone='timezone' in input?input.timezone:current.timezone,reserve='reserve' in input?input.reserve:current.reserve;
+        new Intl.DateTimeFormat('en-US',{timeZone:zone});
+        if(typeof reserve!=='number'||reserve<0||reserve>0.8)throw new Error('Reserve must be between 0 and 80%');
+        const enabled='workingHoursEnabled' in input?input.workingHoursEnabled:current.workingHoursEnabled;
+        if(typeof enabled!=='boolean')throw new Error('workingHoursEnabled must be boolean');
+        const hours=domain.validateWorkingHours('workingHours' in input?input.workingHours:current.workingHours);
+        if('windows' in input){
+            if(!Array.isArray(input.windows)||input.windows.length>500)throw new Error('Invalid availability');
+            const windows=input.windows.map(w=>({start:integer(w.start,'start',false),end:integer(w.end,'end',false)}));
+            if(windows.some(w=>w.end<=w.start))throw new Error('Availability end must follow start');domain.intervals(windows,0,0);
+            db.prepare('DELETE FROM plan_availability WHERE user_id=?').run(owner);
+            for(const w of windows)db.prepare('INSERT INTO plan_availability VALUES(?,?,?,?)').run(randomUUID(),owner,w.start,w.end);
+        }
+        db.prepare('INSERT INTO plan_settings(user_id,timezone,reserve,working_hours_enabled) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET timezone=excluded.timezone,reserve=excluded.reserve,working_hours_enabled=excluded.working_hours_enabled').run(owner,zone,reserve,enabled?1:0);
+        if('workingHours' in input){
+            db.prepare('DELETE FROM plan_working_hours WHERE user_id=?').run(owner);
+            for(const period of hours)db.prepare('INSERT INTO plan_working_hours VALUES(?,?,?,?)').run(owner,period.weekday,period.startMinute,period.endMinute);
+        }
+        return {saved:true};
     });},
     calendarShift,materializeRecurrences
 };

@@ -85,3 +85,49 @@ test('explicit task starts and working intervals override the present-time defau
  const expired=plan([task('a')],[],[],{now,windows:[{start:now-2*H,end:now-H}]});
  assert.equal(expired.schedule.length,0,'expired explicit windows must not silently become continuous availability');
 });
+
+test('weekly working hours respect days, breaks, and multi-day task splitting',()=>{
+ const now=Date.parse('2026-10-26T14:00:00Z'); // Monday 09:00 in Chicago.
+ const workingHours=[1,2,3,4,5].flatMap(weekday=>[{weekday,startMinute:540,endMinute:720},{weekday,startMinute:780,endMinute:1020}]);
+ const result=plan([task('long',{estimated_ms:10*H})],[],[],{now,timezone:'America/Chicago',workingHoursEnabled:true,workingHours,reserve:0});
+ assert.equal(result.availabilityMode,'weekly');
+ assert.deepEqual(result.schedule[0].segments,[
+  {start:now,end:Date.parse('2026-10-26T17:00:00Z')},
+  {start:Date.parse('2026-10-26T18:00:00Z'),end:Date.parse('2026-10-26T22:00:00Z')},
+  {start:Date.parse('2026-10-27T14:00:00Z'),end:Date.parse('2026-10-27T17:00:00Z')}
+ ]);
+ const unsplittable=plan([task('continuous',{estimated_ms:5*H,splittable:false})],[],[],{now,timezone:'America/Chicago',workingHoursEnabled:true,workingHours,reserve:0});
+ assert.equal(unsplittable.schedule.length,0,'a continuous task cannot span a break');
+});
+test('weekly hours skip nonworking days and continue recurring beyond manually entered dates',()=>{
+ const now=Date.parse('2026-10-30T23:00:00Z'); // Friday after work, before the fall DST change.
+ const options={now,timezone:'America/Chicago',workingHoursEnabled:true,workingHours:[1,2,3,4,5].map(weekday=>({weekday,startMinute:540,endMinute:1020})),reserve:0};
+ const result=plan([task('monday')],[],[],options);
+ assert.equal(result.schedule[0].start,Date.parse('2026-11-02T15:00:00Z'));
+ const distant=plan([task('new-year',{earliest_start_at:Date.parse('2027-01-04T15:00:00Z')})],[],[],options);
+ assert.equal(distant.schedule[0].start,Date.parse('2027-01-04T15:00:00Z'));
+ assert.ok(distant.horizonEnd>Date.parse('2027-01-04T15:00:00Z'));
+});
+test('weekly hours resolve DST gaps and repeated hours in the selected timezone',()=>{
+ const {weeklyWindows}=require('../frontend/plan-domain');
+ const sunday=[{weekday:0,startMinute:60,endMinute:240}];
+ assert.deepEqual(weeklyWindows(sunday,{now:Date.parse('2026-03-08T05:00:00Z'),end:Date.parse('2026-03-09T04:00:00Z'),timezone:'America/New_York'}),[{start:Date.parse('2026-03-08T06:00:00Z'),end:Date.parse('2026-03-08T08:00:00Z')}]);
+ assert.deepEqual(weeklyWindows(sunday,{now:Date.parse('2026-11-01T04:00:00Z'),end:Date.parse('2026-11-02T05:00:00Z'),timezone:'America/New_York'}),[{start:Date.parse('2026-11-01T05:00:00Z'),end:Date.parse('2026-11-01T09:00:00Z')}]);
+ assert.deepEqual(weeklyWindows([{weekday:0,startMinute:150,endMinute:240}],{now:Date.parse('2026-03-08T05:00:00Z'),end:Date.parse('2026-03-09T04:00:00Z'),timezone:'America/New_York'}),[{start:Date.parse('2026-03-08T07:30:00Z'),end:Date.parse('2026-03-08T08:00:00Z')}]);
+});
+test('overnight shifts span midnight and weekly validation catches wraparound overlap',()=>{
+ const {weeklyWindows,validateWorkingHours}=require('../frontend/plan-domain');
+ const overnight=[{weekday:6,startMinute:1320,endMinute:1800}];
+ const windows=weeklyWindows(overnight,{now:Date.parse('2026-10-31T20:00:00Z'),end:Date.parse('2026-11-01T08:00:00Z'),timezone:'UTC'});
+ assert.deepEqual(windows,[{start:Date.parse('2026-10-31T22:00:00Z'),end:Date.parse('2026-11-01T06:00:00Z')}]);
+ assert.throws(()=>validateWorkingHours([...overnight,{weekday:0,startMinute:300,endMinute:420}]),/overlap/);
+ assert.throws(()=>validateWorkingHours([{weekday:7,startMinute:540,endMinute:1020}]),/Invalid/);
+ assert.throws(()=>validateWorkingHours([{weekday:1,startMinute:540,endMinute:540}]),/Invalid/);
+});
+test('weekly and one-off availability merge once before reserving capacity; all days off stays unavailable',()=>{
+ const now=Date.parse('2026-10-26T09:00:00Z'),base={now,timezone:'UTC',workingHoursEnabled:true,workingHours:[{weekday:1,startMinute:540,endMinute:720}],reserve:0.2};
+ const merged=plan([task('four-hours',{estimated_ms:4*H})],[],[],{...base,windows:[{start:now+H,end:now+5*H}]});
+ assert.equal(merged.schedule[0].start,now);assert.equal(merged.schedule[0].end,now+4*H);
+ const off=plan([task('off')],[],[],{...base,workingHours:[]});assert.equal(off.schedule.length,0);assert.equal(off.availabilityMode,'weekly');
+ const disabled=plan([task('now')],[],[],{...base,workingHoursEnabled:false});assert.equal(disabled.schedule[0].start,now);assert.equal(disabled.availabilityMode,'continuous');
+});
