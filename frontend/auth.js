@@ -19,13 +19,13 @@
         'frontend/work-planner.js?v=20261015-project-qa-2',
         'frontend/planner.js?v=20261015-project-qa-2',
         'frontend/project-queue-filter.js?v=20261015-project-qa-2',
-        'frontend/project-editor.js?v=20261015-project-qa-2',
+        'frontend/project-editor.js?v=20261102-feedback2',
         'frontend/duplicate-review.js?v=20261015-project-qa-2',
         'frontend/project-csv.js?v=20261015-project-qa-2',
         'frontend/planner-bridge.js?v=20261015-project-qa-2',
-        'frontend/beta-insights.js?v=20261015-project-qa-2',
+        'frontend/beta-insights.js?v=20261102-feedback2',
         'frontend/plan-domain.js?v=vnext1',
-        'frontend/plan.js?v=vnext1',
+        'frontend/plan.js?v=20261102-feedback2',
         'frontend/navigation.js?v=consolidated1'
     ];
 
@@ -108,13 +108,16 @@
         document.getElementById('guestEntryBtn').onclick = async()=>{await guest();window.AppNavigation.go('entry');showTaskInput();};
         document.getElementById('getStartedBtn').onclick=()=>{history.pushState({onboarding:'started'},'', '#get-started');showOnboarding();};
         function showOnboarding(){
+            document.body.classList.toggle('signing-in',location.hash==='#sign-in');
+            if(location.hash!=='#sign-in')document.getElementById('signIn')?.classList.add('hidden');
             const started=['#get-started','#sign-in'].includes(location.hash),welcome=!location.hash;
             if(applicationStarted){document.getElementById('getStartedScreen').classList.toggle('hidden',!started);document.getElementById('welcomeScreen').classList.toggle('hidden',!welcome);document.getElementById('taskSorterApp').classList.toggle('hidden',started||welcome);return;}
             document.getElementById('welcomeScreen').classList.toggle('hidden',started);document.getElementById('getStartedScreen').classList.toggle('hidden',!started);
         }
         window.addEventListener('popstate',showOnboarding);showOnboarding();
         document.getElementById('signInBtn').onclick = async () => {
-            if(applicationStarted){history.pushState({onboarding:'sign-in'},'', '#sign-in');document.getElementById('getStartedScreen').classList.remove('hidden');}
+            document.getElementById('authError')?.classList.add('hidden');
+            if(location.hash!=='#sign-in')history.pushState({onboarding:'sign-in'},'', '#sign-in');showOnboarding();
             if (window.Clerk?.isSignedIn) { window.location.reload(); return; }
             try {
                 const response = await nativeFetch(`${API_BASE_URL}/api/config`);
@@ -132,7 +135,7 @@
             if (!configResponse.ok) throw new Error(`Authentication configuration failed (${configResponse.status}).`);
             const config = await configResponse.json();
             if (config.localDemo) {
-                clearTimeout(fallback); applicationStarted=true;window.taskSorterMode='authenticated';window.taskSorterAuth={userId:'local_demo'};
+                clearTimeout(fallback); applicationStarted=true;document.body.classList.remove('signing-in');window.taskSorterMode='authenticated';window.taskSorterAuth={userId:'local_demo'};
                 document.getElementById('guestEntryBtn')?.classList.add('hidden');document.getElementById('signInBtn')?.classList.add('hidden');
                 await loadApplication();document.getElementById('welcomeScreen')?.classList.add('hidden');document.getElementById('getStartedScreen')?.classList.add('hidden');document.getElementById('taskSorterApp').classList.remove('hidden');document.getElementById('authLoading')?.classList.add('hidden');return;
             }
@@ -142,11 +145,11 @@
 
             if (!clerk.isSignedIn || !clerk.user?.id || !clerk.session) {
                 const signIn = document.getElementById('signIn');
-                clearTimeout(fallback);if(location.hash.startsWith('#app/'))await guest();return;
+                clearTimeout(fallback);if(location.hash==='#sign-in')await document.getElementById('signInBtn').onclick();else if(location.hash.startsWith('#app/'))await guest();return;
             }
             if (applicationStarted) return;
             clearTimeout(fallback); applicationStarted = true;
-            window.taskSorterMode = 'authenticated';
+            document.body.classList.remove('signing-in');window.taskSorterMode = 'authenticated';
             document.getElementById('guestEntryBtn')?.classList.add('hidden');
             document.getElementById('signInBtn')?.classList.add('hidden');
 

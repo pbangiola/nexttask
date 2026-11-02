@@ -103,8 +103,5 @@ window.BetaInsights = (() => {
             const back=document.createElement('button');back.textContent='Back';back.onclick=showModeSelect;container.append(key,grid,table,refresh,back);
         } catch(error){container.append(document.createTextNode(error.message));}
     }
-    for(const [id,label,handler] of [['insightsBtn','Importance / urgency (optional)',matrix],['metricsBtn','Hierarchy / metrics',metrics]]) {
-        const button=document.createElement('button');button.id=id;button.textContent=label;button.onclick=handler;el('modeSelect').appendChild(button);
-    }
     return {matrix,metrics,slack,remaining,csv};
 })();

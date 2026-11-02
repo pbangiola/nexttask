@@ -141,51 +141,8 @@ window.ProjectEditor = (() => {
     async function showDelete(item,parent){const {children}=await getNode(item.id);if(item.node_type==='project'&&children.length){const c=shell();c.innerHTML=`<h2>Delete ${esc(item.name)}?</h2><p>This project contains ${children.length} direct item${children.length===1?'':'s'}.</p><div class="planner-choice-grid"><button id="deleteAll">Delete Project & Contents</button><button id="deleteUngroup">Keep Contents / Ungroup</button></div><button id="deleteBack">Back</button>`;el('deleteAll').onclick=()=>performDelete(item,parent,'subtree');el('deleteUngroup').onclick=()=>performDelete(item,parent,'ungroup');el('deleteBack').onclick=()=>returnToParent(parent);return;}if(confirm(`Delete “${item.name}”?`))performDelete(item,parent,'subtree');}
     async function performDelete(item,parent,mode){try{const result=await removeNode(item.id,mode);setUndo({snapshot:result.undo,returnId:parent.id});returnToParent(parent);}catch(error){alert(error.message);}}
 
-    function showAddTask(parent){
-        const c=shell();
-        c.innerHTML=`<h2>Add Task to ${esc(parent.name)}</h2><label>Task name<input id="projectEditorTaskName"></label><label>Estimated time (optional shortcut)<input id="projectEditorTaskMinutes" type="number" min="1" placeholder="Minutes"></label><label><input id="projectEditorTaskDefer" type="checkbox">Add estimate later</label><button id="projectEditorTaskNext">Choose Position</button><button id="projectEditorTaskCancel">Back</button>`;
-        el('projectEditorTaskNext').onclick=()=>{
-            const parsed=parseTaskEntries(el('projectEditorTaskName').value);
-            const mins=Number(el('projectEditorTaskMinutes').value);
-            if(parsed.invalid.length||parsed.entries.length!==1)return alert('Enter one task.');
-            if(el('projectEditorTaskMinutes').value&&(!Number.isFinite(mins)||mins<=0))return alert('Enter a positive estimate.');
-            const draft={...parsed.entries[0]};
-            if(mins>0)draft.estimatedTimeMs=Math.round(mins*60000);
-            const insert=async()=>{
-                try{const {children}=await getNode(parent.id);showTaskInsertion(parent,{name:draft.name,mins:draft.estimatedTimeMs/60000},children);}
-                catch(error){alert(error.message);}
-            };
-            if(el('projectEditorTaskDefer').checked)insert();else collectMissingEstimates([draft],insert,()=>returnToParent(parent));
-        };
-        el('projectEditorTaskCancel').onclick=()=>returnToParent(parent);
-    }
+    function showAddTask(parent){return window.NextPlan.capture(parent.id,()=>open(parent.id));}
 
-    function showTaskInsertion(parent,draft,children){
-        const ordered=[...(children||[])].sort((a,b)=>(Number(a.position||0)-Number(b.position||0))||(Number(a.created||0)-Number(b.created||0)));
-        const c=shell();
-        c.innerHTML=`<h2>Where should this task go?</h2><p class="planner-moving">${esc(draft.name)} — ${draft.mins?draft.mins+' min':'Unestimated'}</p><div id="projectEditorInsertSlots" class="planner-list"></div><button id="projectEditorInsertBack">Back</button>`;
-        const list=el('projectEditorInsertSlots');
-        for(let i=0;i<=ordered.length;i++){
-            const button=document.createElement('button');
-            button.textContent=i===ordered.length?'Add at end':`Add before ${ordered[i].name}`;
-            button.onclick=async()=>{
-                el('projectEditorInsertSlots').querySelectorAll('button').forEach(item=>item.disabled=true);el('projectEditorInsertBack').disabled=true;
-                try{
-                    const result=await batch({action:'insert',parentId:parent.id,index:i,node:{id:makeId('task'),name:draft.name,nodeType:'task',estimatedTimeMs:Math.round(draft.mins*60000),sessionId}});
-                    if(parent.node_type==='task')await open(parent.id);else await returnToParent(parent);
-                    const offer=document.createElement('div');offer.id='projectEditorDecomposeOffer';
-                    offer.textContent=`Break “${draft.name}” into smaller parts? `;
-                    const decompose=document.createElement('button');decompose.textContent='Add subtask';decompose.onclick=()=>showAddTask(result.node);
-                    const skip=document.createElement('button');skip.id='projectEditorDecomposeSkip';skip.textContent='Keep as one task';skip.onclick=()=>offer.remove();offer.append(decompose,skip);el('projectEditorTasks')?.before(offer);
-                }catch(error){
-                    alert(error.message);
-                    el('projectEditorInsertSlots').querySelectorAll('button').forEach(item=>item.disabled=false);el('projectEditorInsertBack').disabled=false;
-                }
-            };
-            list.appendChild(button);
-        }
-        el('projectEditorInsertBack').onclick=()=>showAddTask(parent);
-    }
 
     function showAddProject(parent){const c=shell();c.innerHTML=`<h2>Add Subproject to ${esc(parent.name)}</h2><label>Project name<input id="projectEditorProjectName"></label><label>Estimated time (optional)<input id="projectEditorProjectMinutes" type="number" min="1" placeholder="Minutes"></label><button id="projectEditorProjectSave">Add Subproject</button><button id="projectEditorProjectCancel">Back</button>`;el('projectEditorProjectSave').onclick=async()=>{const name=el('projectEditorProjectName').value.trim(),mins=Number(el('projectEditorProjectMinutes').value);if(!name)return alert('Please enter a project name.');if(el('projectEditorProjectMinutes').value&&(!Number.isFinite(mins)||mins<1))return alert('Enter a positive estimate or leave it blank.');try{const child=await createNode({name,nodeType:'project',parentId:parent.id,estimatedTimeMs:Math.round((mins||0)*60000),independentlyActionable:false,sessionId});await open(child.id);}catch(error){alert(error.message);}};el('projectEditorProjectCancel').onclick=()=>returnToParent(parent);}
 

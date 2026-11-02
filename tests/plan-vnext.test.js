@@ -313,11 +313,13 @@ test('Learn More preserves the source article and renders all three diagrams wit
  await page.goto(base);await page.getByRole('link',{name:'Learn More',exact:true}).click();await page.getByRole('heading',{name:'Why this app?',exact:true}).waitFor();
  const article=page.locator('main');assert.equal(await article.locator('img').count(),3);
  await page.waitForFunction(()=>[...document.images].every(img=>img.complete&&img.naturalWidth>0&&img.naturalHeight>0));
- assert.equal(await article.locator('.tool-descriptions>li').count(),6);
+ assert.equal(await article.locator('ol>li').count(),6);
  assert.deepEqual(await article.locator('table').last().locator('tbody tr').allTextContents(),['GroupedProjectsProject PlanningRoutines','UngroupedBacklogTask Sorting (core merge)Hardstops']);
  const text=await article.innerText();for(const phrase of ['big stones','Importance','Priority','Start Date','End Date','Deadline','3:07 every Tuesday','meeting to plan client meeting planning meeting'])assert.ok(text.includes(phrase));
- assert.match(await page.locator('#routines').innerText(),/Planned/);assert.match(await page.locator('#routines').innerText(),/isn't implemented/);assert.doesNotMatch(await page.locator('#hardstops').innerText(),/It can even/);
- assert.match(text,/original circular dependencies/);assert.match(text,/without completing the task/);
+ const source=fs.readFileSync(path.join(__dirname,'../Documentation/content/Learn More.md'),'utf8').replace(/```mermaid[\s\S]*?```/g,'');
+ const expected=source.split(/\r?\n/).filter(line=>line.trim()&&!line.startsWith('|')).map(line=>line.replace(/^#{1,6}\s+|^-\s+|^\d+\.\s+/,'').trim());
+ const actual=await article.locator('h1,h2,h3,p,ul>li,ol>li').allTextContents();assert.deepEqual(actual.map(value=>value.trim()),expected);
+ assert.equal(await article.locator('figcaption,.article-note,.feature-status').count(),0);
  for(const name of ['task-landscape','illustrative-day','pairwise-sorting']){
   const response=await page.request.get(base+'/frontend/diagrams/'+name+'.svg');assert.equal(response.status(),200);assert.match(response.headers()['content-type'],/image\/svg\+xml/);
   assert.equal(await page.evaluate(svg=>{const doc=new DOMParser().parseFromString(svg,'image/svg+xml');return doc.querySelectorAll('parsererror').length;},await response.text()),0);
@@ -325,8 +327,41 @@ test('Learn More preserves the source article and renders all three diagrams wit
  if(process.env.NEXTTASK_QA_SCREENSHOTS)await page.screenshot({path:path.join(process.env.NEXTTASK_QA_SCREENSHOTS,'learn-more-desktop.png'),fullPage:true});
  await page.goBack();await page.locator('#welcomeScreen').waitFor({state:'visible'});await page.goForward();await page.getByRole('heading',{name:'Why this app?',exact:true}).waitFor();
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
- const gantt=page.getByRole('region',{name:'Illustrative day Gantt chart; scroll horizontally to explore',exact:true});await gantt.focus();await page.keyboard.press('ArrowRight');await page.waitForFunction(()=>document.querySelector('.gantt-diagram').parentElement.scrollLeft>0);
+ const gantt=page.getByRole('region',{name:'Task schedule',exact:true});await gantt.focus();await page.keyboard.press('ArrowRight');await page.waitForFunction(()=>document.querySelector('.gantt-diagram').parentElement.scrollLeft>0);
  if(process.env.NEXTTASK_QA_SCREENSHOTS)await page.screenshot({path:path.join(process.env.NEXTTASK_QA_SCREENSHOTS,'learn-more-mobile.png'),fullPage:true});
  await page.getByRole('link',{name:'Get Started',exact:true}).last().click();await page.locator('#getStartedScreen').waitFor({state:'visible'});assert.equal(await page.getByRole('button',{name:'Enter Tasks Anonymously',exact:true}).isVisible(),true);assert.equal(await page.getByRole('button',{name:'Sign In',exact:true}).isVisible(),true);
  assert.deepEqual(errors,[]);assert.deepEqual(privateRequests,[]);assert.deepEqual(external,[]);
+});
+
+test('calendar uses planned starts and leaves tasks without a feasible placement unscheduled',async t=>{
+ const owner='calendar_start_fix',now=Date.now(),deadline=now+7*86400000;
+ store.create(owner,{tasks:[{id:'calendar-start',name:'Start before deadline',estimatedTimeMs:3600000,deadline_at:deadline},{id:'calendar-unknown',name:'Unknown duration',deadline_at:deadline}]});
+ const page=await pageFor(t,owner);await page.getByRole('button',{name:'Calendar',exact:true}).click();
+ const scheduled=page.locator('.plan-day').filter({has:page.locator('[data-task-id="calendar-start"]')});
+ assert.equal(await scheduled.locator('h3').textContent(),new Date(now).toLocaleDateString());
+ assert.match(await scheduled.locator('[data-task-id="calendar-start"]').innerText(),/Deadline/);
+ const unknown=page.locator('.plan-day').filter({has:page.locator('[data-task-id="calendar-unknown"]')});assert.equal(await unknown.locator('h3').textContent(),'Unscheduled');assert.match(await unknown.innerText(),/No timing placement/);
+});
+
+test('Clerk sign-in stands alone and Back restores the anonymous draft without inspection buttons',async t=>{
+ if(!browser){const {chromium}=require('playwright');browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:['--no-sandbox']});}
+ const context=await browser.newContext();t.after(()=>context.close());
+ await context.route('https://cdn.jsdelivr.net/**',r=>r.fulfill({contentType:'application/javascript',body:''}));
+ await context.route('https://'+domain+'/**',r=>r.fulfill({contentType:'application/javascript',body:`window.Clerk=window.Clerk||{isSignedIn:false,async load(){},mountSignIn(target){target.innerHTML='<section aria-label="Clerk sign-in">Sign in to Task Sorter</section>';}};`}));
+ const page=await context.newPage();await page.goto(base);await page.getByRole('button',{name:'Get Started',exact:true}).click();await page.getByRole('button',{name:'Enter Tasks Anonymously',exact:true}).click();await page.locator('#tasks').fill('Keep this draft');
+ await page.evaluate(()=>showModeSelect());assert.equal(await page.locator('#insightsBtn,#metricsBtn').count(),0);
+ await page.getByRole('button',{name:'Sign In',exact:true}).last().click();await page.getByRole('region',{name:'Clerk sign-in'}).waitFor();
+ assert.equal(await page.locator('#taskSorterApp').isVisible(),false);assert.equal(await page.getByRole('heading',{name:'Get Started',exact:true}).isVisible(),false);assert.equal(await page.locator('#guestNotice').isVisible(),false);
+ await page.goBack();await page.locator('#taskSorterApp').waitFor({state:'visible'});assert.equal(await page.locator('#signIn').isVisible(),false);assert.equal(await page.locator('#tasks').inputValue(),'Keep this draft');
+});
+
+test('legacy project Add Task requires timing then an unavoidable sibling comparison',async t=>{
+ const owner='legacy_required_fix';store.create(owner,{tasks:[{id:'required-parent',name:'Project',nodeType:'project'},{id:'required-peer',name:'Existing peer',parentId:'required-parent',estimatedTimeMs:60000}]});
+ const page=await pageFor(t,owner);await page.evaluate(()=>ProjectEditor.open('required-parent'));await page.locator('#projectEditorAddTask').click();
+ await page.locator('dialog input[name=title]').fill('Required new task');await page.locator('dialog button[type=submit]').click();assert.equal(store.snapshot(owner).nodes.length,2);
+ await page.locator('dialog input[name=estimate]').fill('10');await page.locator('dialog button[type=submit]').click();assert.equal(store.snapshot(owner).nodes.length,2);
+ await page.locator('dialog input[name=deadline]').fill('2027-02-01T12:00');await page.locator('dialog button[type=submit]').click();await page.getByRole('heading',{name:'What’s more important?',exact:true}).waitFor();
+ await page.keyboard.press('Escape');assert.equal(await page.locator('dialog').isVisible(),true);
+ await page.locator('dialog').getByRole('button',{name:'Required new task',exact:true}).click();await page.locator('#projectEditorTasks').waitFor();
+ const state=store.snapshot(owner),task=state.nodes.find(n=>n.name==='Required new task');assert.equal(task.estimated_ms,600000);assert.ok(task.deadline_at);assert.ok(state.comparisons.some(c=>c.higher_id===task.id&&c.lower_id==='required-peer'));
 });

@@ -1,4 +1,2 @@
-flowchart LR
-    a["this task"] --> choice{"Which is more important?"}
-    b["that task"] --> choice
-    choice --> c["Next Task"]
+flowchart
+    a["this task"] & b["that task"] --> choice["or"] --> c["Next Task"]

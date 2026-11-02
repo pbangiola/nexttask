@@ -1,6 +1,6 @@
 # Consolidated implementation — local delivery
 
-Date: 2026-11-02. The user authorized one integrated commit on `codex/plan-vnext` after reviewing the implementation and test results. Push, merge and deployment remain unauthorized.
+Date: 2026-11-02. The original integrated change was committed and pushed as 5c11b8c. The user subsequently authorized implementing the reported feedback and pushing one follow-up commit to `codex/plan-vnext`. Main remains unchanged.
 
 ## Repository reconnaissance
 
@@ -38,11 +38,11 @@ No new schema migration, destructive rebuild, table drop, data reset or producti
 
 ## Source content and remaining limits
 
-The three original content sources were supplied and are preserved in `Documentation/content/` with trailing whitespace normalized. Welcome copy and Get Started choices match them. Learn More now retains the source's headings, examples, six-tool conceptual matrix, all six descriptions, and all three Mermaid visualizations. Edits correct spelling/punctuation, distinguish importance from execution sequence, and add restrained notes for actual behavior. Routines are explicitly planned. The unfinished Hardstops sentence was removed after the last complete thought; no missing feature was invented.
+The three original content sources are preserved in `Documentation/content/` with trailing whitespace normalized. Following the user's feedback, `scripts/build-learn-more.js` converts the Learn More source directly to static HTML. Its prose, headings, examples, original spelling and unfinished Hardstops sentence are retained. There are no added captions, editorial explanations, feature labels, or text alternatives visible in the article. Diagram images retain minimal accessibility labels and keyboard-scrollable regions.
 
-The original Gantt contains a circular sleep/breakfast/nurturing chain, an undefined `transport` predecessor and an unsupported `until` expression. The corrected `.mmd` uses an illustrative Oct 25–26 timeline, retaining fixed appointments and stated durations. Work is split into example blocks around lunch/email; the managing-up/transport conflict is retained and called out. The page documents this approximation and provides a text schedule. Mindmap syntax uses consistent indentation and explicit labels; the flowchart preserves this/that → choice → Next Task with an explicit importance question.
+The original Gantt cannot render literally because it contains circular dependencies, an undefined predecessor and unsupported `until` syntax. The renderable `.mmd` preserves the original tasks, fixed appointments and stated durations on Oct 25–26. The actual-work block is after lunch/email and before the late managing-up/transport boundary; the extra morning block and added chart title were removed. The flowchart uses the source's “this task”, “that task”, “or”, and “Next Task” labels. These technical encoding repairs are documented here, without explanatory text added to the article.
 
-Diagrams are generated locally using Mermaid 12.2.0 and served as static SVG images through the explicit public asset allowlist. No Mermaid runtime, CDN, or additional production dependency is needed. Figures have descriptive alt text, text alternatives, and keyboard-scrollable regions; the original mindmap items are also available as a list. All diagram sources are in `frontend/diagrams/`.
+Diagrams are generated locally using Mermaid 12.2.0 and served as static SVG images through the explicit public asset allowlist. No Mermaid runtime, CDN, or additional production dependency is needed. Run `node scripts/build-learn-more.js` after changing the article source. All diagram sources are in `frontend/diagrams/`.
 
 To regenerate after editing `.mmd` sources, use Node 22.23.4 and the existing Playwright development dependency. Download Mermaid 12.2.0 into a temporary directory (`npm pack mermaid@12.2.0 --pack-destination /tmp`), extract `package/dist/mermaid.min.js` from the tarball there, and run `MERMAID_BUNDLE=/tmp/<extracted-directory>/package/dist/mermaid.min.js CHROMIUM_PATH=/usr/bin/chromium node scripts/render-learn-more.js`. Omit `CHROMIUM_PATH` when using the matching Playwright-installed browser. Commit the regenerated SVGs along with the sources only when committing is authorized.
 
@@ -50,8 +50,20 @@ Routines remain future scope. The existing limited N-day recurrence feature is p
 
 ## Validation and artifacts
 
-After incorporating the three supplied content sources, the full regression run passed 139/139 tests with zero failures and zero skips. The completed article also passed a final focused browser check after diagram regeneration. Coverage includes all three local SVGs, source examples and six-tool matrix, explicit future labels, no external article resources, browser Back/Forward, mobile overflow, keyboard horizontal scrolling and Get Started navigation. Tests run with Node 22.23.4 and Chromium, disposable SQLite databases, authenticated API fixtures and an offline anonymous fixture. Existing migration, ownership, timer, blocker, journal and Work regressions are included. Screenshot artifacts are in `/workspace/work/consolidated-screenshots/`. Production dependency audit after the narrow parser updates reports zero vulnerabilities.
+After the deployment-feedback fixes, the full regression run passed 142/142 tests with zero failures and zero skips. The completed article also passed a final focused browser check after diagram regeneration. Coverage includes all three local SVGs, source examples and six-tool matrix, exact source prose with no added captions, no external article resources, browser Back/Forward, mobile overflow, keyboard horizontal scrolling and Get Started navigation. Tests run with Node 22.23.4 and Chromium, disposable SQLite databases, authenticated API fixtures and an offline anonymous fixture. Existing migration, ownership, timer, blocker, journal and Work regressions are included. Screenshot artifacts are in `/workspace/work/consolidated-screenshots/`. Production dependency audit after the narrow parser updates reports zero vulnerabilities.
 
-## Railway Dev setup — only after authorization
+## Railway Dev setup
 
-No deployment is authorized by this delivery. After reviewing and authorizing one logical commit, use the existing Dev service and its `codex/plan-vnext` source branch. Keep main unchanged. Follow RAILWAY_SETUP.md: Node 22.23.4, `npm ci`, `npm start`, health `/api/health`, one replica and the existing isolated Dev volume at `/data`. Reuse the matching existing Clerk development publishable/secret key pair. `FRONTEND_ORIGINS` is the Dev HTTPS origin without a trailing slash. Do not enable `NEXTTASK_LOCAL_DEMO` on Railway. No new environment variables, schema reset, volume replacement or data wipe is required. After an authorized redeployment, refresh the frontend and exercise welcome, anonymous entry, sign-in, project capture, sibling sorting and Work resumption.
+The user authorized pushing these feedback fixes to the existing `codex/plan-vnext` branch, which may trigger Railway Dev auto-deployment. Use the existing Dev service and its branch configuration. Keep main unchanged. Follow RAILWAY_SETUP.md: Node 22.23.4, `npm ci`, `npm start`, health `/api/health`, one replica and the existing isolated Dev volume at `/data`. Reuse the matching existing Clerk development publishable/secret key pair. `FRONTEND_ORIGINS` is the Dev HTTPS origin without a trailing slash. Do not enable `NEXTTASK_LOCAL_DEMO` on Railway. No new environment variables, schema reset, volume replacement or data wipe is required. After an authorized redeployment, refresh the frontend and exercise welcome, anonymous entry, sign-in, project capture, sibling sorting and Work resumption.
+
+
+## Follow-up fixes from deployment feedback
+
+- Learn More uses the user's original prose, with no added captions or amplifications. The build script makes source fidelity reproducible.
+- Inspection/metrics buttons are no longer inserted into Work's landing page, including anonymous startup. Existing inspection functions and Plan's Matrix remain available in their existing contexts.
+- Sign-in has its own history state and hides surrounding onboarding/app text while Clerk is open. Back restores the preceding view and anonymous draft.
+- The legacy Project Editor's Add Task and Add Subtask now use the same required duration/deadline form as Plan. New sibling comparisons cannot be dismissed with Escape; a single child requires no comparison. The original editor context and nested parent are retained after saving. No existing untimed data is rewritten.
+- Calendar uses forecast segment/start times only. Tasks without a planned placement are unscheduled; a deadline remains task metadata rather than a fabricated start.
+- Frontend asset versions are bumped for the changed entry points.
+
+Follow-up validation: browser regressions cover exact-source prose, no inspection buttons in anonymous Work, isolated Clerk sign-in with Back/draft preservation, legacy Add Task duration/deadline validation and mandatory comparison, Calendar planned starts versus unscheduled deadlines, nested parent retention, and server-restart persistence. The complete suite passed before committing.
