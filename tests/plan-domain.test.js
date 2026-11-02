@@ -131,3 +131,10 @@ test('weekly and one-off availability merge once before reserving capacity; all 
  const off=plan([task('off')],[],[],{...base,workingHours:[]});assert.equal(off.schedule.length,0);assert.equal(off.availabilityMode,'weekly');
  const disabled=plan([task('now')],[],[],{...base,workingHoursEnabled:false});assert.equal(disabled.schedule[0].start,now);assert.equal(disabled.availabilityMode,'continuous');
 });
+
+test('importance traverses ranked parent blocks and ignores cross-parent legacy comparisons',()=>{
+ const nodes=[task('p',{node_type:'project',position:2}),task('q',{node_type:'project',position:1}),task('p1',{parent_id:'p',position:2}),task('p2',{parent_id:'p',position:1}),task('q1',{parent_id:'q'})];
+ const comparisons=[{higher_id:'p',lower_id:'q',created_at:1},{higher_id:'p1',lower_id:'p2',created_at:2},{higher_id:'q1',lower_id:'p1',created_at:3}];
+ const result=importance(nodes,comparisons);assert.deepEqual(result.order,['p','p1','p2','q','q1']);assert.equal(result.known.has('q1'),false);
+ nodes.find(n=>n.id==='p1').parent_id='q';assert.equal(importance(nodes,comparisons.slice(0,2)).known.has('p1'),false,'moving a task invalidates comparisons with its former siblings');
+});

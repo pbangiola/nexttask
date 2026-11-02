@@ -176,7 +176,8 @@ module.exports={
     });},
     rank(owner,input){return mutate(owner,input,()=>{
         const ids=input.ids;if(!Array.isArray(ids)||ids.length<2||ids.length>1000||new Set(ids).size!==ids.length)throw new Error('Supply unique task IDs to rank');
-        ids.forEach(id=>owned(owner,id));
+        const rows=ids.map(id=>owned(owner,id));
+        if(rows.some(row=>row.parent_id!==rows[0].parent_id))throw new Error('Importance comparisons must be between siblings');
         const stmt=db.prepare("INSERT INTO plan_comparisons(user_id,higher_id,lower_id,created_at,context) VALUES(?,?,?,?,?)"),now=Date.now();
         ids.slice(1).forEach((id,index)=>stmt.run(owner,ids[index],id,now,'backlog-sort'));return {ids};
     });},

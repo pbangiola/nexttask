@@ -25,12 +25,14 @@
         'frontend/planner-bridge.js?v=20261015-project-qa-2',
         'frontend/beta-insights.js?v=20261015-project-qa-2',
         'frontend/plan-domain.js?v=vnext1',
-        'frontend/plan.js?v=vnext1'
+        'frontend/plan.js?v=vnext1',
+        'frontend/navigation.js?v=consolidated1'
     ];
 
     const nativeFetch = window.fetch.bind(window);
 
     function showFatal(message) {
+        document.getElementById('getStartedScreen')?.classList.remove('hidden');
         document.getElementById('authLoading')?.classList.add('hidden');
         const error = document.getElementById('authError');
         if (error) {
@@ -77,11 +79,14 @@
     async function loadApplication() {
         for (const src of APP_SCRIPTS) await loadScript(src);
         if (typeof window.init === 'function') await window.init();
+        await window.AppNavigation?.restore();
     }
 
     let applicationStarted = false;
     async function guest() {
-        if (applicationStarted) return;
+        document.getElementById('welcomeScreen')?.classList.add('hidden');
+        document.getElementById('getStartedScreen')?.classList.add('hidden');
+        if (applicationStarted) {document.getElementById('taskSorterApp')?.classList.remove('hidden');return;}
         applicationStarted = true;
         window.taskSorterMode = 'guest';
         window.taskSorterAuth = null;
@@ -95,12 +100,21 @@
         document.getElementById('planBtn').title = 'Sign in for saved nested projects. Guest lists stay local.';
         document.getElementById('taskSorterApp').classList.remove('hidden');
         document.getElementById('authLoading')?.classList.add('hidden');
-        document.getElementById('guestEntryBtn')?.classList.add('hidden');
         document.getElementById('guestNotice')?.classList.remove('hidden');
+        const signIn=document.createElement('button');signIn.textContent='Sign In';signIn.onclick=()=>document.getElementById('signInBtn').click();document.getElementById('sessionMenu')?.append(signIn);
+        document.getElementById('taskSorterApp')?.prepend(document.getElementById('guestNotice'));
     }
     async function boot() {
-        document.getElementById('guestEntryBtn').onclick = guest;
+        document.getElementById('guestEntryBtn').onclick = async()=>{await guest();window.AppNavigation.go('entry');showTaskInput();};
+        document.getElementById('getStartedBtn').onclick=()=>{history.pushState({onboarding:'started'},'', '#get-started');showOnboarding();};
+        function showOnboarding(){
+            const started=['#get-started','#sign-in'].includes(location.hash),welcome=!location.hash;
+            if(applicationStarted){document.getElementById('getStartedScreen').classList.toggle('hidden',!started);document.getElementById('welcomeScreen').classList.toggle('hidden',!welcome);document.getElementById('taskSorterApp').classList.toggle('hidden',started||welcome);return;}
+            document.getElementById('welcomeScreen').classList.toggle('hidden',started);document.getElementById('getStartedScreen').classList.toggle('hidden',!started);
+        }
+        window.addEventListener('popstate',showOnboarding);showOnboarding();
         document.getElementById('signInBtn').onclick = async () => {
+            if(applicationStarted){history.pushState({onboarding:'sign-in'},'', '#sign-in');document.getElementById('getStartedScreen').classList.remove('hidden');}
             if (window.Clerk?.isSignedIn) { window.location.reload(); return; }
             try {
                 const response = await nativeFetch(`${API_BASE_URL}/api/config`);
@@ -112,7 +126,7 @@
                 clerk.mountSignIn(target,{forceRedirectUrl:window.location.href,signUpForceRedirectUrl:window.location.href});
             } catch(_) { showFatal('Sign-in is unavailable. You can keep using your local guest list.'); }
         };
-        const fallback = setTimeout(() => guest().catch(()=>showFatal('Local application could not load. Reload to retry.')), 1500);
+        const fallback = setTimeout(() => document.getElementById('authLoading')?.classList.add('hidden'),1500);
         try {
             const configResponse = await nativeFetch(`${API_BASE_URL}/api/config`);
             if (!configResponse.ok) throw new Error(`Authentication configuration failed (${configResponse.status}).`);
@@ -120,7 +134,7 @@
             if (config.localDemo) {
                 clearTimeout(fallback); applicationStarted=true;window.taskSorterMode='authenticated';window.taskSorterAuth={userId:'local_demo'};
                 document.getElementById('guestEntryBtn')?.classList.add('hidden');document.getElementById('signInBtn')?.classList.add('hidden');
-                await loadApplication();document.getElementById('taskSorterApp').classList.remove('hidden');document.getElementById('authLoading')?.classList.add('hidden');return;
+                await loadApplication();document.getElementById('welcomeScreen')?.classList.add('hidden');document.getElementById('getStartedScreen')?.classList.add('hidden');document.getElementById('taskSorterApp').classList.remove('hidden');document.getElementById('authLoading')?.classList.add('hidden');return;
             }
             const clerk = await loadClerk(config.clerkPublishableKey);
 
@@ -128,13 +142,7 @@
 
             if (!clerk.isSignedIn || !clerk.user?.id || !clerk.session) {
                 const signIn = document.getElementById('signIn');
-                signIn?.classList.remove('hidden');
-                const appUrl = new URL('.', window.location.href).href;
-                clerk.mountSignIn(signIn, {
-                    forceRedirectUrl: appUrl,
-                    signUpForceRedirectUrl: appUrl
-                });
-                clearTimeout(fallback); await guest(); return;
+                clearTimeout(fallback);if(location.hash.startsWith('#app/'))await guest();return;
             }
             if (applicationStarted) return;
             clearTimeout(fallback); applicationStarted = true;
@@ -187,10 +195,11 @@
 
             await loadApplication();
             if (!sameAccount()) throw new Error('Account changed. Reload to continue.');
+            document.getElementById('welcomeScreen')?.classList.add('hidden');document.getElementById('getStartedScreen')?.classList.add('hidden');
             document.getElementById('taskSorterApp')?.classList.remove('hidden');
         } catch (error) {
             clearTimeout(fallback);
-            if (!applicationStarted) await guest();
+            if (!applicationStarted){document.getElementById('authLoading')?.classList.add('hidden');if(location.hash.startsWith('#app/'))await guest();}
             else if(window.taskSorterMode==='authenticated') showFatal('Sign-in could not be initialized. Reload to retry.');
         }
     }

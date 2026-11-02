@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Why this app? — Task Sorter</title>
+    <link rel="stylesheet" href="frontend/design.css?v=consolidated1">
+</head>
+<body>
+<a class="skip-link" href="#article">Skip to article</a>
+<main id="article" class="reading">
+    <nav class="article-nav" aria-label="Page navigation"><a href="index.html">Task Sorter</a><a href="index.html#get-started">Get Started</a></nav>
+    <h1>Why this app?</h1>
+    <p>If you're like me, your daily to-do list lives in your head, looking like this:</p>
+    <figure>
+        <div class="diagram-scroll" tabindex="0" role="region" aria-label="Task landscape diagram; scroll horizontally to explore">
+            <img class="landscape-diagram" src="frontend/diagrams/task-landscape.svg" alt="A mindmap of chores for house and family, work tasks, personal projects, and self care, all branching from: What do I need to do next?">
+        </div>
+        <figcaption>One head, a lot of things to keep track of. Scroll across on a small screen, or <a href="frontend/diagrams/task-landscape.svg">open the full mindmap</a>.</figcaption>
+        <details><summary>Read the mindmap as a list</summary>
+            <ul>
+                <li>Chores for house and family: dishes, groceries, laundry, transport, cleaning, childcare, nurturing.</li>
+                <li>Work Tasks: email, planning, relationship building, managing up, managing sideways, actual work.</li>
+                <li>Personal Projects: gardening, painting, contracting.</li>
+                <li>Self Care: sleep, eat, exercise, doctor's orders, Sobriety and Self-Love.</li>
+            </ul>
+        </details>
+    </figure>
+    <p>It's not chaotic, really, but it's a little overwhelming. It's not really clear where to start. You might write it down in a task app or a bullet journal, or on a whiteboard, but then you either can't see the whole picture, leave it anchored in one place, or put it down and can't find it later.</p>
+    <p>More important, you end up doing the wrong work first, and never finding time for the big stones.</p>
+
+    <h2>Task Sorter is different.</h2>
+    <ul>
+        <li>It's on your phone so you don't lose it.</li>
+        <li>When you enter your tasks, Task Sorter walks you through a sorting algorithm so you rank the tasks from most to least important.</li>
+        <li>You enter how long the tasks take.</li>
+        <li>You tell us how long you have to work.</li>
+    </ul>
+    <p>Then Task Sorter walks you through the tasks, one at a time, and tracks your time to keep you focused.</p>
+    <p>Tasks that are unimportant but urgent displace tasks that are important, sometimes completely.</p>
+    <figure>
+        <div class="diagram-scroll" tabindex="0" role="region" aria-label="Illustrative day Gantt chart; scroll horizontally to explore">
+            <img class="gantt-diagram" src="frontend/diagrams/illustrative-day.svg" alt="A Gantt chart groups a day into important, medium, and unimportant tasks. Meals, care, sleep, transport, email, and meetings surround the remaining time for actual work. Managing up overlaps the 5 p.m. transport boundary by 15 minutes.">
+        </div>
+        <figcaption>An illustrative day, from dinner on October 25 to transport on October 26, 2026. The overlapping managing-up and transport appointments show a conflict. Scroll across to see the whole day, or <a href="frontend/diagrams/illustrative-day.svg">open the full chart</a>.</figcaption>
+        <details><summary>Read the chart as a schedule</summary>
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Illustrative schedule table">
+                <table>
+                    <caption>Illustrative times, not a calculated or promised plan</caption>
+                    <thead><tr><th scope="col">Importance</th><th scope="col">Task</th><th scope="col">Time</th></tr></thead>
+                    <tbody>
+                        <tr><td>Important</td><td>Dinner</td><td>Oct 25, 6–6:30 p.m.</td></tr>
+                        <tr><td>Medium</td><td>Dishes</td><td>6:30–7 p.m.</td></tr>
+                        <tr><td>Important</td><td>Nurturing</td><td>7–7:30 p.m.</td></tr>
+                        <tr><td>Important</td><td>Childcare</td><td>7:30–8:30 p.m.</td></tr>
+                        <tr><td>Medium</td><td>Cleaning</td><td>8:30–9 p.m.</td></tr>
+                        <tr><td>Important</td><td>Sleep</td><td>9 p.m.–5 a.m.</td></tr>
+                        <tr><td>Medium</td><td>Breakfast</td><td>Oct 26, 5–5:30 a.m.</td></tr>
+                        <tr><td>Important</td><td>Nurturing</td><td>5:30–5:40 a.m.</td></tr>
+                        <tr><td>Unimportant</td><td>Transport</td><td>5:40–6:25 a.m.</td></tr>
+                        <tr><td>Unimportant</td><td>Email</td><td>6:25–7:25 a.m.</td></tr>
+                        <tr><td>Unimportant</td><td>Managing up</td><td>7:25–8:10 a.m.</td></tr>
+                        <tr><td>Unimportant</td><td>Managing sideways</td><td>8:10–9:10 a.m.</td></tr>
+                        <tr><td>Medium</td><td>Relationship building</td><td>9:10–9:35 a.m.</td></tr>
+                        <tr><td>Important</td><td>Actual work</td><td>9:35 a.m.–noon</td></tr>
+                        <tr><td>Medium</td><td>Lunch</td><td>Noon–12:30 p.m.</td></tr>
+                        <tr><td>Unimportant</td><td>Email</td><td>12:30–1 p.m.</td></tr>
+                        <tr><td>Important</td><td>Actual work</td><td>1–4:45 p.m.</td></tr>
+                        <tr><td>Unimportant</td><td>Managing up</td><td>4:45–5:15 p.m. — conflicts with transport</td></tr>
+                        <tr><td>Medium</td><td>Transport</td><td>5–6 p.m.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </details>
+        <p class="article-note">This illustration uses explicit times to untangle the original circular dependencies. Actual work is split around lunch and email; its time blocks are illustrative. The original fixed appointments and stated durations are retained. This is an example of the problem, not output from Task Sorter's scheduler.</p>
+    </figure>
+
+    <h3>So there are five related ideas to distinguish</h3>
+    <p class="concept-equation">Importance ≠ Priority ≠ Start Date ≠ End Date − Duration ≠ Deadline</p>
+    <ul>
+        <li><strong>Importance</strong> is about the impact the task has.</li>
+        <li><strong>Priority</strong> is about what order the tasks happen in.</li>
+        <li><strong>Start Date</strong> is about when you actually start the task.</li>
+        <li><strong>End Date</strong> is when the task is complete. But not all tasks happen in one single burst.</li>
+        <li><strong>Deadline</strong> is about when the task must be completed, either for compliance or some other reason.</li>
+    </ul>
+    <p>Estimated duration is the amount of work you predict. A task can take several work sessions, so subtracting its estimate from its completion date doesn't tell you when you first started. Reaching the estimate doesn't finish the task; you choose Done.</p>
+
+    <h3>Task Sorter contains (and will contain) six related tools to coerce unordered tasks into a prioritized list</h3>
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Six-tool conceptual matrix">
+        <table>
+            <caption>How the six tools relate</caption>
+            <thead><tr><th scope="col"><span class="visually-hidden">Grouping</span></th><th scope="col">Sorted</th><th scope="col">Unsorted</th><th scope="col">Unordered</th></tr></thead>
+            <tbody>
+                <tr><th scope="row">Grouped</th><td>Projects</td><td>Project Planning</td><td>Routines</td></tr>
+                <tr><th scope="row">Ungrouped</th><td>Backlog</td><td>Task Sorting (core merge)</td><td>Hardstops</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <p class="article-note">Sorting, Backlog, hardstops, and nested projects are available now. Routines below describe a future tool. Scheduling examples show the idea; forecasts still depend on the tasks, estimates, deadlines, and working time you've recorded.</p>
+    <ol class="tool-descriptions">
+        <li id="task-sorting">
+            <p><strong>Task Sorting:</strong> At the heart of the app is my sorting algorithm. This isn't any fancy computing, and there's nothing artificial about it. We've hard-coded a recipe that helps you rank your tasks from most to least important, using only comparisons between this and that. Instead of an overwhelming list, it's very simple:</p>
+            <figure>
+                <div class="diagram-scroll" tabindex="0" role="region" aria-label="Pairwise sorting flowchart; scroll horizontally to explore">
+                    <img class="sorting-diagram" src="frontend/diagrams/pairwise-sorting.svg" alt="This task and that task lead to one question: Which is more important? Choose one, then move to the next task comparison.">
+                </div>
+                <figcaption>One question, two choices, one tap. Relative importance helps determine what to advance when time constraints leave you a choice.</figcaption>
+            </figure>
+        </li>
+        <li id="backlog"><p><strong>Backlog:</strong> Anything you don't finish gets automatically saved. Next time you log in, click Resume to get back to your next eligible task.</p><p class="article-note">Compared unfinished work and unsorted pending work stay distinct. Anonymous lists stay in this browser; signing in opens your separate account data and doesn't merge or replace either list.</p></li>
+        <li id="hardstops"><p><strong>Hardstops:</strong> When you have a hard stop to your work session, like lunch with the boss or just 5 p.m., you record it before you start working. When the hard stop rolls around, Task Sorter saves your progress and sounds an alarm for you to move on.</p><p class="article-note">A hardstop pauses the session without completing the task. Dismissing or snoozing an estimate alarm leaves its timer running. Browsers may silence audio in the background or on a locked phone.</p></li>
+        <li id="routines"><p><strong>Routines <span class="feature-status">Planned</span>:</strong> Some tasks and hardstops repeat, and you don't need to reenter them. If you want, Task Sorter will stop you and remind you to leave work at 3:07 every Tuesday, so you can get your son by 3:50 and your daughter before 4:15 without sitting on your to-do list staring at you all week. And when she's strapped in, tap Done, and Task Sorter will merge reminding you to grab a gallon of milk and some chicken breasts before “Make Dinner” starts at 5:15.</p><p class="article-note">This routines workflow isn't implemented. Weekly working hours and limited task recurrence don't provide this sequence of reminders.</p></li>
+        <li id="project-planning"><p><strong>Project Planning:</strong> Not every task is a one-off. Task Sorter supports nested tasks so that you can create projects with subprojects and sub-subprojects, all prioritized and ready to pop up when needed.</p><p class="article-note">Compare siblings within each project. Prerequisites enable a task; components make up a project. The planner respects both relationships.</p></li>
+        <li id="projects"><p><strong>Projects:</strong> Your saved projects sit in your sorted backlog right next to your small tasks. So if you check off “check morning email” at 9:15, “Get a coffee and think about Q4 priorities” can slot itself in for an hour before “meeting to plan client meeting planning meeting” starts at 10:30.</p><p class="article-note">That placement needs an estimate, recorded available time, and compatible constraints. A forecast explains conflicts rather than guaranteeing everything will fit.</p></li>
+    </ol>
+    <p>And all of these different tools sit peacefully in the background, doing their job while you focus on the task at hand.</p>
+    <nav class="article-nav" aria-label="Continue from article"><a href="index.html">Welcome</a><a class="button" href="index.html#get-started">Get Started</a></nav>
+</main>
+</body>
+</html>

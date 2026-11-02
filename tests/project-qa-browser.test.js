@@ -121,7 +121,7 @@ async function fixture(owner) {
     for(const [i,m] of [90,90].entries()) await create('right'+i,'Right '+i,'task','right',m);
     await api(owner,`/users/${owner}/nodes?tree=1`);
 }
-test('project discovery includes empty/completed projects in Plan and Work after fresh authenticated contexts',async t=>{
+test('project management retains completed history while Work resume shows incomplete projects',async t=>{
     const {page,owner}=await pageFor(t);
     await api(owner,`/users/${owner}/nodes`,'POST',{id:'empty-discover',name:'Empty saved project',nodeType:'project'});
     await api(owner,`/users/${owner}/nodes`,'POST',{id:'done-discover',name:'Completed saved project',nodeType:'project'});
@@ -133,7 +133,7 @@ test('project discovery includes empty/completed projects in Plan and Work after
     assert.match(await page.locator('#projectEditorTasks').textContent(),/Finished child/);
     await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');
     await page.getByRole('button',{name:'Work',exact:true}).click();await page.locator('#resumeExistingListBtn').click();await page.getByRole('button',{name:"No, I don't have a set stop time."}).click();
-    await page.getByRole('button',{name:/Completed saved project —/}).click();assert.equal(await page.getByRole('button',{name:'Start This Project',exact:true}).isDisabled(),true);await page.getByRole('button',{name:'Manage',exact:true}).click();assert.match(await page.locator('#projectEditorTasks').textContent(),/Finished child/);
+    await page.locator('#existingWorkSelectScreen').waitFor();assert.equal(await page.getByRole('button',{name:/Completed saved project —/}).count(),0);assert.equal(await page.getByRole('button',{name:/Empty saved project —/}).count(),1);assert.equal(raw.prepare("SELECT status FROM tasks WHERE id='done-child'").get().status,'completed');
     const fresh=await pageFor(t,owner);await planProjects(fresh.page);await expectProjects(fresh.page);
     const other=await pageFor(t);await planProjects(other.page);assert.equal(await other.page.getByRole('button',{name:'Empty saved project',exact:true}).count(),0);
 });

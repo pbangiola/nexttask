@@ -124,8 +124,8 @@ async function guestFor(t,mode='unavailable') {
     const privateRequests=[];page.on('request',r=>{if(new URL(r.url()).pathname.startsWith('/api/')&&!['/api/config','/api/health'].includes(new URL(r.url()).pathname))privateRequests.push(r.url());});
     await context.route('https://cdn.jsdelivr.net/**',r=>r.fulfill({contentType:'application/javascript',body:''}));
     await context.route('**/api/config',async route=>{if(mode==='slow')await new Promise(resolve=>setTimeout(resolve,3000));try{await route.fulfill({status:503,contentType:'application/json',body:'{"error":"fixture offline"}'});}catch(_){} });
-    await page.goto(base);await page.waitForFunction(()=>window.taskSorterMode==='guest'&&window.FocusDurability&&!document.getElementById('taskSorterApp').classList.contains('hidden'));
-    return {page,privateRequests,context};
+    await page.goto(base);await page.getByRole('button',{name:'Get Started',exact:true}).click();await page.getByRole('button',{name:'Enter Tasks Anonymously',exact:true}).click();await page.waitForFunction(()=>window.taskSorterMode==='guest'&&window.FocusDurability&&!document.getElementById('taskSorterApp').classList.contains('hidden'));
+    await page.evaluate(()=>showModeSelect());return {page,privateRequests,context};
 }
 async function entry(page,text,sort=false) {
     await page.getByRole('button',{name:'Work',exact:true}).click();await page.locator('#createNewListBtn').click();await page.getByRole('button',{name:"No, I don't have a set stop time."}).click();await page.locator('#tasks').fill(text);await page.locator('#skipSortCheckbox').setChecked(!sort);await page.locator('#startSort').click();

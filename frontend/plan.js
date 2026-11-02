@@ -12,7 +12,7 @@ window.NextPlan=(()=>{
     function message(value){const target=document.getElementById('planMessage');if(target)target.textContent=value;else alert(value);}
     const node=id=>state.nodes.find(n=>n.id===id);
     const item=id=>state.forecast.items.find(n=>n.id===id);
-    async function load(){state=await request();execution.adopt(state);return state;}
+    async function load(){state=await request();selected=new Set([...selected].filter(id=>state.nodes.some(n=>n.id===id)));execution.adopt(state);return state;}
     async function change(path,method,body){
         const requestId=createId('plan_request'),payload={...body,version:state.version,requestId};
         try{await request(path,method,payload);await load();selected.clear();render();}
@@ -28,6 +28,7 @@ window.NextPlan=(()=>{
         return panel;
     }
     async function open(next=view,id=project){
+        if(window.AppNavigation&&!window.AppNavigation.restoring)window.AppNavigation.go('plan',{view:next,project:id});
         if(window.taskSorterMode==='guest'){alert('Sign in to manage your saved Plan.');return;}
         if(el('focusScreen')&&currentTask()){const paused=window.FocusDurability.pause(currentTask());if(!paused)return;await paused;}
         const current=++generation;view=next;project=id;shell().textContent='Loading your plan…';
@@ -40,7 +41,7 @@ window.NextPlan=(()=>{
             if(view==='completed')return n.status==='completed'&&!n.archived;
             if(view==='archive')return n.archived||n.status==='cancelled';
             if(!openNode(n)||window.PlanDomain.graph(state.nodes,state.dependencies).ancestors(n.id).some(a=>a.archived||a.status==='cancelled'))return false;
-            if(view==='inbox')return !n.parent_id&&n.node_type==='task';
+            if(view==='inbox')return !n.parent_id&&n.node_type==='task'&&n.independently_actionable!==0;
             if(view==='projects')return n.node_type==='project'&&!n.parent_id;
             if(view==='project')return n.parent_id===project;
             if(view==='today')return n.node_type==='task'&&[n.due_at,n.deadline_at,item(n.id)?.dueAt,item(n.id)?.deadlineAt,n.scheduled_start_at,item(n.id)?.start].some(at=>at!=null&&at<=end);
@@ -56,14 +57,17 @@ window.NextPlan=(()=>{
     function row(n,compact=false){
         const forecast=item(n.id),element=document.createElement('article');element.className='plan-row';element.dataset.taskId=n.id;
         if(!compact){const check=document.createElement('input');check.type='checkbox';check.checked=selected.has(n.id);check.setAttribute('aria-label','Select '+n.name);check.onchange=()=>{check.checked?selected.add(n.id):selected.delete(n.id);renderBulk();};element.append(check);}
-        const content=document.createElement('div'),title=btn(n.name,()=>n.node_type==='project'&&openNode(n)?open('project',n.id):edit(n.id));title.className='title';content.append(title);
+        const content=document.createElement('div'),title=document.createElement('a'),isProject=n.node_type==='project'&&openNode(n);
+        title.textContent=n.name;title.className='title';title.href='#app/'+encodeURIComponent(JSON.stringify(isProject?{screen:'plan',view:'project',project:n.id}:{screen:'plan',view,project,edit:n.id}));
+        title.onclick=e=>{if(e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;e.preventDefault();Promise.resolve(isProject?open('project',n.id):edit(n.id)).catch(error=>message(error.message));};content.append(title);
         const meta=document.createElement('div');meta.className='meta';
-        const bits=[n.node_type==='project'?`${n.progress.completed}/${n.progress.total} components complete`:n.status,`${minute(n.progress.remainingMs)} min remaining`,`${minute(n.progress.actualMs)} min worked`];
+        const compared=state.comparisons.some(c=>(c.higher_id===n.id||c.lower_id===n.id)&&node(c.higher_id)?.parent_id===node(c.lower_id)?.parent_id);
+        const bits=[compared?'Compared':'Unsorted',n.node_type==='project'?`${n.progress.completed}/${n.progress.total} components complete`:n.status,`${minute(n.progress.remainingMs)} min remaining`,`${minute(n.progress.actualMs)} min worked`];
         if(path(n))bits.unshift(path(n));if(n.due_at)bits.push('Due '+date(n.due_at));if(n.deadline_at)bits.push('Deadline '+date(n.deadline_at));if(n.recurrence_days)bits.push(`Every ${n.recurrence_days} days`);bits.push(...n.tags.map(t=>'#'+t));meta.textContent=bits.join(' · ');content.append(meta);
         if(n.node_type==='project'&&n.progress.total){const progress=document.createElement('progress');progress.max=n.progress.total;progress.value=n.progress.completed;progress.setAttribute('aria-label','Completed components');content.append(progress);}
         if(forecast){const reason=document.createElement('div');reason.className='reason';reason.textContent=(forecast.start!=null?date(forecast.start)+' · ':'')+(forecast.blockedBy.length?'Waiting for '+forecast.blockedBy.join(', '):forecast.reason);content.append(reason);}
         element.append(content);
-        if(!compact){const actions=document.createElement('div');actions.className='plan-actions';actions.append(btn('Edit',()=>edit(n.id)));
+        if(!compact){const actions=document.createElement('div');actions.className='plan-actions';if(n.node_type==='project')actions.append(btn('Project settings',()=>edit(n.id)));
             if(!n.archived&&n.status!=='cancelled'&&n.node_type==='task')actions.append(btn(n.status==='completed'?'Reopen':'Complete',()=>change('/tasks/'+encodeURIComponent(n.id),'PUT',{status:n.status==='completed'?'pending':'completed'})));
             if(n.archived||n.status==='cancelled')actions.append(btn('Restore',()=>change('/tasks/'+encodeURIComponent(n.id)+(n.status==='cancelled'?'/restore':''),n.status==='cancelled'?'POST':'PUT',n.status==='cancelled'?{}:{archived:false})));
             element.append(actions);
@@ -82,15 +86,15 @@ window.NextPlan=(()=>{
         if(!selected.size)return;
         target.append(document.createTextNode(selected.size+' selected '));
         const ids=[...selected];
-        target.append(btn('Edit selected',()=>bulkEdit(ids)),btn('Complete',()=>change('/bulk','POST',{ids,changes:{status:'completed'}})),btn('Reopen',()=>change('/bulk','POST',{ids,changes:{status:'pending'}})),btn('Archive',()=>change('/bulk','POST',{ids,changes:{archived:true}})),btn('Move',()=>move(ids)),btn('Delete selected',()=>bulkDelete(ids)),btn('Clear',()=>{selected.clear();render();}));
+        target.append(btn('Edit selected',()=>bulkEdit(ids)),btn('Complete',()=>change('/bulk','POST',{ids,changes:{status:'completed'}})),btn('Reopen',()=>change('/bulk','POST',{ids,changes:{status:'pending'}})),btn('Move',()=>move(ids)),btn('Delete selected',()=>bulkDelete(ids)));
     }
     function render(){
         shell();
         const heading=document.createElement('header');heading.className='plan-head';
-        const title=document.createElement('div');title.innerHTML='<span class="muted">NEXTTASK · PLAN</span><h2>'+esc(view==='project'?node(project)?.name||'Project':({inbox:'Inbox',all:'Your landscape',projects:'Projects',today:'Today',upcoming:'Upcoming',calendar:'Calendar',matrix:'Importance & urgency',completed:'Completed work',archive:'Archived work'})[view])+'</h2>';
+        const title=document.createElement('div');title.innerHTML='<span class="muted">NEXTTASK · PLAN</span><h2>'+esc(view==='project'?node(project)?.name||'Project':({inbox:'Backlog',all:'Your landscape',projects:'Projects',today:'Today',upcoming:'Upcoming',calendar:'Calendar',matrix:'Importance & urgency',completed:'Completed work',archive:'Archived work'})[view])+'</h2>';
         const actions=document.createElement('div');actions.className='plan-actions';actions.append(btn('Work',()=>work()),btn('Working hours',workingHours),btn('Availability',availability),btn('Refresh',()=>open()),btn('Home',()=>{document.body.classList.remove('planning');showModeSelect();}));heading.append(title,actions);panel.append(heading);
         const nav=document.createElement('nav');nav.className='plan-nav';nav.setAttribute('aria-label','Plan views');
-        for(const [key,label]of Object.entries({inbox:'Inbox',all:'All work',projects:'Projects',today:'Today',upcoming:'Upcoming',calendar:'Calendar',matrix:'Matrix',completed:'Completed',archive:'Archive'})){const b=btn(label,()=>{selected.clear();return open(key,null);});if(view===key)b.setAttribute('aria-current','page');nav.append(b);}panel.append(nav);
+        for(const [key,label]of Object.entries({inbox:'Backlog',all:'All work',projects:'Projects',today:'Today',upcoming:'Upcoming',calendar:'Calendar',matrix:'Matrix',completed:'Completed',archive:'Archive'})){const b=btn(label,()=>{selected.clear();return open(key,null);});if(view===key)b.setAttribute('aria-current','page');nav.append(b);}panel.append(nav);
         const status=document.createElement('p');status.id='planMessage';status.className='plan-error';status.setAttribute('role','status');panel.append(status);
         if(view==='project'){
             const n=node(project),summary=document.createElement('div');summary.className='plan-stats';summary.textContent=`${n.progress.completed}/${n.progress.total} components completed · ${minute(n.progress.remainingMs)} min remaining · ${minute(n.progress.actualMs)} min recorded`;
@@ -98,7 +102,7 @@ window.NextPlan=(()=>{
         }
         const capture=document.createElement('form');capture.className='plan-capture';
         const input=document.createElement('input');input.placeholder='Capture a task, optionally with “, 15m”';input.setAttribute('aria-label','Quick add task');input.required=true;
-        const add=btn('Add task',()=>{} ,true);add.type='submit';capture.onsubmit=async e=>{e.preventDefault();const parsed=window.TaskEntry.parse(input.value);if(parsed.invalid.length||!parsed.entries.length)return message('Enter a task, optionally followed by a duration.');add.disabled=true;try{await change('/tasks','POST',{tasks:parsed.entries.map(n=>({...n,id:createId('task'),parentId:view==='project'?project:null}))});}catch(error){message(error.message);add.disabled=false;}};
+        const add=btn('Add task',()=>{} ,true);add.type='submit';capture.onsubmit=async e=>{e.preventDefault();if(view==='project'){await edit(null,'task',input.value);return;}const parsed=window.TaskEntry.parse(input.value);if(parsed.invalid.length||!parsed.entries.length)return message('Enter a task, optionally followed by a duration.');add.disabled=true;try{await change('/tasks','POST',{tasks:parsed.entries.map(n=>({...n,id:createId('task'),parentId:view==='project'?project:null}))});}catch(error){message(error.message);add.disabled=false;}};
         capture.append(input,add,btn('Bulk entry',bulkEntry),btn('New project',()=>edit(null,'project')));panel.append(capture);
         const tools=document.createElement('div');tools.className='plan-tools';
         const query=document.createElement('input');query.type='search';query.placeholder='Search titles, notes, projects, tags';query.setAttribute('aria-label','Search tasks');query.value=search;
@@ -126,14 +130,19 @@ window.NextPlan=(()=>{
             for(const n of rows.filter(n=>n.node_type==='task')){const segments=item(n.id)?.segments||[];const entries=segments.length?segments:[{start:n.scheduled_start_at??item(n.id)?.deadlineAt??item(n.id)?.dueAt??n.deadline_at??n.due_at}];for(const segment of entries){const key=segment.start==null?'Unscheduled':new Date(segment.start).toLocaleDateString();if(!groups.has(key))groups.set(key,[]);groups.get(key).push({n,segment});}}
             for(const [key,entries]of groups){const section=document.createElement('section');section.className='plan-day';const h=document.createElement('h3');h.textContent=key;section.append(h);for(const {n,segment}of entries){const label=document.createElement('p');label.className='muted';label.textContent=segment.start==null?'No timing placement':date(segment.start)+(segment.end?' – '+date(segment.end):' · requested date');section.append(label,row(n));}content.append(section);}if(!groups.size)empty(content);return;
         }
-        content.className='plan-list';for(const n of rows)content.append(row(n));if(!rows.length)empty(content);
+        content.className='plan-list';
+        if(view==='inbox'&&rows.length){
+            const compared=n=>state.comparisons.some(c=>(c.higher_id===n.id||c.lower_id===n.id)&&node(c.higher_id)?.parent_id===node(c.lower_id)?.parent_id);
+            const note=document.createElement('p');note.className='muted';note.textContent='Completion and importance are separate. Compared work has saved importance evidence; unsorted work still needs placement. Time sequence can differ from importance.';content.append(note);
+            for(const [label,match]of [['Compared unfinished work',true],['Unsorted pending work',false]]){const section=rows.filter(n=>compared(n)===match);if(!section.length)continue;const h=document.createElement('h3');h.textContent=label;content.append(h,...section.map(n=>row(n)));}
+        }else for(const n of rows)content.append(row(n));if(!rows.length)empty(content);
     }
     function empty(content){const box=document.createElement('div');box.className='plan-empty';box.textContent='No work in this view. Capture something above, or change your filters.';content.append(box);}
     function dialog(title){
         document.querySelector('.plan-dialog')?.remove();const d=document.createElement('dialog');d.className='plan-dialog plan-app';const h=document.createElement('h3');h.textContent=title;d.append(h);document.body.append(d);d.addEventListener('close',()=>d.remove());d.showModal();return d;
     }
     function field(form,label,type,value,name){const wrap=document.createElement('label');wrap.textContent=label;const input=document.createElement(type==='textarea'?'textarea':type==='select'?'select':'input');if(!['textarea','select'].includes(type))input.type=type;input.name=name;input.value=value??'';wrap.append(input);form.append(wrap);return input;}
-    function parentOptions(select,current,exclude){select.append(new Option('No project / Inbox',''));for(const n of state.nodes.filter(n=>n.node_type==='project'&&n.status!=='cancelled'&&n.id!==exclude)){const o=new Option([path(n),n.name].filter(Boolean).join(' / '),n.id);o.selected=current===n.id;select.append(o);}}
+    function parentOptions(select,current,exclude){select.append(new Option('No project / Backlog',''));for(const n of state.nodes.filter(n=>n.node_type==='project'&&n.status!=='cancelled'&&n.id!==exclude)){const o=new Option([path(n),n.name].filter(Boolean).join(' / '),n.id);o.selected=current===n.id;select.append(o);}}
     function bulkEdit(ids){
         const d=dialog('Edit '+ids.length+' selected items'),form=document.createElement('form');d.append(form);
         const note=document.createElement('p');note.className='muted';note.textContent='Only checked fields change. A checked field left blank clears that value. Estimates apply to tasks; project totals stay derived from their components.';form.append(note);
@@ -173,15 +182,20 @@ window.NextPlan=(()=>{
         const actions=document.createElement('div');actions.className='plan-actions';const remove=btn('Delete items',()=>{});remove.type='submit';remove.className='danger';actions.append(btn('Cancel',()=>d.close()),remove);form.append(actions);
         form.onsubmit=async e=>{e.preventDefault();remove.disabled=true;try{await change('/bulk','POST',{ids,action:'delete'});d.close();}catch(reason){error.textContent=reason.message;remove.disabled=false;}};
     }
-    async function edit(id,type='task'){
-        const n=id?node(id):{node_type:type,name:'',parent_id:view==='project'?project:null,tags:[]},d=dialog(id?'Edit '+(n.node_type==='project'?'project':'task'):'New '+type),form=document.createElement('form');d.append(form);
+    async function edit(id,type='task',initial=''){
+        if(window.AppNavigation&&!window.AppNavigation.restoring)window.AppNavigation.go('plan',{view,project,edit:id||'new',type,initial});
+        const n=id?node(id):{node_type:type,name:initial,parent_id:view==='project'?project:null,tags:[]},d=dialog(id?'Edit '+(n.node_type==='project'?'project':'task'):'New '+type),form=document.createElement('form');d.append(form);
+        if(!id&&initial){const parsed=window.TaskEntry.parse(initial);if(parsed.entries.length===1){n.name=parsed.entries[0].name;n.estimated_ms=parsed.entries[0].estimatedTimeMs;}}
+        const draftKey='nexttaskEdit_'+userId+'_'+(id||'new_'+(project||'root'));
         const title=field(form,'Title','text',n.name,'title');title.required=true;title.maxLength=1000;
         const parent=field(form,'Parent project','select','','parent');parentOptions(parent,n.parent_id,id);
-        const estimate=field(form,'Estimated total minutes (blank = unknown)','number',n.estimated_ms>0?n.estimated_ms/60000:'','estimate');estimate.min=0;estimate.step='any';if(n.node_type==='project')estimate.disabled=true;
+        const estimate=field(form,'Estimated total minutes (blank = unknown)','number',n.estimated_ms>0?n.estimated_ms/60000:'','estimate');estimate.min=0;estimate.step='any';if(n.node_type==='project')estimate.disabled=true;const projectTask=!id&&n.node_type==='task'&&!!n.parent_id;if(projectTask){estimate.required=true;estimate.min=0.000001;}
         const description=field(form,'Description','textarea',n.description,'description');description.rows=2;
         const dates=document.createElement('div');dates.className='plan-fields';form.append(dates);
         const due=field(dates,'Preferred due date','datetime-local',local(n.due_at),'due');
         const deadline=field(dates,'Hard deadline','datetime-local',local(n.deadline_at),'deadline');
+        if(projectTask)deadline.required=true;
+        parent.onchange=()=>{const required=!id&&n.node_type==='task'&&!!parent.value;estimate.required=deadline.required=required;estimate.min=required?0.000001:0;};
         const more=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Scheduling, prerequisites & details';more.append(summary);form.append(more);
         const earliest=field(more,'Earliest start','datetime-local',local(n.earliest_start_at),'earliest');
         const scheduled=field(more,'Scheduled start (reserves estimated duration)','datetime-local',local(n.scheduled_start_at),'scheduled');
@@ -199,18 +213,23 @@ window.NextPlan=(()=>{
         const position=field(more,'Sibling display position','number',n.position||1,'position');position.min=0;position.step=1;
         const error=document.createElement('p');error.className='plan-error';error.setAttribute('role','alert');form.append(error);
         const actions=document.createElement('div');actions.className='plan-actions';const save=btn('Save',()=>{},true);save.type='submit';actions.append(save,btn('Cancel',()=>d.close()));
-        if(id){actions.append(btn('Archive',async()=>{await change('/tasks/'+encodeURIComponent(id),'PUT',{archived:true});d.close();}));actions.append(btn('Delete',async()=>{await change('/tasks/'+encodeURIComponent(id)+'/delete','POST',{});d.close();}));if(n.node_type==='task')actions.append(btn('Convert to project',async()=>{await change('/tasks/'+encodeURIComponent(id),'PUT',{nodeType:'project'});d.close();}));}
+        if(id){actions.append(btn('Archive (hide from active views)',async()=>{await change('/tasks/'+encodeURIComponent(id),'PUT',{archived:true});d.close();}));actions.append(btn('Delete',async()=>{if(!confirm('Delete this item and its components? Recorded work is preserved and deletion can be restored from Archive.'))return;await change('/tasks/'+encodeURIComponent(id)+'/delete','POST',{});d.close();}));if(n.node_type==='task')actions.append(btn('Convert to project',async()=>{await change('/tasks/'+encodeURIComponent(id),'PUT',{nodeType:'project'});d.close();}));}
         form.append(actions);
         form.onsubmit=async e=>{e.preventDefault();save.disabled=true;try{
             const timestamp=input=>input.value?new Date(input.value).getTime():null;
             const payload={name:title.value.trim(),nodeType:n.node_type,parentId:parent.value||null,estimatedTimeMs:Math.round(Number(estimate.value)*60000),description:description.value,notes:notes.value,location:location.value,assignee:assignee.value,success_criteria:success.value,position:Number(position.value),
                 due_at:timestamp(due),deadline_at:timestamp(deadline),earliest_start_at:timestamp(earliest),scheduled_start_at:timestamp(scheduled),remaining_ms:remaining.value===''?null:Math.round(Number(remaining.value)*60000),splittable:split.checked,
                 prerequisites:[...prereq.selectedOptions].map(o=>o.value),tags:tags.value.split(',').map(s=>s.trim()).filter(Boolean),recurrence_days:recurrence.value?Number(recurrence.value):null,recurrence_zone:state.settings.timezone};
-            await change(id?'/tasks/'+encodeURIComponent(id):'/tasks',id?'PUT':'POST',id?payload:{tasks:[{...payload,id:createId('task')}]});d.close();
+            const createdId=id||createId('task');
+            await change(id?'/tasks/'+encodeURIComponent(id):'/tasks',id?'PUT':'POST',id?payload:{tasks:[{...payload,id:createdId}]});d.close();if(!id&&payload.parentId)await rank(state.nodes.filter(row=>row.parent_id===payload.parentId&&openNode(row)),true);
         }catch(reason){error.textContent=reason.message;save.disabled=false;}};
+        try{const saved=JSON.parse(sessionStorage.getItem(draftKey));if(saved)for(const control of form.elements){if(!control.name||!(control.name in saved))continue;if(control.type==='checkbox')control.checked=saved[control.name];else if(control.multiple){for(const option of control.options)option.selected=saved[control.name].includes(option.value);}else control.value=saved[control.name];}}catch(_){}
+        form.addEventListener('input',()=>{const draft={};for(const control of form.elements){if(control.name)draft[control.name]=control.type==='checkbox'?control.checked:control.multiple?[...control.selectedOptions].map(o=>o.value):control.value;}sessionStorage.setItem(draftKey,JSON.stringify(draft));});
+        d.addEventListener('close',()=>{if(window.AppNavigation&&!window.AppNavigation.restoring&&history.state?.route?.edit)window.AppNavigation.go('plan',{view,project},true);});
+        const submit=form.onsubmit;form.onsubmit=async event=>{await submit(event);if(!d.open)sessionStorage.removeItem(draftKey);};
         title.focus();
     }
-    function bulkEntry(){const d=dialog('Capture several tasks'),form=document.createElement('form');d.append(form);const input=field(form,'One task per line; optional “, 15m”','textarea','','tasks');input.rows=8;input.required=true;const error=document.createElement('p');error.className='plan-error';form.append(error);const save=btn('Add tasks',()=>{},true);save.type='submit';form.append(save,btn('Cancel',()=>d.close()));form.onsubmit=async e=>{e.preventDefault();const parsed=window.TaskEntry.parse(input.value);if(parsed.invalid.length||!parsed.entries.length){error.textContent='Check task durations and names.';return;}save.disabled=true;try{await change('/tasks','POST',{tasks:parsed.entries.map(n=>({...n,id:createId('task'),parentId:view==='project'?project:null}))});d.close();}catch(reason){error.textContent=reason.message;save.disabled=false;}};}
+    function bulkEntry(){const d=dialog('Capture several tasks'),form=document.createElement('form');d.append(form);const input=field(form,'One task per line; optional “, 15m”','textarea','','tasks');input.rows=8;input.required=true;const error=document.createElement('p');error.className='plan-error';form.append(error);const deadline=view==='project'?field(form,'Hard deadline for these tasks','datetime-local','','deadline'):null;if(deadline)deadline.required=true;const save=btn('Add tasks',()=>{},true);save.type='submit';form.append(save,btn('Cancel',()=>d.close()));form.onsubmit=async e=>{e.preventDefault();const parsed=window.TaskEntry.parse(input.value);if(parsed.invalid.length||!parsed.entries.length||deadline&&parsed.entries.some(n=>n.estimatedTimeMs<=0)){error.textContent='Check task durations and names. Project tasks require an estimate.';return;}save.disabled=true;try{await change('/tasks','POST',{tasks:parsed.entries.map(n=>({...n,id:createId('task'),parentId:view==='project'?project:null,...(deadline?{deadline_at:new Date(deadline.value).getTime()}:{} )}))});d.close();if(view==='project')await rank(state.nodes.filter(row=>row.parent_id===project&&openNode(row)),true);}catch(reason){error.textContent=reason.message;save.disabled=false;}};}
     function move(ids){const d=dialog('Move selected work'),form=document.createElement('form');d.append(form);const parent=field(form,'Destination project','select','','parent');parentOptions(parent,null,null);const error=document.createElement('p');error.className='plan-error';form.append(error);const save=btn('Move',()=>{},true);save.type='submit';form.append(save,btn('Cancel',()=>d.close()));form.onsubmit=async e=>{e.preventDefault();try{await change('/bulk','POST',{ids,changes:{parentId:parent.value||null}});d.close();}catch(reason){error.textContent=reason.message;}};}
     function workingHours(){
         const d=dialog('Working hours'),form=document.createElement('form');d.append(form);
@@ -265,14 +284,45 @@ window.NextPlan=(()=>{
         draw();form.append(btn('Add interval',()=>{const start=Date.now();windows.push({start,end:start+2*3600000});draw();}),btn('Next 7 weekdays, 9–5',()=>{windows.length=0;for(let i=0;i<10&&windows.length<7;i++){const start=new Date();start.setDate(start.getDate()+i);start.setHours(9,0,0,0);if([0,6].includes(start.getDay()))continue;windows.push({start:start.getTime(),end:start.getTime()+8*3600000});}draw();}));
         const error=document.createElement('p');error.className='plan-error';form.append(error);const save=btn('Save availability',()=>{},true);save.type='submit';form.append(save,btn('Cancel',()=>d.close()));form.onsubmit=async e=>{e.preventDefault();save.disabled=true;try{await change('/settings','PUT',{timezone:timezone.value,reserve:Number(reserve.value)/100,windows});d.close();}catch(reason){error.textContent=reason.message;save.disabled=false;}};
     }
-    async function rank(){
-        const rows=selected.size?[...selected].map(node):list();if(rows.length<2)return message('Choose at least two tasks or projects to compare.');
-        const d=dialog('Which matters more?'),p=document.createElement('p');p.className='muted';p.textContent='Compare importance, even when prerequisites mean the other item must happen first.';d.append(p);
-        const choices=document.createElement('div');choices.className='plan-list';d.append(choices);let stopped=false;
-        d.addEventListener('close',()=>{stopped=true;resolveChoice?.(null);});let resolveChoice;
-        const compare=(a,b)=>new Promise(resolve=>{resolveChoice=resolve;choices.replaceChildren(btn(a.name,()=>resolve(a.id)),btn(b.name,()=>resolve(b.id)));});
-        async function mergeSort(items){if(items.length<2)return items;const mid=Math.floor(items.length/2),a=await mergeSort(items.slice(0,mid)),b=await mergeSort(items.slice(mid)),out=[];while(a.length&&b.length&&!stopped){const winner=await compare(a[0],b[0]);if(!winner)break;out.push(winner===a[0].id?a.shift():b.shift());}return [...out,...a,...b];}
-        const result=await mergeSort(rows);if(stopped)return;choices.textContent='Saving comparisons…';await change('/rank','POST',{ids:result.map(n=>n.id)});d.close();
+    async function rank(input,inserting=false){
+        const rows=Array.isArray(input)?input:selected.size?[...selected].map(node):list();
+        const groups=new Map();for(const n of rows){const key=n.parent_id||'';if(!groups.has(key))groups.set(key,[]);groups.get(key).push(n);}
+        if(![...groups.values()].some(g=>g.length>1))return message('Choose at least two siblings to compare.');
+        for(const siblings of groups.values()){
+            if(siblings.length<2)continue;
+            const key='nexttaskImportance_'+userId+'_'+(siblings[0].parent_id||'root');
+            const signature=siblings.map(n=>n.id).sort().join('|');
+            let draft;try{draft=JSON.parse(localStorage.getItem(key));}catch(_){}
+            if(draft?.signature!==signature){
+                const ranked=window.PlanDomain.importance(siblings,state.comparisons);
+                const ordered=inserting?ranked.order.filter(id=>ranked.known.has(id)):[];
+                draft={signature,ordered,pending:siblings.map(n=>n.id).filter(id=>!ordered.includes(id)),low:0,high:ordered.length};
+            }
+            const d=dialog('What’s more important?'),note=document.createElement('p'),choices=document.createElement('div');
+            note.textContent='Compare '+(siblings[0].parent_id?node(siblings[0].parent_id)?.name+' components':'root tasks and projects')+'. Prerequisites can happen first regardless of importance. Progress saves after each choice.';
+            choices.className='plan-list';d.append(note,choices);
+            let resolveClose;const finished=new Promise(resolve=>resolveClose=resolve);let saved=false;
+            d.addEventListener('close',()=>resolveClose(saved),{once:true});
+            async function draw(){
+                while(draft.pending.length&&draft.low===draft.high){draft.ordered.splice(draft.low,0,draft.pending.shift());draft.low=0;draft.high=draft.ordered.length;}
+                localStorage.setItem(key,JSON.stringify(draft));
+                if(!draft.pending.length){
+                    try{await change('/rank','POST',{ids:draft.ordered});localStorage.removeItem(key);saved=true;d.close();}catch(error){choices.replaceChildren(btn('Retry saving',draw));message(error.message);}return;
+                }
+                const candidate=draft.pending[0],mid=Math.floor((draft.low+draft.high)/2),peer=draft.ordered[mid];
+                async function choose(winner){
+                    choices.querySelectorAll('button').forEach(b=>b.disabled=true);
+                    try{
+                        await change('/rank','POST',{ids:winner===candidate?[candidate,peer]:[peer,candidate]});
+                        if(!d.open)return;
+                        if(winner===candidate)draft.high=mid;else draft.low=mid+1;
+                        await draw();
+                    }catch(error){message(error.message);choices.querySelectorAll('button').forEach(b=>b.disabled=false);}
+                }
+                choices.replaceChildren(btn(node(candidate).name,()=>choose(candidate)),btn(node(peer).name,()=>choose(peer)));
+            }
+            await draw();if(!await finished)return;
+        }
     }
     async function work(){
         await load();const candidates=state.forecast.schedule.map(s=>node(s.id));
@@ -309,8 +359,11 @@ window.NextPlan=(()=>{
     setInterval(()=>{if(!document.hidden&&document.getElementById('nextPlan')&&!document.querySelector('dialog')&&document.activeElement?.tagName!=='INPUT')open();},60000);
     async function recordImportance(rows){
         if(window.taskSorterMode==='guest'||rows.length<2)return;
-        await window.TaskGraph.commit('importance comparisons',[{path:'/plan/rank',method:'POST',body:{ids:rows.map(n=>n.id),requestId:createId('importance')}}]);
+        const groups=new Map();
+        for(const row of rows){const canonical=execution.data?.nodes.find(n=>n.id===row.id);const parent=canonical?.parent_id||'';if(!groups.has(parent))groups.set(parent,[]);groups.get(parent).push(row.id);}
+        const operations=[...groups.values()].filter(ids=>ids.length>1).map(ids=>({path:'/plan/rank',method:'POST',body:{ids,requestId:createId('importance')}}));
+        if(operations.length)await window.TaskGraph.commit('importance comparisons',operations);
         await execution.refresh();
     }
-    return {open,edit,work,recordImportance};
+    return {open,edit,work,recordImportance,context(){return {search,filter,sort,selected:[...selected]};},restoreContext(value){if(!value)return;search=value.search||'';filter=value.filter||'all';sort=value.sort||'sequence';selected=new Set(value.selected||[]);}};
 })();

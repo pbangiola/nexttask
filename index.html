@@ -77,14 +77,20 @@
         @media(max-width:480px) { .focus-toolbar > button { flex:1 1 45%; } #focusScreen label { display:flex; } }
         @media(prefers-reduced-motion:reduce) { #focusScreen * { animation:none!important; transition:none!important; } }
     </style>
+    <link rel="stylesheet" href="frontend/design.css?v=consolidated1">
 </head>
 <body>
-    <div id="authShell">
-        <button id="guestEntryBtn">Continue as Guest</button><button id="signInBtn">Sign In</button><p id="guestNotice" class="hidden">Guest mode: this list stays in this browser. Signing in does not upload it.</p>
-        <p id="authLoading">Loading sign-in…</p>
-        <p id="authError" class="hidden"></p>
-        <div id="signIn" class="hidden"></div>
-    </div>
+    <section id="welcomeScreen" class="arrival-card">
+        <h1>Welcome to Task Sorter</h1>
+        <p>This is a combo focus and planning app. We help you figure out what you need to do next, and knock your tasks out one after the other. We can even track your long term projects, so you can chip away when you get a minute.</p>
+        <a class="button" href="learn-more.html">Learn More</a>
+        <button id="getStartedBtn">Get Started</button>
+    </section>
+    <section id="getStartedScreen" class="arrival-card hidden"><h1>Get Started</h1>
+        <button id="guestEntryBtn">Enter Tasks Anonymously</button><button id="signInBtn">Sign In</button>
+        <p id="guestNotice" class="hidden">Anonymous work stays in this browser. Signing in opens your separate account data and preserves this local list.</p>
+        <div id="authShell"><p id="authLoading">Checking sign-in…</p><p id="authError" class="hidden" role="alert"></p><div id="signIn" class="hidden"></div></div>
+    </section>
     <div id="taskSorterApp" class="hidden">
     <div id="sessionMenu">
         <button id="stopWorkingBtn" class="hidden">Stop Working</button>
@@ -124,7 +130,7 @@
         </div>
     </div>
     <div id="taskCompare" class="hidden">
-        <h2>Which task is more important?</h2>
+        <h2>What’s more important?</h2>
         <button id="task1"></button>
         <button id="task2"></button>
     </div>

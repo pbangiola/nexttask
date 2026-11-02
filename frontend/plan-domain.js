@@ -55,22 +55,25 @@
     }
     function importance(nodes, comparisons = []) {
         // Newest evidence wins: retain an older edge only if it introduces no cycle.
-        const ids = nodes.map(n => n.id), edges = new Map(ids.map(id => [id, new Set()]));
+        const ids = nodes.map(n => n.id), edges = new Map(ids.map(id => [id, new Set()])), byId=new Map(nodes.map(n=>[n.id,n]));
         const reachable = (a, b, seen = new Set()) => a === b || (!seen.has(a) && (seen.add(a), [...edges.get(a) || []].some(c => reachable(c, b, seen))));
         const known = new Set();
         for (const c of [...comparisons].sort((a,b) => b.created_at-a.created_at || (b.sequence || 0)-(a.sequence || 0))) {
             if (!edges.has(c.higher_id) || !edges.has(c.lower_id) || c.higher_id === c.lower_id) continue;
+            if((byId.get(c.higher_id).parent_id??null)!==(byId.get(c.lower_id).parent_id??null))continue;
             known.add(c.higher_id); known.add(c.lower_id);
             if (!reachable(c.lower_id, c.higher_id)) edges.get(c.higher_id).add(c.lower_id);
         }
-        const incoming = new Map(ids.map(id => [id, 0]));
-        edges.forEach(list => list.forEach(id => incoming.set(id, incoming.get(id)+1)));
-        const stable = (a,b) => (nodes.find(n=>n.id===a).position || 0)-(nodes.find(n=>n.id===b).position || 0) || a.localeCompare(b);
-        const order = [];
-        while (order.length < ids.length) {
-            const next = ids.filter(id => !order.includes(id) && incoming.get(id) === 0).sort(stable)[0];
-            order.push(next); edges.get(next).forEach(id => incoming.set(id, incoming.get(id)-1));
+        const stable = (a,b) => (byId.get(a).position || 0)-(byId.get(b).position || 0) || a.localeCompare(b);
+        const groups=new Map();for(const n of nodes){const parent=byId.has(n.parent_id)?n.parent_id:null;if(!groups.has(parent))groups.set(parent,[]);groups.get(parent).push(n.id);}
+        const order=[];
+        function visit(parent){
+            const siblings=groups.get(parent)||[],incoming=new Map(siblings.map(id=>[id,0]));
+            for(const id of siblings)for(const next of edges.get(id))incoming.set(next,incoming.get(next)+1);
+            const remaining=new Set(siblings);
+            while(remaining.size){const next=[...remaining].filter(id=>incoming.get(id)===0).sort(stable)[0];if(next===undefined)break;remaining.delete(next);order.push(next);for(const child of edges.get(next))incoming.set(child,incoming.get(child)-1);visit(next);}
         }
+        visit(null);
         const expressedOrder=order.filter(id=>known.has(id));
         return {order, known, ranks:new Map(order.map(id => [id, known.has(id) ? expressedOrder.indexOf(id)+1 : null]))};
     }

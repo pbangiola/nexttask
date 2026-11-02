@@ -370,5 +370,5 @@ window.FocusDurability = (() => {
         if (!document.hidden && hasHardStop() && Date.now() >= hardStopAtMs) hardStop();
     });
     window.addEventListener('pagehide', preserveRunningFocus);
-    return { init, recover, prepare, newWork() { needsPreparation = true; }, enter, done, pause, add, blocker, finish, hardStop, snapshot, payload, eligible, snooze };
+    return { init, recover, prepare, get ready(){return initialized;}, newWork() { needsPreparation = true; }, enter, done, pause, add, blocker, finish, hardStop, snapshot, payload, eligible, snooze };
 })();
