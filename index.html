@@ -76,6 +76,16 @@
         body.focus-expanded #focusScreen, #focusScreen:fullscreen { max-width:none; min-height:100dvh; overflow:auto; }
         @media(max-width:480px) { .focus-toolbar > button { flex:1 1 45%; } #focusScreen label { display:flex; } }
         @media(prefers-reduced-motion:reduce) { #focusScreen * { animation:none!important; transition:none!important; } }
+        .agenda-deadline { display:block; padding:12px 0; border-bottom:1px solid #ddd; }
+        .agenda-list li { padding:12px 0; border-bottom:1px solid #ddd; }
+        .agenda-conflict { color:#b71c1c; font-weight:bold; }
+        .calendar-scroll { overflow-x:auto; max-width:100%; }
+        .calendar-week { display:grid; grid-template-columns:repeat(7,minmax(130px,1fr)); min-width:980px; gap:4px; }
+        .calendar-week h3 { font-size:14px; }
+        .calendar-day { position:relative; height:864px; border:1px solid #ccc; background:repeating-linear-gradient(to bottom,#fff 0,#fff 35px,#ddd 35px,#ddd 36px); }
+        .calendar-hour { position:absolute; left:0; font-size:10px; color:#666; }
+        .calendar-block { position:absolute; left:30px; right:2px; box-sizing:border-box; overflow:hidden; padding:2px; border:1px solid #468152; border-radius:3px; font-size:11px; background:#e0f2e4; }
+        .calendar-event { background:#e3edff; border-color:#3156a0; }
     </style>
     <link rel="stylesheet" href="frontend/design.css?v=20261102-feedback2">
 </head>
@@ -101,6 +111,7 @@
     <div id="modeSelect">
         <button id="workBtn">Work</button>
         <button id="planBtn">Plan</button>
+        <button id="agendaBtn">Agenda</button><button id="calendarBtn">Calendar</button>
     </div>
     <div id="workChoiceStep" class="hidden">
         <h2>What do you want to do?</h2>
@@ -137,7 +148,7 @@
     <div id="dynamicContainer"></div>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.3/papaparse.min.js" onerror="console.warn('CSV helper unavailable; using built-in parser.')"></script>
     </div>
-    <script src="frontend/auth.js?v=20261102-feedback2"></script>
+    <script src="frontend/auth.js?v=20261104-plan-1"></script>
     <script src="frontend/deadline-audio.js?v=20261021-focus-1"></script>
 </body>
 </html>

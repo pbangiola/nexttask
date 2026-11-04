@@ -50,9 +50,9 @@ test('archived parents and cancelled prerequisites cannot enable work',()=>{
  const nodes=[{id:'p',name:'p',node_type:'project',status:'pending',archived:true},task('a',{parent_id:'p'}),task('cancelled',{status:'cancelled'}),task('b',{deadline_at:4*H})];
  const r=plan(nodes,[edge('cancelled','b')],[],options);assert.equal(r.schedule.length,0);assert.equal(r.hardConstraintsSatisfied,false);
 });
-test('work availability and interruption reserve affect deadline feasibility',()=>{
+test('legacy reserve settings no longer reduce available capacity',()=>{
  const nodes=[task('a',{estimated_ms:3*H,deadline_at:4*H})];
- assert.equal(plan(nodes,[],[],{now:0,windows:[{start:0,end:4*H}],reserve:0.5}).hardConstraintsSatisfied,false);
+ assert.equal(plan(nodes,[],[],{now:0,windows:[{start:0,end:4*H}],reserve:0.5}).hardConstraintsSatisfied,true);
  assert.equal(plan(nodes,[],[],{now:0,windows:[{start:0,end:4*H}],reserve:0}).hardConstraintsSatisfied,true);
 });
 test('preferred due dates flow through projects and prerequisites without becoming hard constraints',()=>{
@@ -68,7 +68,7 @@ test('calendar planning starts now without availability or importance comparison
   assert.equal(result.availabilityMode,'continuous');
   assert.equal(result.schedule[0].start,now);
   assert.equal(result.schedule.at(-1).end,now+3*H);
-  assert.ok(result.items.every(i=>i.importanceRank===null&&i.ready));
+  assert.deepEqual(result.items.map(i=>i.importanceRank),[1,2]);assert.ok(result.items.every(i=>i.ready));
   assert.deepEqual(result.warnings,[]);
  }
 });

@@ -3,7 +3,7 @@ const path = require('node:path');
 // Enumerate the intended browser surface; do not mount the checkout, backend,
 // or even the entire frontend directory (which can contain local data files).
 const scripts = [
-    'navigation', 'plan-domain', 'plan', 'auth', 'initialization', 'persistence', 'ui', 'core', 'timing',
+    'agenda', 'agenda-scheduler', 'navigation', 'plan-domain', 'plan', 'auth', 'initialization', 'persistence', 'ui', 'core', 'timing',
     'work-planner', 'planner', 'project-queue-filter', 'project-editor',
     'duplicate-review', 'project-csv', 'planner-bridge', 'deadline-audio',
     'project-queue', 'task-entry', 'guest-graph', 'beta-insights', 'task-graph', 'task-graph-timing', 'focus-durability'

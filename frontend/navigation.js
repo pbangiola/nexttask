@@ -28,7 +28,9 @@ window.AppNavigation=(()=>{
                 window.NextPlan.restoreContext(history.state?.planContext);
                 await window.NextPlan.open(target.view||'inbox',target.project||null);
                 if(target.edit)await window.NextPlan.edit(target.edit==='new'?null:target.edit,target.type||'task',target.initial||'');
-            }else if(target.screen==='entry')showTaskInput();
+            }else if(target.screen==='calendar')await window.Agenda.calendar();
+            else if(target.screen==='agenda')await window.Agenda.show();
+            else if(target.screen==='entry')showTaskInput();
             else if(target.screen==='resume')await window.WorkPlanner.resume();
             else if(target.screen==='work-project')await window.WorkPlanner.overview(target.project);
             else if(target.screen==='work')showWorkChoice();

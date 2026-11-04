@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS plan_details(
 CREATE TABLE IF NOT EXISTS plan_tags(task_id TEXT NOT NULL REFERENCES tasks(id),tag TEXT NOT NULL,PRIMARY KEY(task_id,tag));
 CREATE TABLE IF NOT EXISTS plan_dependencies(user_id TEXT NOT NULL,task_id TEXT NOT NULL REFERENCES tasks(id),prerequisite_id TEXT NOT NULL REFERENCES tasks(id),PRIMARY KEY(task_id,prerequisite_id));
 CREATE TABLE IF NOT EXISTS plan_comparisons(sequence INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,higher_id TEXT NOT NULL REFERENCES tasks(id),lower_id TEXT NOT NULL REFERENCES tasks(id),created_at INTEGER NOT NULL,context TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS plan_settings(user_id TEXT PRIMARY KEY,timezone TEXT NOT NULL,reserve REAL NOT NULL DEFAULT 0.2);
+CREATE TABLE IF NOT EXISTS plan_settings(user_id TEXT PRIMARY KEY,timezone TEXT NOT NULL,reserve REAL NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS plan_availability(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,start_at INTEGER NOT NULL,end_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS plan_working_hours(user_id TEXT NOT NULL,weekday INTEGER NOT NULL,start_minute INTEGER NOT NULL,end_minute INTEGER NOT NULL,PRIMARY KEY(user_id,weekday,start_minute));
 CREATE TABLE IF NOT EXISTS plan_revisions(user_id TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0);
@@ -41,8 +41,8 @@ function revision(owner){return db.prepare('SELECT revision FROM plan_revisions 
 function integer(value,label,nullable=true){if(value==null&&nullable)return null;if(!Number.isSafeInteger(value)||value<0)throw new Error(label+' must be nonnegative integer milliseconds');return value;}
 function text(value,label){if(typeof value!=='string'||value.length>20000)throw new Error('Invalid '+label);return value;}
 function settings(owner){
-    const current=db.prepare('SELECT * FROM plan_settings WHERE user_id=?').get(owner)||{timezone:'America/Chicago',reserve:0.2};
-    return {...current,workingHoursEnabled:current.working_hours_enabled===1,workingHours:db.prepare('SELECT weekday,start_minute startMinute,end_minute endMinute FROM plan_working_hours WHERE user_id=? ORDER BY weekday,start_minute').all(owner)};
+    const current=db.prepare('SELECT * FROM plan_settings WHERE user_id=?').get(owner)||{timezone:'America/Chicago',reserve:0};
+    return {...current,reserve:0,workingHoursEnabled:current.working_hours_enabled===1,workingHours:db.prepare('SELECT weekday,start_minute startMinute,end_minute endMinute FROM plan_working_hours WHERE user_id=? ORDER BY weekday,start_minute').all(owner)};
 }
 function snapshot(owner,now=Date.now()){
     integrity.reconcile(owner);
@@ -63,7 +63,7 @@ function snapshot(owner,now=Date.now()){
             actualMs:nodes.filter(candidate=>candidate.id===n.id||g.ancestors(candidate.id).some(a=>a.id===n.id)).reduce((s,l)=>s+l.actual_ms,0),estimatedMs:included.reduce((s,l)=>s+l.estimated_ms,0),
             remainingMs:included.some(l=>l.status!=='completed'&&l.remaining_ms==null&&l.estimated_ms<=0)?null:included.filter(l=>l.status!=='completed').reduce((s,l)=>s+(l.remaining_ms??Math.max(0,l.estimated_ms-l.actual_ms)),0)};
     }
-    return {version:revision(owner),nodes,dependencies,comparisons,windows,settings:config,forecast:domain.plan(nodes,dependencies,comparisons,{now,windows,reserve:config.reserve,timezone:config.timezone,workingHoursEnabled:config.workingHoursEnabled,workingHours:config.workingHours})};
+    return {version:revision(owner),nodes,dependencies,comparisons,windows,settings:config,forecast:domain.plan(nodes,dependencies,comparisons,{now,windows,reserve:config.reserve,timezone:config.timezone,workingHoursEnabled:config.workingHoursEnabled,workingHours:config.workingHours,importanceOrder:require('./agenda-store').ranks(owner),events:require('./agenda-store').events(owner)})};
 }
 function details(owner,id,input){
     db.prepare('INSERT OR IGNORE INTO plan_details(task_id,user_id) VALUES(?,?)').run(id,owner);
@@ -182,9 +182,8 @@ module.exports={
         ids.slice(1).forEach((id,index)=>stmt.run(owner,ids[index],id,now,'backlog-sort'));return {ids};
     });},
     settings(owner,input){return mutate(owner,input,()=>{
-        const current=settings(owner),zone='timezone' in input?input.timezone:current.timezone,reserve='reserve' in input?input.reserve:current.reserve;
+        const current=settings(owner),zone='timezone' in input?input.timezone:current.timezone,reserve=0;
         new Intl.DateTimeFormat('en-US',{timeZone:zone});
-        if(typeof reserve!=='number'||reserve<0||reserve>0.8)throw new Error('Reserve must be between 0 and 80%');
         const enabled='workingHoursEnabled' in input?input.workingHoursEnabled:current.workingHoursEnabled;
         if(typeof enabled!=='boolean')throw new Error('workingHoursEnabled must be boolean');
         const hours=domain.validateWorkingHours('workingHours' in input?input.workingHours:current.workingHours);

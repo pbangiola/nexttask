@@ -153,7 +153,8 @@
         return null;
     }
     function plan(nodes, dependencies, comparisons, options) {
-        const {now, windows:rawWindows=[], reserve=0,workingHoursEnabled=false,workingHours=[],timezone='UTC'} = options;
+        const {now, windows:rawWindows=[], workingHoursEnabled=false,workingHours=[],timezone='UTC',events=[]} = options;
+        const reserve=0;
         // Missing working hours are not a release constraint. Forecast from now
         // on an open timeline until the user supplies explicit availability.
         const availabilityMode=workingHoursEnabled?'weekly':rawWindows.length?'specified':'continuous';
@@ -167,9 +168,12 @@
             horizonEnd=Math.min(now+366*5*DAY,Math.max(now+Math.max(56,effortDays)*DAY,latest+14*DAY));
             planningWindows=mergeWindows([...rawWindows,...weeklyWindows(hours,{now,end:horizonEnd,timezone})]);
         }
-        const windows=availabilityMode==='continuous'?[{start:now,end:Number.MAX_SAFE_INTEGER}]:intervals(planningWindows,now,reserve);
+        let windows=availabilityMode==='continuous'?[{start:now,end:8640000000000000}]:intervals(planningWindows,now,0);
+        for(const event of [...events].sort((a,b)=>a.start_at-b.start_at))windows=windows.flatMap(w=>event.end_at<=w.start||event.start_at>=w.end?[w]:[{start:w.start,end:Math.min(w.end,event.start_at)},{start:Math.max(w.start,event.end_at),end:w.end}].filter(w=>w.end>w.start));
         const g=graph(nodes,dependencies), ranks=importance(nodes,comparisons);
+        if(options.importanceOrder?.length){const explicit=new Map(options.importanceOrder.map((id,index)=>[id,index])),previous=new Map(ranks.order.map((id,index)=>[id,index]));ranks.order.sort((a,b)=>(explicit.get(a)??100000+previous.get(a))-(explicit.get(b)??100000+previous.get(b)));}
         const work=nodes.filter(n=>n.node_type==='task'&&n.independently_actionable!==0&&!closed(n));
+        const importancePosition=new Map([...work].sort((a,b)=>ranks.order.indexOf(a.id)-ranks.order.indexOf(b.id)).map((n,index)=>[n.id,index+1]));
         const remaining = n => n.remaining_ms ?? (n.estimated_ms>0?Math.max(0,n.estimated_ms-(n.actual_ms??n.elapsed_ms??0)):null);
         const duration = new Map(work.map(n=>[n.id,remaining(n)]));
         const deadlines=new Map(),targets=new Map(),release=new Map(),benefit=new Map();
@@ -179,7 +183,7 @@
             deadlines.set(n.id,Math.min(min(family.map(n=>n.deadline_at)),n.scheduled_start_at!=null&&duration.get(n.id)!=null?n.scheduled_start_at+duration.get(n.id):Infinity));
             targets.set(n.id,min(family.map(n=>n.due_at)));
             release.set(n.id,Math.max(now,...family.map(n=>n.earliest_start_at||0),n.scheduled_start_at||0));
-            benefit.set(n.id,min(family.map(n=>ranks.ranks.get(n.id))));
+            benefit.set(n.id,options.importanceOrder?.includes(n.id)?options.importanceOrder.indexOf(n.id)+1:ranks.order.indexOf(n.id)+1);
         }
         let changed=true;
         while(changed) {
@@ -198,60 +202,66 @@
         }
         changed=true;
         while(changed){changed=false;for(const n of work)if([...g.predecessors.get(n.id)].some(id=>unavailable.has(id)||(['cancelled'].includes(g.byId.get(id).status))))if(!unavailable.has(n.id)){unavailable.add(n.id);changed=true;}}
-        const usable=work.filter(n=>!unavailable.has(n.id)), constrained=new Set(usable.filter(n=>Number.isFinite(deadlines.get(n.id))).map(n=>n.id));
-        const baselineOrder=(a,b)=>deadlines.get(a.id)-deadlines.get(b.id)||targets.get(a.id)-targets.get(b.id)||benefit.get(a.id)-benefit.get(b.id)||a.id.localeCompare(b.id);
-        function simulate(doneInput, cursor, fixedCandidate=null, onlyHard=false) {
-            const done=new Set(doneInput), slots=[];
-            let todo=usable.filter(n=>!done.has(n.id)&&(!onlyHard||constrained.has(n.id)));
-            const eligible=n=>[...g.predecessors.get(n.id)].every(id=>g.byId.get(id).status==='completed'||done.has(id));
-            while(todo.length) {
-                const candidates=todo.filter(eligible).sort(baselineOrder);
-                const n=fixedCandidate ? candidates.find(n=>n.id===fixedCandidate) : candidates[0];fixedCandidate=null;
-                if(!n)return {ok:false,slots,reason:'Unresolved prerequisite'};
-                const segments=duration.get(n.id)===0?[{start:Math.max(cursor,release.get(n.id)),end:Math.max(cursor,release.get(n.id))}]:fit(windows,Math.max(cursor,release.get(n.id)),duration.get(n.id),n.splittable!==false);
-                if(!segments)return {ok:false,slots,reason:'Insufficient available capacity'};
-                const end=segments.at(-1).end;
-                if(end>deadlines.get(n.id))return {ok:false,slots,reason:'Hard deadline conflict'};
-                slots.push({id:n.id,segments,start:segments[0].start,end});cursor=end;done.add(n.id);todo=todo.filter(t=>t.id!==n.id);
+        const usable=work.filter(n=>!unavailable.has(n.id));
+        const orderIndex=new Map(ranks.order.map((id,index)=>[id,index]));
+        const priority=(a,b)=>benefit.get(a.id)-benefit.get(b.id)||orderIndex.get(a.id)-orderIndex.get(b.id);
+        function simulate(order){
+            const done=new Set(),slots=[];let cursor=now;
+            const pending=[...order];
+            while(pending.length){
+                const eligible=pending.filter(n=>[...g.predecessors.get(n.id)].every(id=>g.byId.get(id).status==='completed'||done.has(id)));
+                if(!eligible.length)break;
+                let chosen=null;
+                for(const n of eligible){
+                    const segments=duration.get(n.id)===0?[{start:Math.max(cursor,release.get(n.id)),end:Math.max(cursor,release.get(n.id))}]:fit(windows,Math.max(cursor,release.get(n.id)),duration.get(n.id),n.splittable!==false);
+                    if(!segments)continue;
+                    const slot={id:n.id,segments,start:segments[0].start,end:segments.at(-1).end};
+                    if(!chosen||slot.end<=chosen.start)chosen=slot;
+                    if(chosen.start===cursor)break;
+                }
+                if(!chosen)break;
+                slots.push(chosen);done.add(chosen.id);cursor=chosen.end;pending.splice(pending.findIndex(n=>n.id===chosen.id),1);
             }
-            return {ok:true,slots};
+            return slots;
         }
-        const hardBaseline=simulate(new Set(),now,null,true), schedule=[],done=new Set();let cursor=now;
-        const latest=new Map(),timingBound=new Map(usable.map(n=>[n.id,Math.min(deadlines.get(n.id),targets.get(n.id))]));
-        // A resource-aware backward forecast: each prerequisite is reserved once.
-        const pending=new Set(usable.filter(n=>Number.isFinite(timingBound.get(n.id))).map(n=>n.id));let before=Infinity;
-        while(pending.size) {
-            const sinks=usable.filter(n=>pending.has(n.id)&&!usable.some(other=>pending.has(other.id)&&g.predecessors.get(other.id).has(n.id)))
-                .sort((a,b)=>timingBound.get(b.id)-timingBound.get(a.id)||b.id.localeCompare(a.id));
-            const n=sinks[0];if(!n)break;
-            const successors=usable.filter(other=>g.predecessors.get(other.id).has(n.id));
-            const limit=Math.min(before,timingBound.get(n.id),...successors.map(other=>latest.get(other.id)??Infinity));
-            const segments=fit(windows,release.get(n.id),duration.get(n.id),n.splittable!==false,limit,true);
-            if(!segments)break;latest.set(n.id,segments[0].start);before=segments[0].start;pending.delete(n.id);
-        }
-        while(done.size<usable.length) {
-            const candidates=usable.filter(n=>!done.has(n.id)&&[...g.predecessors.get(n.id)].every(id=>g.byId.get(id).status==='completed'||done.has(id)))
-                .sort((a,b)=>benefit.get(a.id)-benefit.get(b.id)||targets.get(a.id)-targets.get(b.id)||a.id.localeCompare(b.id));
-            if(!candidates.length)break;
-            let selected;
-            for(const n of candidates) {
-                const segments=duration.get(n.id)===0?[{start:Math.max(cursor,release.get(n.id)),end:Math.max(cursor,release.get(n.id))}]:fit(windows,Math.max(cursor,release.get(n.id)),duration.get(n.id),n.splittable!==false);
-                if(!segments || segments.at(-1).end>deadlines.get(n.id))continue;
-                const nextDone=new Set([...done,n.id]);
-                if(hardBaseline.ok&&!simulate(nextDone,segments.at(-1).end,null,true).ok)continue;
-                const placement={id:n.id,segments,start:segments[0].start,end:segments.at(-1).end};
-                if(!selected || (placement.start<selected.start && placement.end<=selected.start))selected=placement;
-                if(selected.start===cursor)break;
+        let order=[...usable].sort(priority),schedule=simulate(order);
+        let moved=true;
+        while(moved){
+            moved=false;
+            for(let i=1;i<order.length;i++){
+                const current=order[i],slot=schedule.find(slot=>slot.id===current.id),bound=Math.min(deadlines.get(current.id),targets.get(current.id));
+                if(!Number.isFinite(bound)||(slot&&slot.end<=bound))continue;
+                const candidate=[...order];[candidate[i-1],candidate[i]]=[candidate[i],candidate[i-1]];
+                const trial=simulate(candidate),advanced=trial.find(slot=>slot.id===current.id);
+                if(!advanced||(slot&&advanced.start>=slot.start))continue;
+                const sacrificed=order.some(n=>{
+                    if(n.id===current.id||benefit.get(n.id)>=benefit.get(current.id))return false;
+                    const finish=trial.find(slot=>slot.id===n.id)?.end??Infinity;
+                    const previous=schedule.find(slot=>slot.id===n.id)?.end??Infinity;
+                    return finish>Math.min(deadlines.get(n.id),targets.get(n.id))&&finish>previous;
+                });
+                if(sacrificed)continue;
+                order=candidate;schedule=trial;moved=true;break;
             }
-            if(!selected)break;
-            done.add(selected.id);cursor=selected.end;schedule.push(selected);
         }
-        const warnings=[];
-        if(!hardBaseline.ok)warnings.push(hardBaseline.reason+'. No feasible schedule found by this planner; review capacity and constraints.');
+        const done=new Set(schedule.map(slot=>slot.id)),latest=new Map(),warnings=[];
+        for(const n of usable){
+            const limit=Math.min(deadlines.get(n.id),targets.get(n.id));
+            if(Number.isFinite(limit)){
+                const segments=fit(windows,now,duration.get(n.id),n.splittable!==false,limit,true);
+                latest.set(n.id,segments?.[0]?.start??limit-duration.get(n.id));
+            }
+        }
+        // Prerequisite latest starts also respect the dependent's latest start.
+        for(let pass=0;pass<usable.length;pass++)for(const n of usable)for(const predecessor of g.predecessors.get(n.id)){
+            if(latest.has(n.id)&&duration.has(predecessor))latest.set(predecessor,Math.min(latest.get(predecessor)??Infinity,latest.get(n.id)-duration.get(predecessor)));
+        }
         for(const n of work)if(!done.has(n.id))warnings.push(`${n.name}: ${unavailable.has(n.id)?'unknown estimate, closed parent, or unresolved prerequisite':'no placement found within available time'}.`);
+        for(const slot of schedule)if(slot.end>deadlines.get(slot.id))warnings.push(`${g.byId.get(slot.id).name}: deadline missed to protect more important work or because time is insufficient.`);
+        const hardBaseline={ok:work.filter(n=>Number.isFinite(deadlines.get(n.id))).every(n=>{const slot=schedule.find(slot=>slot.id===n.id);return slot&&slot.end<=deadlines.get(n.id);})};
         const items=work.map(n=>{
             const slot=schedule.find(s=>s.id===n.id),latestStart=latest.get(n.id)??null;
-            const ancestors=g.ancestors(n.id), ownRank=ranks.ranks.get(n.id)??null;
+            const ancestors=g.ancestors(n.id), ownRank=importancePosition.get(n.id)??null;
             return {id:n.id,remainingMs:duration.get(n.id),importanceRank:ownRank,effectiveImportance:Number.isFinite(benefit.get(n.id))?benefit.get(n.id):null,
                 deadlineAt:Number.isFinite(deadlines.get(n.id))?deadlines.get(n.id):null,dueAt:Number.isFinite(targets.get(n.id))?targets.get(n.id):null,latestStart,slackMs:latestStart==null?null:latestStart-now,
                 ready:g.blocked(n.id).length===0&&release.get(n.id)<=now,blockedBy:g.blocked(n.id),...slot,

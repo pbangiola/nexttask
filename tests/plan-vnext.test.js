@@ -72,7 +72,7 @@ async function pageFor(t,owner){
  const context=await browser.newContext();t.after(()=>context.close());const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
  await context.route('https://cdn.jsdelivr.net/**',route=>route.fulfill({contentType:'application/javascript',body:''}));
  await context.route('https://'+domain+'/**',route=>route.fulfill({contentType:'application/javascript',body:`window.Clerk=window.Clerk||{isSignedIn:true,user:{id:${JSON.stringify(owner)}},session:{id:'sess_fixture',async getToken(){return ${JSON.stringify(token(owner))}}},async load(){},mountUserButton(){},addListener(){}};`}));
- page.setDefaultTimeout(10000);await page.goto(base);await page.waitForSelector('#modeSelect:not(.hidden)');await page.locator('#planBtn').click();await page.waitForSelector('#nextPlan .plan-capture');return page;
+ page.setDefaultTimeout(10000);await page.goto(base);await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>window.NextPlan.open('inbox',null));await page.waitForSelector('#nextPlan .plan-capture');return page;
 }
 test('browser capture, nested project editing, comparison, dependencies, calendar, reload, and shared Work identity',async t=>{
  const owner='plan_browser',page=await pageFor(t,owner);
@@ -86,9 +86,9 @@ test('browser capture, nested project editing, comparison, dependencies, calenda
  await page.getByRole('button',{name:'Sort importance',exact:true}).click();await page.locator('dialog').getByRole('button',{name:'Write proposal',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('dialog'));
  assert.equal(store.snapshot(owner).forecast.items.find(i=>i.id===b.id).importanceRank,1);
  await page.getByRole('button',{name:'Availability',exact:true}).click();await page.getByRole('button',{name:'Next 7 weekdays, 9–5',exact:true}).click();await page.getByRole('button',{name:'Save availability',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('dialog'));
- await page.getByRole('button',{name:'Calendar',exact:true}).click();await page.waitForSelector('.plan-day');
+ await page.evaluate(()=>window.NextPlan.open('agenda',null));await page.waitForSelector('.plan-day');
  await page.getByRole('button',{name:'Matrix',exact:true}).click();await page.waitForSelector('.plan-grid');
- await page.reload();await page.waitForSelector('#nextPlan');await page.getByRole('button',{name:'All work',exact:true}).click();await page.waitForSelector(`[data-task-id="${b.id}"]`);
+ await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>window.NextPlan.open('inbox',null));await page.waitForSelector('#nextPlan');await page.getByRole('button',{name:'All work',exact:true}).click();await page.waitForSelector(`[data-task-id="${b.id}"]`);
  // Select both tasks: the prerequisite executes first despite expressed importance.
  await page.getByLabel('Select Gather evidence',{exact:true}).check();await page.getByLabel('Select Write proposal',{exact:true}).check();await page.locator('#nextPlan header').getByRole('button',{name:'Work',exact:true}).click();
  await page.waitForSelector('#dashboardScreen');await page.getByRole('button',{name:'Get to Work',exact:true}).click();await page.waitForSelector('#focusScreen');
@@ -178,7 +178,7 @@ test('bulk deletion rolls back the whole selection if any task is running or bel
 test('browser calendar works before setup and selected tasks support bulk metadata edits and deletion',async t=>{
  const owner='bulk_browser';store.create(owner,{tasks:[{id:'bb-a',name:'Bulk Alpha',estimatedTimeMs:60000,notes:'Keep Alpha',due_at:Date.now()+86400000},{id:'bb-b',name:'Bulk Beta',estimatedTimeMs:120000,notes:'Keep Beta',due_at:Date.now()+2*86400000},{id:'bb-keep',name:'Leave alone',estimatedTimeMs:180000}]});
  const page=await pageFor(t,owner);
- await page.getByRole('button',{name:'Calendar',exact:true}).click();await page.waitForSelector('.plan-day');
+ await page.evaluate(()=>window.NextPlan.open('agenda',null));await page.waitForSelector('.plan-day');
  assert.doesNotMatch(await page.locator('#planContent').textContent(),/Unscheduled|No timing placement/);
  await page.getByRole('button',{name:'Availability',exact:true}).click();await page.locator('dialog').getByRole('button',{name:'Add interval',exact:true}).click();
  const start=await page.locator('dialog').getByLabel('Available from',{exact:true}).inputValue();
@@ -199,7 +199,7 @@ test('browser calendar works before setup and selected tasks support bulk metada
  state=store.snapshot(owner);assert.equal(state.nodes.find(n=>n.id==='bb-a').status,'cancelled');assert.equal(state.nodes.find(n=>n.id==='bb-b').status,'cancelled');assert.equal(state.nodes.find(n=>n.id==='bb-keep').status,'pending');
  await page.getByLabel('Search tasks').fill('');await page.getByRole('button',{name:'Archive',exact:true}).click();await page.locator('[data-task-id="bb-a"]').getByRole('button',{name:'Restore',exact:true}).click();
  await page.waitForFunction(()=>!document.querySelector('[data-task-id="bb-a"]'));assert.equal(users.getNode(owner,'bb-a').status,'pending');
- await page.reload();await page.waitForSelector('#nextPlan');await page.getByRole('button',{name:'Backlog',exact:true}).click();await page.waitForSelector('[data-task-id="bb-a"]');
+ await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>window.NextPlan.open('inbox',null));await page.waitForSelector('#nextPlan');await page.getByRole('button',{name:'Backlog',exact:true}).click();await page.waitForSelector('[data-task-id="bb-a"]');
  assert.match(await page.locator('[data-task-id="bb-a"]').textContent(),/12 min remaining/);
 });
 
@@ -244,7 +244,7 @@ test('browser saves weekly working hours, supports breaks, validates overlap, re
  for(const slot of state.forecast.schedule)for(const segment of slot.segments){
   const local=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'long',hour:'numeric',hourCycle:'h23'}).formatToParts(segment.start);const parts=Object.fromEntries(local.filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));assert.ok(['Monday','Wednesday'].includes(parts.weekday));assert.ok(Number(parts.hour)>=9&&Number(parts.hour)<17);if(parts.weekday==='Monday')assert.notEqual(Number(parts.hour),12);
  }
- await page.reload();await page.waitForSelector('#nextPlan');await page.getByRole('button',{name:'Working hours',exact:true}).click();
+ await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>window.NextPlan.open('inbox',null));await page.waitForSelector('#nextPlan');await page.getByRole('button',{name:'Working hours',exact:true}).click();
  assert.equal(await page.locator('dialog').getByLabel('Monday start 2',{exact:true}).inputValue(),'13:00');assert.equal(await page.locator('dialog').getByLabel('Work on Tuesday',{exact:true}).isChecked(),false);
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.querySelector('dialog').scrollWidth<=document.querySelector('dialog').clientWidth),true);
  await page.locator('dialog').getByRole('button',{name:'Turn off weekly hours',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('dialog'));
@@ -277,10 +277,10 @@ test('project navigation restores edits with Back, Forward and refresh; new comp
  const page=await pageFor(t,owner);await page.getByRole('button',{name:'Projects',exact:true}).click();await page.getByRole('link',{name:'History project',exact:true}).click();
  assert.equal(await page.locator('.plan-row').getByRole('button',{name:'Edit',exact:true}).count(),0);
  await page.getByRole('link',{name:'Existing component',exact:true}).click();await page.locator('dialog input[name=title]').fill('Draft component');await page.goBack();await page.waitForFunction(()=>!document.querySelector('dialog'));
- await page.goForward();await page.locator('dialog').waitFor();assert.equal(await page.locator('dialog input[name=title]').inputValue(),'Draft component');await page.reload();await page.locator('dialog').waitFor();assert.equal(await page.locator('dialog input[name=title]').inputValue(),'Draft component');
+ await page.goForward();await page.locator('dialog').waitFor();assert.equal(await page.locator('dialog input[name=title]').inputValue(),'Draft component');await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');assert.equal(await page.locator('dialog').count(),0);await page.evaluate(()=>window.NextPlan.open('project','history-p'));await page.getByRole('link',{name:'Existing component',exact:true}).click();await page.locator('dialog').waitFor();assert.equal(await page.locator('dialog input[name=title]').inputValue(),'Draft component');
  await page.locator('dialog button').filter({hasText:'Cancel'}).click();assert.equal(users.getNode(owner,'history-a').name,'Existing component');
  await page.getByLabel('Quick add task').fill('New component');await page.locator('.plan-capture button[type=submit]').click();
- assert.equal(await page.locator('dialog input[name=estimate]').getAttribute('required'),'');assert.equal(await page.locator('dialog input[name=deadline]').getAttribute('required'),'');
+ assert.equal(await page.locator('dialog input[name=estimate]').getAttribute('required'),'');assert.equal(await page.locator('dialog input[name=deadline]').getAttribute('required'),null);
  await page.locator('dialog input[name=estimate]').fill('35');await page.locator('dialog input[name=deadline]').fill('2027-02-01T12:00');await page.locator('dialog button[type=submit]').click();await page.getByRole('heading',{name:'What’s more important?',exact:true}).waitFor();
  await page.locator('dialog').getByRole('button',{name:'New component',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('dialog'));
  if(process.env.NEXTTASK_QA_SCREENSHOTS)await page.screenshot({path:path.join(process.env.NEXTTASK_QA_SCREENSHOTS,'project-components.png'),fullPage:true});
@@ -291,7 +291,7 @@ test('interrupted importance sorting resumes saved decisions without completing 
  const page=await pageFor(t,'importance_resume');await page.evaluate(()=>showModeSelect());
  await page.locator('#workBtn').click();await page.locator('#createNewListBtn').click();await page.getByRole('button',{name:"No, I don't have a set stop time."}).click();await page.locator('#tasks').fill('Alpha, 1m\nBeta, 1m\nGamma, 1m');await page.locator('#startSort').click();
  await page.locator('#taskCompare:not(.hidden)').waitFor();const pair=await page.locator('#taskCompare button').allTextContents();await page.locator('#task1').click();
- await page.waitForFunction(()=>!window.TaskGraph.pending());await page.reload();await page.locator('#resumeImportanceSort').waitFor();await page.locator('#resumeImportanceSort').click();await page.locator('#taskCompare:not(.hidden)').waitFor();
+ await page.waitForFunction(()=>!window.TaskGraph.pending());await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.locator('#resumeImportanceSort').waitFor();await page.locator('#resumeImportanceSort').click();await page.locator('#taskCompare:not(.hidden)').waitFor();
  assert.notDeepEqual(await page.locator('#taskCompare button').allTextContents(),pair,'answered pair is replayed from its saved decision');
  while(await page.locator('#taskCompare:not(.hidden)').count())await page.locator('#task1').click();await page.locator('#dashboardScreen').waitFor();
  assert.equal(store.snapshot('importance_resume').nodes.filter(n=>['Alpha','Beta','Gamma'].includes(n.name)&&n.status==='completed').length,0);
@@ -336,7 +336,7 @@ test('Learn More preserves the source article and renders all three diagrams wit
 test('calendar uses planned starts and leaves tasks without a feasible placement unscheduled',async t=>{
  const owner='calendar_start_fix',now=Date.now(),deadline=now+7*86400000;
  store.create(owner,{tasks:[{id:'calendar-start',name:'Start before deadline',estimatedTimeMs:3600000,deadline_at:deadline},{id:'calendar-unknown',name:'Unknown duration',deadline_at:deadline}]});
- const page=await pageFor(t,owner);await page.getByRole('button',{name:'Calendar',exact:true}).click();
+ const page=await pageFor(t,owner);await page.evaluate(()=>window.NextPlan.open('agenda',null));
  const scheduled=page.locator('.plan-day').filter({has:page.locator('[data-task-id="calendar-start"]')});
  assert.equal(await scheduled.locator('h3').textContent(),new Date(now).toLocaleDateString());
  assert.match(await scheduled.locator('[data-task-id="calendar-start"]').innerText(),/Deadline/);
@@ -359,9 +359,8 @@ test('legacy project Add Task requires timing then an unavoidable sibling compar
  const owner='legacy_required_fix';store.create(owner,{tasks:[{id:'required-parent',name:'Project',nodeType:'project'},{id:'required-peer',name:'Existing peer',parentId:'required-parent',estimatedTimeMs:60000}]});
  const page=await pageFor(t,owner);await page.evaluate(()=>ProjectEditor.open('required-parent'));await page.locator('#projectEditorAddTask').click();
  await page.locator('dialog input[name=title]').fill('Required new task');await page.locator('dialog button[type=submit]').click();assert.equal(store.snapshot(owner).nodes.length,2);
- await page.locator('dialog input[name=estimate]').fill('10');await page.locator('dialog button[type=submit]').click();assert.equal(store.snapshot(owner).nodes.length,2);
- await page.locator('dialog input[name=deadline]').fill('2027-02-01T12:00');await page.locator('dialog button[type=submit]').click();await page.getByRole('heading',{name:'What’s more important?',exact:true}).waitFor();
+ await page.locator('dialog input[name=estimate]').fill('10');await page.locator('dialog button[type=submit]').click();await page.getByRole('heading',{name:'What’s more important?',exact:true}).waitFor();
  await page.keyboard.press('Escape');assert.equal(await page.locator('dialog').isVisible(),true);
  await page.locator('dialog').getByRole('button',{name:'Required new task',exact:true}).click();await page.locator('#projectEditorTasks').waitFor();
- const state=store.snapshot(owner),task=state.nodes.find(n=>n.name==='Required new task');assert.equal(task.estimated_ms,600000);assert.ok(task.deadline_at);assert.ok(state.comparisons.some(c=>c.higher_id===task.id&&c.lower_id==='required-peer'));
+ const state=store.snapshot(owner),task=state.nodes.find(n=>n.name==='Required new task');assert.equal(task.estimated_ms,600000);assert.equal(task.deadline_at,null);assert.ok(state.comparisons.some(c=>c.higher_id===task.id&&c.lower_id==='required-peer'));
 });

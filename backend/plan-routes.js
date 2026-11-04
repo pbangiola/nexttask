@@ -3,11 +3,17 @@ const express=require('express');
 const store=require('./plan-store');
 const router=express.Router();
 const handle=fn=>(req,res)=>{try{res.json(fn(req.clerkUserId,req));}catch(error){res.status(error.status||(/not found/i.test(error.message)?404:400)).json({error:error.message});}};
+const agenda=require('./agenda-store');
+router.get('/plan/agenda',handle(owner=>agenda.read(owner)));
+router.put('/plan/agenda',handle((owner,req)=>agenda.save(owner,req.body||{})));
+router.post('/plan/agenda/backlog',handle((owner,req)=>agenda.backlog(owner,req.body?.taskIds)));
+router.post('/plan/calendar-events',handle((owner,req)=>agenda.addEvent(owner,req.body||{})));
+router.delete('/plan/calendar-events/:id',handle((owner,req)=>agenda.deleteEvent(owner,req.params.id)));
 router.get('/plan',handle((owner)=>store.snapshot(owner)));
 router.post('/plan/tasks',handle((owner,req)=>{
     const input=req.body||{};
     if(Array.isArray(input.tasks))for(const task of input.tasks){
-        if(task.parentId&&task.nodeType!=='project'&&(!Number.isSafeInteger(task.estimatedTimeMs)||task.estimatedTimeMs<=0||!Number.isSafeInteger(task.deadline_at)||task.deadline_at<0))throw new Error('New project tasks require an estimated duration and a hard deadline');
+        if(task.parentId&&task.nodeType!=='project'&&(!Number.isSafeInteger(task.estimatedTimeMs)||task.estimatedTimeMs<=0))throw new Error('New project tasks require an estimated duration');
     }
     return store.create(owner,input);
 }));

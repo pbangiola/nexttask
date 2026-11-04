@@ -208,6 +208,7 @@ window.FocusDurability = (() => {
             }
             saveLocal(hard ? 'session-ended' : 'dashboard');
             const steps = [...stopSteps(stoppedAt), snapshot(projected)];
+            if(window.taskSorterMode!=='guest')steps.push(step('/plan/agenda/backlog',{taskIds:projected.filter(row=>!row.completed&&row.status!=='cancelled'&&!row.isSortingOverhead).map(row=>row.id)}));
             if (window.activeWorkSessionId && (!needsPreparation || reset)) steps.push(end(stoppedAt));
             return submit('session end', steps, () => {
                 sortedTasks = projected;
@@ -335,7 +336,9 @@ window.FocusDurability = (() => {
             task.actualTimeMs += Math.max(0, at - checkpoint);
             task.lastChanged = Math.max(checkpoint, at);
         }
-        await submit('recovery pause', [snapshot(), ...intervals.map(row => step(`/work-intervals/${encode(row.id)}/stop`, { endedAt: at }))]);
+        const recoverySteps=[snapshot(), ...intervals.map(row => step(`/work-intervals/${encode(row.id)}/stop`, { endedAt: at }))];
+        if(window.taskSorterMode!=='guest')recoverySteps.push(step('/plan/agenda/backlog',{taskIds:sortedTasks.filter(task=>!task.completed&&task.status!=='cancelled'&&!task.isSortingOverhead).map(task=>task.id)}));
+        await submit('recovery pause', recoverySteps);
         for (const task of sortedTasks) {
             task.lastChanged = null;
             if (task.status === 'active') task.status = 'pending';

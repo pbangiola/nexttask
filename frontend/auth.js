@@ -5,28 +5,30 @@
         ? window.location.origin
         : 'https://nexttask-production.up.railway.app';
     const APP_SCRIPTS = [
-        'frontend/initialization.js?v=20261015-project-qa-2',
-        'frontend/task-entry.js?v=20261015-project-qa-2',
-        'frontend/guest-graph.js?v=20261015-project-qa-2',
-        'frontend/task-graph.js?v=20261015-project-qa-2',
-        'frontend/task-graph-timing.js?v=20261015-project-qa-2',
-        'frontend/persistence.js?v=20261015-project-qa-2',
-        'frontend/ui.js?v=20261021-focus-1',
-        'frontend/core.js?v=20261015-project-qa-2',
-        'frontend/timing.js?v=20261015-project-qa-2',
-        'frontend/project-queue.js?v=20261015-project-qa-2',
-        'frontend/focus-durability.js?v=20261021-focus-1',
-        'frontend/work-planner.js?v=20261015-project-qa-2',
-        'frontend/planner.js?v=20261015-project-qa-2',
-        'frontend/project-queue-filter.js?v=20261015-project-qa-2',
-        'frontend/project-editor.js?v=20261102-feedback2',
-        'frontend/duplicate-review.js?v=20261015-project-qa-2',
-        'frontend/project-csv.js?v=20261015-project-qa-2',
-        'frontend/planner-bridge.js?v=20261015-project-qa-2',
-        'frontend/beta-insights.js?v=20261102-feedback2',
-        'frontend/plan-domain.js?v=vnext1',
-        'frontend/plan.js?v=20261102-feedback2',
-        'frontend/navigation.js?v=consolidated1'
+        'frontend/initialization.js?v=20261104-plan-1',
+        'frontend/task-entry.js?v=20261104-plan-1',
+        'frontend/guest-graph.js?v=20261104-plan-1',
+        'frontend/task-graph.js?v=20261104-plan-1',
+        'frontend/task-graph-timing.js?v=20261104-plan-1',
+        'frontend/persistence.js?v=20261104-plan-1',
+        'frontend/ui.js?v=20261104-plan-1',
+        'frontend/core.js?v=20261104-plan-1',
+        'frontend/timing.js?v=20261104-plan-1',
+        'frontend/project-queue.js?v=20261104-plan-1',
+        'frontend/focus-durability.js?v=20261104-plan-1',
+        'frontend/work-planner.js?v=20261104-plan-1',
+        'frontend/planner.js?v=20261104-plan-1',
+        'frontend/project-queue-filter.js?v=20261104-plan-1',
+        'frontend/project-editor.js?v=20261104-plan-1',
+        'frontend/duplicate-review.js?v=20261104-plan-1',
+        'frontend/project-csv.js?v=20261104-plan-1',
+        'frontend/planner-bridge.js?v=20261104-plan-1',
+        'frontend/beta-insights.js?v=20261104-plan-1',
+        'frontend/plan-domain.js?v=20261104-plan-1',
+        'frontend/plan.js?v=20261104-plan-1',
+        'frontend/agenda-scheduler.js?v=20261104-plan-1',
+        'frontend/agenda.js?v=20261104-plan-1',
+        'frontend/navigation.js?v=20261104-plan-1'
     ];
 
     const nativeFetch = window.fetch.bind(window);
@@ -79,7 +81,13 @@
     async function loadApplication() {
         for (const src of APP_SCRIPTS) await loadScript(src);
         if (typeof window.init === 'function') await window.init();
-        await window.AppNavigation?.restore();
+        if(window.taskSorterMode==='authenticated' && window.FocusDurability.ready){
+            clearSessionTiming();
+            window.AppNavigation.go('home',{},true);
+            history.replaceState({route:{screen:'home'}},'',location.pathname+location.search);
+            await window.AppNavigation?.restore();
+            showModeSelect();
+        } else await window.AppNavigation?.restore();
     }
 
     let applicationStarted = false;
@@ -97,6 +105,7 @@
         };
         await loadApplication();
         document.getElementById('planBtn').disabled = true;
+        document.getElementById('agendaBtn').classList.add('hidden');document.getElementById('calendarBtn').classList.add('hidden');
         document.getElementById('planBtn').title = 'Sign in for saved nested projects. Guest lists stay local.';
         document.getElementById('taskSorterApp').classList.remove('hidden');
         document.getElementById('authLoading')?.classList.add('hidden');

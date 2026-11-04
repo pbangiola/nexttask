@@ -288,62 +288,15 @@ function showSequentialTiming(startIndex = 0) {
     const next = document.createElement('button');
     next.textContent = index === pending.length - 1 ? 'Finish and View List' : 'Save & Next';
 
-    function remainingPlanningTimeMs(now = Date.now()) {
-        const sessionRemaining = sessionTimeRemainingMs(now);
-        return sessionRemaining === null ? null : sessionRemaining - allocatedTimeMs();
-    }
-
     function updatePlanningTimer() {
-        const remainingMs = remainingPlanningTimeMs();
-
-        if (remainingMs === null) {
-            allocationTimer.textContent = 'No overall time limit';
-            input.removeAttribute('max');
-            input.placeholder = 'Minutes';
-            next.disabled = false;
-            return;
-        }
-
-        if (remainingMs <= 0) {
-            clearInterval(timerInterval);
-            saveLocal('dashboard');
-            showDashboard();
-            return;
-        }
-
-        allocationTimer.textContent = formatDuration(remainingMs);
-
-        const maxWholeMinutes = Math.floor(remainingMs / 60_000);
-        if (maxWholeMinutes < 1) {
-            input.max = '0';
-            input.placeholder = 'Less than 1 minute remains';
-            input.disabled = true;
-            next.disabled = true;
-            return;
-        }
-
-        input.disabled = false;
-        next.disabled = false;
-        input.max = String(maxWholeMinutes);
-        input.placeholder = `1-${maxWholeMinutes} minutes`;
+        const remaining=sessionTimeRemainingMs();
+        allocationTimer.textContent=remaining==null?'No overall time limit':formatDuration(remaining);
+        input.removeAttribute('max');input.placeholder='Minutes';input.disabled=false;next.disabled=false;
     }
-
-    next.onclick = () => {
-        const minutes = Number.parseInt(input.value, 10);
-        const remainingMs = remainingPlanningTimeMs();
-        const maxWholeMinutes = remainingMs === null
-            ? Number.POSITIVE_INFINITY
-            : Math.floor(remainingMs / 60_000);
-
-        if (!Number.isFinite(minutes) || minutes < 1 || minutes > maxWholeMinutes) {
-            alert(remainingMs === null ? 'Enter a positive number of minutes.' : `Enter a number from 1 to ${Math.max(1, maxWholeMinutes)}.`);
-            updatePlanningTimer();
-            return;
-        }
-
-        task.estimatedTimeMs = minutes * 60000;
-        saveLocal('timing-entry');
-        showSequentialTiming(index + 1);
+    next.onclick=()=>{
+        const minutes=Number(input.value);
+        if(!Number.isFinite(minutes)||minutes<=0)return alert('Enter a positive number of minutes.');
+        task.estimatedTimeMs=Math.round(minutes*60000);saveLocal('timing-entry');showSequentialTiming(index+1);
     };
 
     screen.append(heading, timerLabel, allocationTimer, prompt, input, next);

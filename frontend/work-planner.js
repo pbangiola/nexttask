@@ -340,7 +340,7 @@
             showWorkChoice();
         }
     }
-    window.WorkPlanner = { resume: resumeSelection, async resumeSort(ids){await loadTree();const nodes=ids.map(id=>findNode(workTreeCache,id));if(nodes.some(n=>!isOpen(n))){finishImportanceSort();showDashboard();return;}sortSelectedWork=true;await orderSelectedWork(nodes);showDashboard();}, async overview(id){await loadTree();showProjectOverview(id,false);} };
+    window.WorkPlanner = { resume: resumeSelection, async review(sort=false){await loadTree();sortSelectedWork=sort;await startNodes(workTreeCache,false);}, async resumeSort(ids){await loadTree();const nodes=ids.map(id=>findNode(workTreeCache,id));if(nodes.some(n=>!isOpen(n))){finishImportanceSort();showDashboard();return;}sortSelectedWork=true;await orderSelectedWork(nodes);showDashboard();}, async overview(id){await loadTree();showProjectOverview(id,false);} };
 
     // Work uses display names with project prefixes, but persistence must keep the
     // canonical backend node name, parent and sibling position intact.
