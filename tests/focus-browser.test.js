@@ -88,7 +88,7 @@ async function pageFor(t, existingOwner, fakeClock = false) {
     ` }));
     page.setDefaultTimeout(10000);
     await page.goto(base);
-    await page.waitForFunction(() => window.FocusDurability && !document.getElementById('taskSorterApp').classList.contains('hidden') && !document.getElementById('modeSelect').classList.contains('hidden'));
+    await page.waitForFunction(() => window.FocusDurability?.ready && !document.getElementById('taskSorterApp').classList.contains('hidden'));
     return { page, owner, context };
 }
 async function newList(page, skip = true) {
@@ -226,7 +226,7 @@ test('nested project labels, parent/session/name/position and blocker relationsh
     assert.equal(blocked.status, 'blocked'); assert.ok(blocked.blocked_by_task_id);
     assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM work_session_items WHERE task_id=?').get(leaf.id).n, 0);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
     assert.match(await page.locator('#dashboardScreen').textContent(), /Project[ :/]+Nested[ :/]+Leaf/);
     await page.getByRole('button', { name: 'Get to Work', exact: true }).click();
     await page.waitForSelector('#focusScreen'); await idle(page);
@@ -282,12 +282,12 @@ test('reload retries a lost response and server-only recovery restores queue pau
     });
     await newList(page);
     await page.getByRole('button', { name: 'Retry Save' }).waitFor();
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
     assert.equal(sessionRows(owner).length, 1); assert.equal(intervalRows(owner).length, 1);
     assert.ok(intervalRows(owner)[0].ended_at);
     await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
     await stopServer(); await startServer(Number(new URL(base).port));
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
     assert.equal(sessionRows(owner).length, 1); assert.equal(intervalRows(owner).length, 1);
     assert.match(await page.locator('#dashboardScreen').textContent(), /Alpha/);
     assert.equal(await page.locator('#focusScreen').count(), 0);
@@ -300,7 +300,7 @@ test('stale cached Focus cannot resurrect a server-ended session or completed ta
     const tasks = (await api(owner, `/session/${owner}/tasks`)).tasks;
     await api(owner, `/work-sessions/${active.id}/end`, 'POST', { endedAt: Date.now() });
     await api(owner, `/session/${owner}/tasks`, 'PUT', { tasks: tasks.map(row => ({ id: row.id, name: row.name, status: 'completed', completedTime: Date.now() })) });
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
     assert.equal(sessionRows(owner).length, 1);
     assert.equal(sessionRows(owner)[0].status, 'ended');
     assert.equal(await page.locator('#focusScreen').count(), 0);
@@ -395,11 +395,11 @@ test('server-only recovery of an expired hard stop closes at its recorded deadli
     await api(owner, `/users/${owner}/nodes`, 'POST', { id: `${owner}_expired_task`, name: 'Expired task', estimatedTimeMs: 60000 });
     await api(owner, '/work-sessions/prepare', 'POST', { id: `${owner}_expired_session`, startedAt: now - 3000, hardStopAt: deadline, taskIds: [`${owner}_expired_task`] });
     await api(owner, '/work-intervals', 'POST', { id: `${owner}_expired_run`, taskId: `${owner}_expired_task`, workSessionId: `${owner}_expired_session`, startedAt: now - 2000 });
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)'); await idle(page);
+    await page.reload();await page.waitForSelector('#sessionEndedScreen'); await idle(page);
     assert.equal(intervalRows(owner)[0].ended_at, deadline);
     assert.equal(sessionRows(owner)[0].ended_at, deadline);
     assert.equal(raw.prepare('SELECT elapsed_ms FROM tasks WHERE id=?').get(`${owner}_expired_task`).elapsed_ms, 1000);
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
+    await page.reload();await page.waitForSelector('#sessionEndedScreen'); await idle(page);
     assert.equal(intervalRows(owner).length, 1); assert.equal(sessionRows(owner).length, 1);
     assert.equal(sessionRows(owner)[0].status, 'ended');
 });
@@ -414,10 +414,10 @@ test('server-only recovery retains running time and repeated reload does not cou
     raw.prepare('UPDATE tasks SET elapsed_ms=4000 WHERE id=?').run(taskId);
     await api(owner, '/work-sessions/prepare', 'POST', { id: sessionId, startedAt: now - 5000, taskIds: [taskId] });
     await api(owner, '/work-intervals', 'POST', { id: `${owner}_running_run`, taskId, workSessionId: sessionId, startedAt: now - 2000 });
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
     const elapsed = raw.prepare('SELECT elapsed_ms FROM tasks WHERE id=?').get(taskId).elapsed_ms;
     assert.ok(elapsed >= 6000);
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
     assert.equal(raw.prepare('SELECT elapsed_ms FROM tasks WHERE id=?').get(taskId).elapsed_ms, elapsed);
 });
 
@@ -455,7 +455,7 @@ test('reload of an uncertain immediate Done retains the intended completion and 
     await page.getByRole('button', { name: 'Done, Next!' }).click();
     const at = Date.now();
     release(); await page.getByRole('button', { name: 'Retry Save' }).waitFor();
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
     const task = raw.prepare("SELECT * FROM tasks WHERE user_id=? AND name='Alpha'").get(owner);
     assert.equal(task.status, 'completed');
     const runs = intervalRows(owner).filter(row => row.task_id === task.id);
@@ -474,7 +474,7 @@ test('confirmed server closure cancels stale journaled starts on reload', async 
     await newList(page); await page.getByRole('button', { name: 'Retry Save' }).waitFor();
     const id = sessionRows(owner)[0].id;
     await api(owner, `/work-sessions/${id}/end`, 'POST', { endedAt: Date.now() });
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page);
     assert.equal(sessionRows(owner).length, 1); assert.equal(sessionRows(owner)[0].status, 'ended');
     assert.equal(intervalRows(owner).length, 1); assert.ok(intervalRows(owner)[0].ended_at);
     assert.equal(await page.locator('#focusScreen').count(), 0);
@@ -532,7 +532,7 @@ test('reload during sorting retains canonical tasks and acknowledged overhead wi
     await page.waitForSelector('#taskCompare'); await idle(page);
     const original = raw.prepare("SELECT * FROM tasks WHERE user_id=? AND name!='Sort Tasks' ORDER BY position").all(owner);
     const overhead = raw.prepare("SELECT * FROM tasks WHERE user_id=? AND name='Sort Tasks'").get(owner);
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen').catch(async error=>{
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen').catch(async error=>{
         console.error('Sorting reload diagnostics',await page.evaluate(()=>({mode:window.taskSorterMode,screen:document.getElementById('dynamicContainer')?.textContent})));
         throw error;
     }); await idle(page);
@@ -556,13 +556,13 @@ test('focus alarm snooze and dismissal survive reload without changing accountin
     await page.getByRole('button',{name:'Snooze 5 Minutes',exact:true}).click();
     assert.equal(await accounting(),before);
     assert.match(await page.locator('#focusAlarmMessage').textContent(),/snoozed/);
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);
     await page.getByRole('button',{name:'Get to Work',exact:true}).click();await page.waitForSelector('#focusScreen');await idle(page);
     assert.match(await page.locator('#focusAlarmMessage').textContent(),/snoozed/);
     await page.clock.fastForward(300000);
     await page.waitForSelector('#alarmOff:visible');
     const beforeOff=await accounting();await page.locator('#alarmOff').click();assert.equal(await accounting(),beforeOff);
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);
     await page.getByRole('button',{name:'Get to Work',exact:true}).click();await page.waitForSelector('#focusScreen');await idle(page);
     assert.match(await page.locator('#focusAlarmMessage').textContent(),/turned off/);
     await page.setViewportSize({width:1280,height:900});
@@ -578,4 +578,29 @@ test('focus alarm snooze and dismissal survive reload without changing accountin
     await page.getByRole('button',{name:'Pause / Session Controls',exact:true}).click();
     await page.waitForSelector('#stopChecklistScreen');assert.equal(await page.title(),'Task Sorter');
     assert.ok(intervalRows(owner).every(row=>row.ended_at!==null));
+});
+
+
+test('mobile reload and renewed sign-in preserve active task, session stop and elapsed time without setup',async t=>{
+ const {page,owner}=await pageFor(t);await page.setViewportSize({width:390,height:844});
+ const now=Date.now(),stop=now+600000,id=owner+'_mobile_session',active=owner+'_mobile_active';
+ for(const [taskId,name]of [[owner+'_mobile_first','Earlier queued task'],[active,'Active mobile task']])await api(owner,`/users/${owner}/nodes`,'POST',{id:taskId,name,estimatedTimeMs:60000});
+ await api(owner,'/work-sessions/prepare','POST',{id,startedAt:now-3000,availableMs:600000,hardStopAt:stop,endConstraint:'School pickup',taskIds:[owner+'_mobile_first',active]});
+ await api(owner,'/work-intervals','POST',{id:owner+'_mobile_run',taskId:active,workSessionId:id,startedAt:now-2000});
+ // Mobile restoration or an auth redirect can reload a stale landing URL.
+ await page.evaluate(()=>history.replaceState({},'', '#app/'+encodeURIComponent(JSON.stringify({screen:'home'}))));
+ await page.reload();await page.waitForSelector('#dashboardScreen');await idle(page);
+ assert.equal(await page.locator('#modeSelect').isVisible(),false);
+ assert.equal(await page.locator('#timeLimitQuestionScreen').count(),0);
+ assert.deepEqual(await page.evaluate(()=>({session:window.activeWorkSessionId,stop:hardStopAtMs,active:activeTaskId,note:endConstraint})),{session:id,stop,active,note:'School pickup'});
+ const elapsed=raw.prepare('SELECT elapsed_ms FROM tasks WHERE id=?').get(active).elapsed_ms;assert.ok(elapsed>=2000);
+ await page.reload();await page.waitForSelector('#dashboardScreen');await idle(page);
+ assert.equal(await page.evaluate(()=>hardStopAtMs),stop);assert.equal(raw.prepare('SELECT elapsed_ms FROM tasks WHERE id=?').get(active).elapsed_ms,elapsed);
+ await page.getByRole('button',{name:'Get to Work',exact:true}).click();await page.waitForSelector('#focusScreen');await idle(page);
+ assert.equal(await page.locator('#focusScreen h2').textContent(),'Active mobile task');
+ // A new authenticated context has no cached snapshot and must use server timing.
+ const renewed=await pageFor(t,owner);await renewed.page.waitForSelector('#dashboardScreen');await idle(renewed.page);
+ assert.deepEqual(await renewed.page.evaluate(()=>({session:window.activeWorkSessionId,stop:hardStopAtMs,active:activeTaskId})),{session:id,stop,active});
+ assert.equal(sessionRows(owner).length,1);assert.equal(sessionRows(owner)[0].hard_stop_at,stop);
+ assert.equal(await renewed.page.locator('#timeLimitQuestionScreen').count(),0);
 });

@@ -210,9 +210,10 @@ function mergeWithChoices(left, right, runId) {
 }
 
 //trigger work on the next task in the sorted list
-function beginWork(){ const task=firstIncompleteTask(); if(!task){if(incompleteTasks().length)showDashboard();else window.FocusDurability.finish();return;} return showFocus(task); }
+function beginWork(){ const task=sortedTasks.find(task=>task.id===activeTaskId&&window.FocusDurability.eligible(task))||firstIncompleteTask(); if(!task){if(incompleteTasks().length)showDashboard();else window.FocusDurability.finish();return;} return showFocus(task); }
 
 
 
 //initialize
 function init(){ return window.FocusDurability.init(); }
+

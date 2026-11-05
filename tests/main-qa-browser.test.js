@@ -176,7 +176,7 @@ test('B8: project context never follows a standalone active task, including reco
     await page.getByRole('button',{name:'Add New Task'}).click(); await page.locator('#addTaskPage input').fill('Standalone, 1m'); await page.getByRole('button',{name:'Choose Work Position'}).click(); await page.getByRole('button',{name:'Do this next'}).click(); await page.waitForSelector('#focusScreen'); await idle(page);
     await page.getByRole('button',{name:'Done, Next!'}).click(); await page.waitForFunction(()=>document.querySelector('#focusScreen h2')?.textContent.includes('Standalone')); await idle(page);
     assert.equal(await page.locator('.project-work-toolbar').count(),0);
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page); await page.getByRole('button',{name:'Get to Work',exact:true}).click(); await page.waitForSelector('#focusScreen'); assert.equal(await page.locator('.project-work-toolbar').count(),0);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page); await page.getByRole('button',{name:'Get to Work',exact:true}).click(); await page.waitForSelector('#focusScreen'); assert.equal(await page.locator('.project-work-toolbar').count(),0);
 });
 test('B1/B3 full untimed work journey sorts one screen, estimates only missing entries, reload stays paused',async t=>{
     const {page,owner}=await pageFor(t);
@@ -189,7 +189,7 @@ test('B1/B3 full untimed work journey sorts one screen, estimates only missing e
     assert.equal(intervalRows(owner).length,0);assert.equal(raw.prepare("SELECT estimated_ms FROM tasks WHERE user_id=? AND name='2'").get(owner).estimated_ms,120000);
     await page.getByRole('button',{name:'Get to Work',exact:true}).click();await page.waitForSelector('#focusScreen');await idle(page);
     assert.equal(intervalRows(owner).filter(r=>r.ended_at===null).length,1);
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);assert.ok(intervalRows(owner).every(r=>r.ended_at!==null));assert.equal(await page.locator('#timingEntryScreen,#deadlinePage,#focusScreen').count(),0);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);assert.ok(intervalRows(owner).every(r=>r.ended_at!==null));assert.equal(await page.locator('#timingEntryScreen,#deadlinePage,#focusScreen').count(),0);
 });
 test('B2 untimed Add Task and project Add Task await the shared estimate continuation',async t=>{
     const {page,owner}=await pageFor(t);await newList(page);await idle(page);
@@ -219,9 +219,10 @@ test('B4/B8 stale browser estimates/context yield to canonical edited rows and a
     await page.evaluate(id=>window.WorkPlanner.overview(id),owner+'_oars');await page.getByRole('button',{name:'Start This Project'}).click();await page.waitForSelector('#focusScreen');await idle(page);
     await api(owner,`/users/${owner}/nodes/${owner}_left0`,'PUT',{name:'Server edit',estimatedTimeMs:30*60000});
     await page.evaluate(()=>{clearInterval(timerInterval);const s=JSON.parse(localStorage.getItem(LOCAL_STATE_KEY));s.sortedTasks.forEach(t=>t.estimatedTimeMs=999);s.currentWorkProjectContext={id:'wrong',name:'Wrong'};localStorage.setItem(LOCAL_STATE_KEY,JSON.stringify(s));});
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);
     assert.match(await page.locator('#dashboardScreen').textContent(),/Server edit — 30 min/);assert.doesNotMatch(await page.locator('#dashboardScreen').textContent(),/Wrong/);
     await page.evaluate(()=>resetAll());await page.waitForSelector('#modeSelect:not(.hidden)');await newList(page);await idle(page);assert.equal(await page.locator('.project-work-toolbar').count(),0);
     await page.locator('#stopWorkingBtn').click();await page.getByRole('button',{name:'End Work Session'}).click();await page.waitForSelector('#dashboardScreen');await idle(page);
     await page.evaluate(()=>resetAll());await page.waitForSelector('#modeSelect:not(.hidden)');await page.getByRole('button',{name:'Work',exact:true}).click();await page.locator('#resumeExistingListBtn').click();await page.getByRole('button',{name:"No, I don't have a set stop time."}).click();await page.waitForSelector('#focusScreen');await idle(page);assert.equal(await page.locator('.project-work-toolbar').count(),0);
 });
+

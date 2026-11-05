@@ -16,7 +16,15 @@ window.AppNavigation=(()=>{
         history.replaceState({...history.state,scrollY:window.scrollY,planContext:window.NextPlan?.context()},'');
         history[replace?'replaceState':'pushState']({route:next},'',hash);
     }
-    async function restore(){
+    async function restore({startup=false}={}){
+        // Startup recovery is authoritative over stale home/resume/history URLs.
+        // A discarded mobile page must not restart the session setup wizard.
+        if(startup&&window.FocusDurability.ready){
+            const screen=document.getElementById('sessionEndedScreen')?'ended'
+                :document.getElementById('completionScreen')?'completed'
+                :window.activeWorkSessionId&&document.getElementById('dashboardScreen')?'dashboard':null;
+            if(screen){ready=true;go(screen,{},true);return;}
+        }
         const target=route();if(!target){ready=true;return;}
         if(!window.FocusDurability.ready||document.getElementById('sessionEndedScreen')||document.getElementById('completionScreen')){ready=true;return;}
         restoring=true;
@@ -50,3 +58,4 @@ window.AppNavigation=(()=>{
     window.addEventListener('popstate',()=>restore().catch(error=>alert(error.message)));
     return {go,restore,get restoring(){return restoring;}};
 })();
+
