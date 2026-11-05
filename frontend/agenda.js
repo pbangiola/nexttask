@@ -80,12 +80,15 @@ window.Agenda = (() => {
             collectMissingEstimates(entries,async()=>{
                 try {
                     for(const entry of entries){const row=rows.find(row=>row.id===entry.id);if(row.estimated_ms!==entry.estimatedTimeMs){await request(`/tasks/${encodeURIComponent(row.id)}`,'PUT',{remaining_ms:entry.estimatedTimeMs});state.revision=(await request('/agenda')).revision;row.estimated_ms=entry.estimatedTimeMs;}}
-                    deadlines(rows,state);
+                    if(options.autoSave&&rows.every(row=>row.due_at==null||row.due_at>=Date.now())){
+                        await request('/agenda','PUT',{revision:state.revision,requestId:createId('capture_agenda'),tasks:rows.map(row=>({id:row.id,dueAt:row.due_at??null}))});
+                        finishImportanceSort();await (options.onSaved||showAgenda)();
+                    }else deadlines(rows,state,options.onSaved);
                 }catch(e){error(e);}
             },showModeSelect);
         }catch(e){error(e);}
     }
-    function deadlines(rows,state) {
+    function deadlines(rows,state,onSaved) {
         const c=shell('Review deadlines','planDeadlines');
         const note=document.createElement('p');note.textContent='Confirm deadlines for the backlog and overdue tasks. Leave a date blank for no deadline. Your saved importance order is preserved.';c.appendChild(note);
         const fields=[];
@@ -101,7 +104,7 @@ window.Agenda = (() => {
             const tasks=fields.map(({row,input})=>({id:row.id,dueAt:input.value?new Date(input.value).getTime():null}));
             if(tasks.some(row=>row.dueAt!==null&&(!Number.isFinite(row.dueAt)||row.dueAt<Date.now())))return alert('Choose a future deadline or no deadline for tasks with past deadlines.');
             save.disabled=true;
-            try{await request('/agenda','PUT',{revision:state.revision,tasks,requestId});finishImportanceSort();await showAgenda();}catch(e){error(e);}
+            try{await request('/agenda','PUT',{revision:state.revision,tasks,requestId});finishImportanceSort();await (onSaved||showAgenda)();}catch(e){error(e);}
         },'saveAgenda');
         c.append(save,button('Manage tasks and projects',()=>window.NextPlan.open('inbox',null)),button('Cancel',showModeSelect));
     }

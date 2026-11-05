@@ -160,3 +160,34 @@ test('Plan merges sorted backlog as the left list and saved Agenda as the right 
  await page.waitForSelector('#planDeadlines');await page.locator('#saveAgenda').click();await page.waitForSelector('#agendaScreen');
  assert.deepEqual(agenda.read(owner).agenda.map(row=>row.id),['merge-a','merge-b','merge-c','merge-d']);assert.equal(agenda.read(owner).backlog.length,0);
 });
+
+test('Plan quick entry requires a deadline choice and inserts the new task into the saved Agenda immediately',async t=>{
+ const owner='capture_insert';store.create(owner,{tasks:[{id:'capture-saved',name:'Saved task',estimatedTimeMs:60000}]});agenda.save(owner,{revision:agenda.read(owner).revision,tasks:[{id:'capture-saved',dueAt:null}]});
+ const page=await pageFor(t,owner);await page.evaluate(()=>window.NextPlan.open('inbox',null));await page.getByLabel('Quick add task').fill('New planned task, 1m');await page.locator('.plan-capture button[type=submit]').click();
+ await page.locator('dialog button[type=submit]').click();assert.equal(store.snapshot(owner).nodes.length,1);
+ await page.locator('dialog input[name=deadline]').fill('2027-02-01T12:00');await page.locator('dialog button[type=submit]').click();await page.getByRole('heading',{name:'What’s more important?',exact:true}).waitFor();
+ const saving=page.waitForResponse(response=>response.url().endsWith('/api/plan/agenda')&&response.request().method()==='PUT');
+ await page.locator('dialog').getByRole('button',{name:'New planned task',exact:true}).click();
+ const acknowledgement=await saving;assert.equal(acknowledgement.status(),200);await page.waitForSelector('#nextPlan');
+ const rows=agenda.read(owner).agenda;assert.equal(rows[0].name,'New planned task',JSON.stringify({rows:rows.map(r=>({name:r.name,rank:r.importance_rank,position:r.agenda_position})),comparisons:store.snapshot(owner).comparisons}));assert.ok(rows[0].due_at);assert.equal(rows[1].id,'capture-saved');
+});
+
+test('No deadline is an explicit Plan capture choice and same-name tasks remain separate',async t=>{
+ const owner='capture_same_name';const page=await pageFor(t,owner);await page.evaluate(()=>window.NextPlan.open('inbox',null));
+ for(let i=0;i<2;i++){
+  await page.getByLabel('Quick add task').fill('make dinner, 1m');await page.locator('.plan-capture button[type=submit]').click();await page.locator('dialog input[name=noDeadline]').check();await page.locator('dialog button[type=submit]').click();
+  if(i){await page.getByRole('heading',{name:'What’s more important?',exact:true}).waitFor();await page.locator('dialog').getByRole('button',{name:'make dinner',exact:true}).first().click();}
+  await page.waitForFunction(count=>!document.querySelector('dialog')&&document.querySelectorAll('.plan-row').length===count,i+1);
+ }
+ const rows=store.snapshot(owner).nodes.filter(n=>n.name==='make dinner');assert.equal(rows.length,2);assert.notEqual(rows[0].id,rows[1].id);assert.ok(rows.every(row=>row.deadline_at===null));assert.ok(store.snapshot(owner).comparisons.length>0);
+});
+
+test('Plan bulk entry requires an explicit deadline choice and mandatory placement',async t=>{
+ const owner='capture_bulk';store.create(owner,{tasks:[{id:'bulk-saved',name:'Saved first',estimatedTimeMs:60000}]});agenda.save(owner,{revision:agenda.read(owner).revision,tasks:[{id:'bulk-saved',dueAt:null}]});
+ const page=await pageFor(t,owner);await page.evaluate(()=>window.NextPlan.open('inbox',null));await page.getByRole('button',{name:'Bulk entry',exact:true}).click();await page.locator('dialog textarea').fill('Bulk B, 1m\nBulk C, 1m');
+ await page.locator('dialog button[type=submit]').click();assert.equal(store.snapshot(owner).nodes.length,1);await page.locator('dialog input[name=noDeadline]').check();await page.locator('dialog button[type=submit]').click();await page.getByRole('heading',{name:'What’s more important?',exact:true}).waitFor();
+ const saving=page.waitForResponse(response=>response.url().endsWith('/api/plan/agenda')&&response.request().method()==='PUT');
+ let comparisons=0;while(await page.locator('dialog').count()){await page.waitForFunction(()=>!document.querySelector('dialog')||document.querySelector('dialog button:not(:disabled)'));if(!await page.locator('dialog').count())break;comparisons++;await page.locator('dialog button:not(:disabled)').first().click();if(comparisons>8)throw new Error('Capture did not finish');}
+ assert.equal((await saving).status(),200);assert.ok(comparisons>=2);assert.ok(agenda.read(owner).items.every(row=>row.due_at===null));
+ const rejected=await api(owner,'/tasks','POST',{capture:true,tasks:[{id:'capture-bypass',name:'Missing deadline choice',estimatedTimeMs:60000}]});assert.equal(rejected.status,400);
+});

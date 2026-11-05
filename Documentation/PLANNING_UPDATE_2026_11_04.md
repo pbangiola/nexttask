@@ -74,3 +74,12 @@ Backlog sorting reuses recorded importance comparisons where available. The
 Agenda retains its saved importance order. Each merge compares only the two
 current heads, advances the chosen side, and appends the remainder. Saved
 relative ranks or prior comparison evidence resolve known choices automatically.
+
+## Plan task capture
+
+Quick entry, the full new-task form, project task entry and bulk entry all require
+an explicit deadline choice: a future date or “No deadline.” New tasks must pass
+importance placement before capture returns. The saved Agenda seeds insertion
+comparisons; new tasks merge into it and the schedule is saved automatically when
+existing dates are valid. With no Agenda yet, tasks remain an ordered backlog.
+Work Create retains its lighter flow and does not calculate deadlines.

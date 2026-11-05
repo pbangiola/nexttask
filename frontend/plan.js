@@ -6,7 +6,7 @@ window.NextPlan=(()=>{
     const local=value=>value==null?'':new Date(value-new Date(value).getTimezoneOffset()*60000).toISOString().slice(0,16);
     const date=value=>value==null?'':new Date(value).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
     let state=null,view='inbox',project=null,search='',filter='all',sort='sequence',selected=new Set(),generation=0;
-    let panel;
+    let panel,captureBusy=false;
     const openNode=n=>n.status!=='cancelled'&&!n.archived&&n.status!=='completed';
     const btn=(label,fn,primary=false)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>Promise.resolve().then(fn).catch(error=>message(error.message));if(primary)b.className='primary';return b;};
     function message(value){const target=document.getElementById('planMessage');if(target)target.textContent=value;else alert(value);}
@@ -102,8 +102,13 @@ window.NextPlan=(()=>{
         }
         const capture=document.createElement('form');capture.className='plan-capture';
         const input=document.createElement('input');input.placeholder='Capture a task, optionally with “, 15m”';input.setAttribute('aria-label','Quick add task');input.required=true;
-        const add=btn('Add task',()=>{} ,true);add.type='submit';capture.onsubmit=async e=>{e.preventDefault();if(view==='project'){await edit(null,'task',input.value);return;}const parsed=window.TaskEntry.parse(input.value);if(parsed.invalid.length||!parsed.entries.length)return message('Enter a task, optionally followed by a duration.');add.disabled=true;try{await change('/tasks','POST',{tasks:parsed.entries.map(n=>({...n,id:createId('task'),parentId:view==='project'?project:null}))});}catch(error){message(error.message);add.disabled=false;}};
-        capture.append(input,add,btn('Bulk entry',bulkEntry),btn('New project',()=>edit(null,'project')));panel.append(capture);
+        const add=btn('Add task',()=>{},true);add.type='submit';capture.onsubmit=async e=>{
+            e.preventDefault();const parsed=window.TaskEntry.parse(input.value);
+            if(parsed.invalid.length||!parsed.entries.length)return message('Enter a task, optionally followed by a duration.');
+            if(parsed.entries.length===1)await edit(null,'task',input.value);
+            else bulkEntry(input.value);
+        };
+        capture.append(input,add,btn('Bulk entry',bulkEntry),btn('New project',()=>edit(null,'project')));for(const control of capture.querySelectorAll('input,button'))control.disabled=captureBusy;panel.append(capture);
         const tools=document.createElement('div');tools.className='plan-tools';
         const query=document.createElement('input');query.type='search';query.placeholder='Search titles, notes, projects, tags';query.setAttribute('aria-label','Search tasks');query.value=search;
         query.oninput=()=>{search=query.value;renderContent();};tools.append(query);
@@ -194,8 +199,11 @@ window.NextPlan=(()=>{
         const dates=document.createElement('div');dates.className='plan-fields';form.append(dates);
         const due=field(dates,'Preferred due date','datetime-local',local(n.due_at),'due');
         const deadline=field(dates,'Hard deadline','datetime-local',local(n.deadline_at),'deadline');
-        deadline.required=false;
-        parent.onchange=()=>{const required=!id&&n.node_type==='task'&&!!parent.value;estimate.required=required;deadline.required=false;estimate.min=required?0.000001:0;};
+        const needsDeadline=!id&&n.node_type==='task';deadline.required=needsDeadline;
+        const noDeadline=needsDeadline?field(dates,'No deadline','checkbox','','noDeadline'):null;
+        const syncDeadline=()=>{if(!noDeadline)return;deadline.disabled=noDeadline.checked;deadline.required=!noDeadline.checked;if(noDeadline.checked)deadline.value='';};
+        if(noDeadline)noDeadline.onchange=syncDeadline;
+        parent.onchange=()=>{const required=!id&&n.node_type==='task'&&!!parent.value;estimate.required=required;estimate.min=required?0.000001:0;};
         const more=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Scheduling, prerequisites & details';more.append(summary);form.append(more);
         const earliest=field(more,'Earliest start','datetime-local',local(n.earliest_start_at),'earliest');
         const scheduled=field(more,'Scheduled start (reserves estimated duration)','datetime-local',local(n.scheduled_start_at),'scheduled');
@@ -220,16 +228,49 @@ window.NextPlan=(()=>{
             const payload={name:title.value.trim(),nodeType:n.node_type,parentId:parent.value||null,estimatedTimeMs:Math.round(Number(estimate.value)*60000),description:description.value,notes:notes.value,location:location.value,assignee:assignee.value,success_criteria:success.value,position:Number(position.value),
                 due_at:timestamp(due),deadline_at:timestamp(deadline),earliest_start_at:timestamp(earliest),scheduled_start_at:timestamp(scheduled),remaining_ms:remaining.value===''?null:Math.round(Number(remaining.value)*60000),splittable:split.checked,
                 prerequisites:[...prereq.selectedOptions].map(o=>o.value),tags:tags.value.split(',').map(s=>s.trim()).filter(Boolean),recurrence_days:recurrence.value?Number(recurrence.value):null,recurrence_zone:state.settings.timezone};
+            if(needsDeadline&&payload.deadline_at!=null&&payload.deadline_at<Date.now())throw new Error('Choose a future deadline or No deadline.');
             const createdId=id||createId('task');
-            await change(id?'/tasks/'+encodeURIComponent(id):'/tasks',id?'PUT':'POST',id?payload:{tasks:[{...payload,id:createdId}]});d.close();if(!id&&payload.parentId)await rank(state.nodes.filter(row=>row.parent_id===payload.parentId&&openNode(row)),true,true);if(!id&&onCreated)await onCreated(createdId);
-        }catch(reason){error.textContent=reason.message;save.disabled=false;}};
+            await change(id?'/tasks/'+encodeURIComponent(id):'/tasks',id?'PUT':'POST',id?payload:{capture:true,tasks:[{...payload,id:createdId}]});d.close();
+            if(!id&&payload.nodeType==='task')await finishCapture([createdId],onCreated?()=>onCreated(createdId):null);
+            else if(!id&&onCreated)await onCreated(createdId);
+        }catch(reason){if(d.open)error.textContent=reason.message;else message(reason.message);save.disabled=false;}};
         try{const saved=JSON.parse(sessionStorage.getItem(draftKey));if(saved)for(const control of form.elements){if(!control.name||!(control.name in saved))continue;if(control.type==='checkbox')control.checked=saved[control.name];else if(control.multiple){for(const option of control.options)option.selected=saved[control.name].includes(option.value);}else control.value=saved[control.name];}}catch(_){}
+        syncDeadline();
         form.addEventListener('input',()=>{const draft={};for(const control of form.elements){if(control.name)draft[control.name]=control.type==='checkbox'?control.checked:control.multiple?[...control.selectedOptions].map(o=>o.value):control.value;}sessionStorage.setItem(draftKey,JSON.stringify(draft));});
         d.addEventListener('close',()=>{if(window.AppNavigation&&!window.AppNavigation.restoring&&history.state?.route?.edit)window.AppNavigation.go('plan',{view,project},true);});
         const submit=form.onsubmit;form.onsubmit=async event=>{await submit(event);if(!d.open)sessionStorage.removeItem(draftKey);};
         title.focus();
     }
-    function bulkEntry(){const d=dialog('Capture several tasks'),form=document.createElement('form');d.append(form);const input=field(form,'One task per line; optional “, 15m”','textarea','','tasks');input.rows=8;input.required=true;const error=document.createElement('p');error.className='plan-error';form.append(error);const deadline=view==='project'?field(form,'Hard deadline for these tasks','datetime-local','','deadline'):null;if(deadline)deadline.required=false;const save=btn('Add tasks',()=>{},true);save.type='submit';form.append(save,btn('Cancel',()=>d.close()));form.onsubmit=async e=>{e.preventDefault();const parsed=window.TaskEntry.parse(input.value);if(parsed.invalid.length||!parsed.entries.length||deadline&&parsed.entries.some(n=>n.estimatedTimeMs<=0)){error.textContent='Check task durations and names. Project tasks require an estimate.';return;}save.disabled=true;try{await change('/tasks','POST',{tasks:parsed.entries.map(n=>({...n,id:createId('task'),parentId:view==='project'?project:null,...(deadline?{deadline_at:deadline.value?new Date(deadline.value).getTime():null}:{} )}))});d.close();if(view==='project')await rank(state.nodes.filter(row=>row.parent_id===project&&openNode(row)),true,true);}catch(reason){error.textContent=reason.message;save.disabled=false;}};}
+    async function finishCapture(ids,onDone){
+        const targetView=view,targetProject=project,parents=new Set(ids.map(id=>node(id).parent_id||''));
+        captureBusy=true;if(document.getElementById('nextPlan'))render();
+        try{
+            for(const parent of parents)await rank(state.nodes.filter(row=>(row.parent_id||'')===parent&&openNode(row)),true,true);
+            const back=onDone||(()=>open(targetView,targetProject));
+            const agenda=await request('/agenda');
+            if(agenda.agenda.length)await window.Agenda.plan({autoSave:true,onSaved:back});
+            else await back();
+        }finally{captureBusy=false;if(document.getElementById('nextPlan'))render();}
+    }
+    function bulkEntry(initial=''){
+        const d=dialog('Capture several tasks'),form=document.createElement('form');d.append(form);
+        const input=field(form,'One task per line; optional “, 15m”','textarea',initial,'tasks');input.rows=8;input.required=true;
+        const deadline=field(form,'Deadline for these tasks','datetime-local','','deadline');deadline.required=true;
+        const none=field(form,'No deadline','checkbox','','noDeadline');none.onchange=()=>{deadline.disabled=none.checked;deadline.required=!none.checked;if(none.checked)deadline.value='';};
+        const error=document.createElement('p');error.className='plan-error';form.append(error);
+        const save=btn('Add tasks',()=>{},true);save.type='submit';form.append(save,btn('Cancel',()=>d.close()));
+        form.onsubmit=async e=>{
+            e.preventDefault();const parsed=window.TaskEntry.parse(input.value);
+            if(parsed.invalid.length||!parsed.entries.length||view==='project'&&parsed.entries.some(n=>n.estimatedTimeMs<=0)){error.textContent='Check task durations and names. Project tasks require an estimate.';return;}
+            const due=none.checked?null:new Date(deadline.value).getTime();
+            if(due!==null&&(!Number.isFinite(due)||due<Date.now())){error.textContent='Choose a future deadline or No deadline.';return;}
+            save.disabled=true;
+            try{
+                const tasks=parsed.entries.map(n=>({...n,id:createId('task'),parentId:view==='project'?project:null,deadline_at:due}));
+                await change('/tasks','POST',{capture:true,tasks});d.close();await finishCapture(tasks.map(n=>n.id));
+            }catch(reason){if(d.open)error.textContent=reason.message;else message(reason.message);save.disabled=false;}
+        };
+    }
     function move(ids){const d=dialog('Move selected work'),form=document.createElement('form');d.append(form);const parent=field(form,'Destination project','select','','parent');parentOptions(parent,null,null);const error=document.createElement('p');error.className='plan-error';form.append(error);const save=btn('Move',()=>{},true);save.type='submit';form.append(save,btn('Cancel',()=>d.close()));form.onsubmit=async e=>{e.preventDefault();try{await change('/bulk','POST',{ids,changes:{parentId:parent.value||null}});d.close();}catch(reason){error.textContent=reason.message;}};}
     function workingHours(){
         const d=dialog('Working hours'),form=document.createElement('form');d.append(form);
@@ -285,6 +326,7 @@ window.NextPlan=(()=>{
     }
     async function rank(input,inserting=false,required=false){
         const rows=Array.isArray(input)?input:selected.size?[...selected].map(node):list();
+        const savedAgenda=inserting?(await request('/agenda')).agenda:[];
         const groups=new Map();for(const n of rows){const key=n.parent_id||'';if(!groups.has(key))groups.set(key,[]);groups.get(key).push(n);}
         if(![...groups.values()].some(g=>g.length>1))return required?undefined:message('Choose at least two siblings to compare.');
         for(const siblings of groups.values()){
@@ -294,7 +336,8 @@ window.NextPlan=(()=>{
             let draft;try{draft=JSON.parse(localStorage.getItem(key));}catch(_){}
             if(draft?.signature!==signature){
                 const ranked=window.PlanDomain.importance(siblings,state.comparisons);
-                const ordered=inserting?ranked.order.filter(id=>ranked.known.has(id)):[];
+                const savedIds=savedAgenda.filter(n=>siblings.some(s=>s.id===n.id)).sort((a,b)=>a.importance_rank-b.importance_rank).map(n=>n.id);
+                const ordered=inserting?(savedIds.length?savedIds:ranked.order.filter(id=>ranked.known.has(id))):[];
                 draft={signature,ordered,pending:siblings.map(n=>n.id).filter(id=>!ordered.includes(id)),low:0,high:ordered.length};
             }
             const d=dialog('What’s more important?');if(required)d.addEventListener('cancel',event=>event.preventDefault());const note=document.createElement('p'),choices=document.createElement('div');

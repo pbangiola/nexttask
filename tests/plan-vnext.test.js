@@ -281,7 +281,7 @@ test('project navigation restores edits with Back, Forward and refresh; new comp
  await page.goForward();await page.locator('dialog').waitFor();assert.equal(await page.locator('dialog input[name=title]').inputValue(),'Draft component');await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');assert.equal(await page.locator('dialog').count(),0);await page.evaluate(()=>window.NextPlan.open('project','history-p'));await page.getByRole('link',{name:'Existing component',exact:true}).click();await page.locator('dialog').waitFor();assert.equal(await page.locator('dialog input[name=title]').inputValue(),'Draft component');
  await page.locator('dialog button').filter({hasText:'Cancel'}).click();assert.equal(users.getNode(owner,'history-a').name,'Existing component');
  await page.getByLabel('Quick add task').fill('New component');await page.locator('.plan-capture button[type=submit]').click();
- assert.equal(await page.locator('dialog input[name=estimate]').getAttribute('required'),'');assert.equal(await page.locator('dialog input[name=deadline]').getAttribute('required'),null);
+ assert.equal(await page.locator('dialog input[name=estimate]').getAttribute('required'),'');assert.equal(await page.locator('dialog input[name=deadline]').getAttribute('required'),'');
  await page.locator('dialog input[name=estimate]').fill('35');await page.locator('dialog input[name=deadline]').fill('2027-02-01T12:00');await page.locator('dialog button[type=submit]').click();await page.getByRole('heading',{name:'What’s more important?',exact:true}).waitFor();
  await page.locator('dialog').getByRole('button',{name:'New component',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('dialog'));
  if(process.env.NEXTTASK_QA_SCREENSHOTS)await page.screenshot({path:path.join(process.env.NEXTTASK_QA_SCREENSHOTS,'project-components.png'),fullPage:true});
@@ -360,7 +360,7 @@ test('legacy project Add Task requires timing then an unavoidable sibling compar
  const owner='legacy_required_fix';store.create(owner,{tasks:[{id:'required-parent',name:'Project',nodeType:'project'},{id:'required-peer',name:'Existing peer',parentId:'required-parent',estimatedTimeMs:60000}]});
  const page=await pageFor(t,owner);await page.evaluate(()=>ProjectEditor.open('required-parent'));await page.locator('#projectEditorAddTask').click();
  await page.locator('dialog input[name=title]').fill('Required new task');await page.locator('dialog button[type=submit]').click();assert.equal(store.snapshot(owner).nodes.length,2);
- await page.locator('dialog input[name=estimate]').fill('10');await page.locator('dialog button[type=submit]').click();await page.getByRole('heading',{name:'What’s more important?',exact:true}).waitFor();
+ await page.locator('dialog input[name=estimate]').fill('10');await page.locator('dialog input[name=noDeadline]').check();await page.locator('dialog button[type=submit]').click();await page.getByRole('heading',{name:'What’s more important?',exact:true}).waitFor();
  await page.keyboard.press('Escape');assert.equal(await page.locator('dialog').isVisible(),true);
  await page.locator('dialog').getByRole('button',{name:'Required new task',exact:true}).click();await page.locator('#projectEditorTasks').waitFor();
  const state=store.snapshot(owner),task=state.nodes.find(n=>n.name==='Required new task');assert.equal(task.estimated_ms,600000);assert.equal(task.deadline_at,null);assert.ok(state.comparisons.some(c=>c.higher_id===task.id&&c.lower_id==='required-peer'));

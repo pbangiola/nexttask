@@ -13,6 +13,8 @@ router.get('/plan',handle((owner)=>store.snapshot(owner)));
 router.post('/plan/tasks',handle((owner,req)=>{
     const input=req.body||{};
     if(Array.isArray(input.tasks))for(const task of input.tasks){
+        if(input.capture&&task.nodeType!=='project'&&!Object.prototype.hasOwnProperty.call(task,'deadline_at'))throw new Error('Choose a deadline or explicitly choose no deadline');
+        if(input.capture&&task.deadline_at!=null&&task.deadline_at<Date.now())throw new Error('Choose a future deadline or explicitly choose no deadline');
         if(task.parentId&&task.nodeType!=='project'&&(!Number.isSafeInteger(task.estimatedTimeMs)||task.estimatedTimeMs<=0))throw new Error('New project tasks require an estimated duration');
     }
     return store.create(owner,input);
