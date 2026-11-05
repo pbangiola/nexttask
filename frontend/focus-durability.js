@@ -271,8 +271,14 @@ window.FocusDurability = (() => {
                 interruptedSorting.forEach(task => { task.lastChanged = null; completeTask(task, Date.now()); });
                 await submit('interrupted sorting history', [snapshot()]);
             }
-            clearSessionTiming();
             activeTaskId = firstIncompleteTask()?.id || null;
+            if(cached?.view==='session-ended'&&hasHardStop()&&Date.now()>=hardStopAtMs){
+                showSessionEnded();return;
+            }
+            if(cached?.view==='completion'&&sortedTasks.length&&!incompleteTasks().length){
+                clearSessionTiming();showCompletion();return;
+            }
+            clearSessionTiming();
             if (sortedTasks.length) {
                 showDashboard();
                 recoveryNote(serverClosed
@@ -312,7 +318,9 @@ window.FocusDurability = (() => {
             }
         }
         sortedTasks = [...recovered.values()].map(row => recoveredTask(row, nodes));
-        activeTaskId = firstIncompleteTask()?.id || null;
+        const previousActive=intervals.find(row=>sortedTasks.some(task=>task.id===row.task_id&&!task.completed))?.task_id
+            || (cached?.workSessionId===workSession.id?cached.activeTaskId:null);
+        activeTaskId = sortedTasks.find(task=>task.id===previousActive&&eligible(task))?.id || firstIncompleteTask()?.id || null;
         const roots = new Map();
         for (const row of rows) {
             let root = nodes.get(row.id) || row;
@@ -375,3 +383,4 @@ window.FocusDurability = (() => {
     window.addEventListener('pagehide', preserveRunningFocus);
     return { init, recover, prepare, get ready(){return initialized;}, newWork() { needsPreparation = true; }, enter, done, pause, add, blocker, finish, hardStop, snapshot, payload, eligible, snooze };
 })();
+

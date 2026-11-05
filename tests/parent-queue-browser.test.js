@@ -153,7 +153,7 @@ test('Snooze moves one whole parent past exactly one peer, persists reload, and 
     const importance=raw.prepare('SELECT * FROM task_priorities WHERE user_id=? ORDER BY task_id').all(owner);
     await reviewQueue(page);await page.waitForSelector('#dashboardScreen');await idle(page);assert.deepEqual(await queued(owner),ids(owner,['p1','p2','q1','q2','R']));
     await page.locator(`[data-snooze-parent="${owner}_P"]`).click();await page.waitForFunction(()=>sortedTasks[0]?.canonicalName==='Q first');await idle(page);assert.deepEqual(await queued(owner),ids(owner,['q1','q2','p1','p2','R']));assert.equal(intervalRows(owner).length,0);
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);assert.deepEqual(await queued(owner),ids(owner,['q1','q2','p1','p2','R']));
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);assert.deepEqual(await queued(owner),ids(owner,['q1','q2','p1','p2','R']));
     await page.locator(`[data-snooze-parent="${owner}_P"]`).click();await page.waitForFunction(()=>sortedTasks.findIndex(row=>row.canonicalName==='Root peer')<sortedTasks.findIndex(row=>row.canonicalName==='P first'));await idle(page);assert.deepEqual(await queued(owner),ids(owner,['q1','q2','R','p1','p2']));assert.equal(await page.locator(`[data-snooze-parent="${owner}_P"]`).isDisabled(),true);
     await page.getByRole('button',{name:'Get to Work',exact:true}).click();await page.waitForSelector('#focusScreen');await idle(page);
     await page.locator(`[data-snooze-parent="${owner}_Q"]`).click();await page.waitForFunction(()=>document.querySelector('#focusScreen h2')?.textContent.includes('Root peer'));await idle(page);
@@ -166,7 +166,7 @@ test('lost Snooze response reload replays only captured queue mutation and recov
     const {page,owner}=await pageFor(t);await parentsFixture(owner);await reviewQueue(page);await page.waitForSelector('#dashboardScreen');await page.getByRole('button',{name:'Get to Work',exact:true}).click();await page.waitForSelector('#focusScreen');await idle(page);
     let first=true;await page.route('**/api/work-sessions/*/items',async route=>{if(!first)return route.continue();first=false;await route.fetch();await route.abort('failed');});
     await page.locator(`[data-snooze-parent="${owner}_P"]`).click();await page.getByRole('button',{name:'Retry Save',exact:true}).waitFor();
-    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);assert.deepEqual(await queued(owner),ids(owner,['q1','q2','p1','p2','R']));assert.equal(sessionRows(owner).length,1);assert.equal(intervalRows(owner).length,1);assert.ok(intervalRows(owner)[0].ended_at);assert.equal(await page.locator('#focusScreen').count(),0);
+    await page.reload();await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);assert.deepEqual(await queued(owner),ids(owner,['q1','q2','p1','p2','R']));assert.equal(sessionRows(owner).length,1);assert.equal(intervalRows(owner).length,1);assert.ok(intervalRows(owner)[0].ended_at);assert.equal(await page.locator('#focusScreen').count(),0);
 });
 test('a never-decomposed parent stays pending through reload until explicitly marked complete',async t=>{
     const {page,owner}=await pageFor(t);const id=owner+'_empty';
@@ -175,3 +175,4 @@ test('a never-decomposed parent stays pending through reload until explicitly ma
     await page.evaluate(id=>ProjectEditor.open(id),id);await page.locator('#projectEditorCompletion').click();await page.waitForFunction(()=>document.getElementById('projectEditorCompletion')?.textContent==='Reopen');assert.equal(raw.prepare('SELECT status FROM tasks WHERE id=?').get(id).status,'completed');
     await page.locator('#projectEditorCompletion').click();await page.waitForFunction(()=>document.getElementById('projectEditorCompletion')?.textContent==='Mark complete');assert.equal(raw.prepare('SELECT status FROM tasks WHERE id=?').get(id).status,'pending');
 });
+

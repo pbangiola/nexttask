@@ -20,7 +20,7 @@ async function pageFor(t,owner){
  const context=await browser.newContext();t.after(()=>context.close());const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
  await context.route('https://cdn.jsdelivr.net/**',route=>route.fulfill({contentType:'application/javascript',body:''}));
  await context.route('https://'+domain+'/**',route=>route.fulfill({contentType:'application/javascript',body:`window.Clerk=window.Clerk||{isSignedIn:true,user:{id:${JSON.stringify(owner)}},session:{id:'sess_fixture',async getToken(){return ${JSON.stringify(token(owner))}}},async load(){},mountUserButton(){},addListener(){}};`}));
- page.setDefaultTimeout(10000);await page.goto(base);await page.waitForSelector('#modeSelect:not(.hidden)');return page;
+ page.setDefaultTimeout(10000);await page.goto(base);await page.waitForFunction(()=>window.FocusDurability?.ready&&!document.getElementById('taskSorterApp').classList.contains('hidden'));return page;
 }
 const agenda=require('../backend/agenda-store');
 const scheduler=require('../frontend/agenda-scheduler');
@@ -96,12 +96,12 @@ test('acknowledgement retry does not replace a newer Agenda, and Work estimates 
  const task=store.snapshot('work_no_deadlines').nodes.find(row=>row.name==='Overruns session');assert.equal(task.estimated_ms,900000);assert.equal(task.deadline_at,null);
 });
 
-test('a returning user keeps unfinished open-session work in backlog before Work/Plan appears',async t=>{
+test('a returning user recovers the open session instead of being sent to Work/Plan',async t=>{
  const owner='agenda_return';store.create(owner,{tasks:[{id:'return-task',name:'Carried work',estimatedTimeMs:60000}]});
  agenda.save(owner,{revision:agenda.read(owner).revision,tasks:[{id:'return-task',dueAt:null}]});assert.equal(agenda.read(owner).backlog.length,0);
  graph.prepareSession(owner,{id:'return-session',taskIds:['return-task'],startedAt:Date.now()-2000});
  graph.startInterval(owner,{id:'return-interval',taskId:'return-task',workSessionId:'return-session',startedAt:Date.now()-1000});
- const page=await pageFor(t,owner);assert.equal(await page.locator('#focusScreen').count(),0);assert.equal(agenda.read(owner).backlog[0].id,'return-task');
+ const page=await pageFor(t,owner);await page.waitForSelector('#dashboardScreen');assert.equal(await page.locator('#modeSelect').isVisible(),false);assert.equal(await page.locator('#focusScreen').count(),0);assert.equal(agenda.read(owner).backlog[0].id,'return-task');
  assert.ok(db.prepare('SELECT ended_at FROM work_intervals WHERE id=?').get('return-interval').ended_at);
 });
 
