@@ -132,11 +132,13 @@
                 const response = await nativeFetch(`${API_BASE_URL}/api/config`);
                 if(!response.ok) throw new Error('Sign-in is unavailable.');
                 const config=await response.json();
+                if(location.hash!=='#sign-in')return;
                 const clerk=await loadClerk(config.clerkPublishableKey);
+                if(location.hash!=='#sign-in')return;
                 if(clerk.isSignedIn){window.location.reload();return;}
                 const target=document.getElementById('signIn');target.classList.remove('hidden');
                 clerk.mountSignIn(target,{forceRedirectUrl:window.location.href,signUpForceRedirectUrl:window.location.href});
-            } catch(_) { showFatal('Sign-in is unavailable. You can keep using your local guest list.'); }
+            } catch(_) { if(location.hash==='#sign-in')showFatal('Sign-in is unavailable. You can keep using your local guest list.'); }
         };
         const fallback = setTimeout(() => document.getElementById('authLoading')?.classList.add('hidden'),1500);
         try {

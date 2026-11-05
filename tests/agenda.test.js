@@ -104,3 +104,17 @@ test('a returning user keeps unfinished open-session work in backlog before Work
  const page=await pageFor(t,owner);assert.equal(await page.locator('#focusScreen').count(),0);assert.equal(agenda.read(owner).backlog[0].id,'return-task');
  assert.ok(db.prepare('SELECT ended_at FROM work_intervals WHERE id=?').get('return-interval').ended_at);
 });
+
+test('completed Work tasks stay out of backlog and repeated Plan entries after reload',async t=>{
+ const owner='agenda_completed';store.create(owner,{tasks:[{id:'completed-a',name:'Finish this task',estimatedTimeMs:60000},{id:'completed-b',name:'Keep this unfinished',estimatedTimeMs:60000}]});
+ const page=await pageFor(t,owner);
+ await page.locator('#workBtn').click();await page.locator('#resumeExistingListBtn').click();await page.getByRole('button',{name:"No, I don't have a set stop time."}).click();await page.waitForSelector('#focusScreen');
+ await page.getByRole('button',{name:'Done, Next!',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#focusScreen h2')?.textContent==='Keep this unfinished');await page.waitForFunction(()=>!window.TaskGraph.pending());
+ assert.equal(store.snapshot(owner).nodes.find(row=>row.id==='completed-a').status,'completed');
+ await page.locator('#stopWorkingBtn').click();await page.getByRole('button',{name:'End Work Session',exact:true}).click();await page.waitForFunction(()=>!window.TaskGraph.pending());
+ for(let visit=0;visit<3;visit++){
+  await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.locator('#planBtn').click();await page.waitForSelector('#planDeadlines');
+  assert.doesNotMatch(await page.locator('#planDeadlines').textContent(),/Finish this task/);assert.equal(await page.locator('#planDeadlines input').count(),1);
+  await page.locator('#saveAgenda').click();await page.waitForSelector('#agendaScreen');assert.equal(agenda.read(owner).backlog.length,0);assert.equal(agenda.read(owner).agenda.length,1);
+ }
+});
