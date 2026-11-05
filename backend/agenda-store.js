@@ -20,7 +20,7 @@ function read(owner){
             estimated_ms:row.remaining_ms==null?row.estimated_ms:row.remaining_ms+row.actual_ms,
             executable:graph.blocked(row.id).length===0&&[row,...graph.ancestors(row.id)].every(n=>(n.earliest_start_at||0)<=Date.now()&&(n.scheduled_start_at||0)<=Date.now()),
             backlog_position:backlog.get(row.id)??null}));
-    return {revision:state.version,items,backlog:items.filter(row=>!saved.has(row.id)||backlog.has(row.id)).sort((a,b)=>(a.backlog_position??100000+order.indexOf(a.id))-(b.backlog_position??100000+order.indexOf(b.id))),
+    return {revision:state.version,items,comparisons:state.comparisons,backlog:items.filter(row=>!saved.has(row.id)||backlog.has(row.id)).sort((a,b)=>(a.backlog_position??100000+order.indexOf(a.id))-(b.backlog_position??100000+order.indexOf(b.id))),
         agenda:items.filter(row=>saved.has(row.id)).sort((a,b)=>a.agenda_position-b.agenda_position),events:events(owner)};
 }
 function save(owner,input){return db.transaction(()=>{

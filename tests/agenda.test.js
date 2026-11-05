@@ -142,8 +142,21 @@ test('Plan preserves answered comparisons until Save Agenda and compares only ne
  store.create(owner,{tasks:[{id:'progress-c',name:'New unsorted task',estimatedTimeMs:60000}]});
  await page.evaluate(()=>showModeSelect());await page.locator('#planBtn').click();await page.waitForSelector('#taskCompare:not(.hidden)');
  let comparisons=0;while(await page.locator('#taskCompare:not(.hidden)').count()){
-  const pair=await page.locator('#task1,#task2').allTextContents();assert.ok(pair.includes('New unsorted task'));comparisons++;await page.locator('#task1').click();
+  const pair=await page.locator('#task1,#task2').allTextContents();assert.ok(pair.includes('New unsorted task'));comparisons++;await page.locator(pair[0]==='New unsorted task'?'#task2':'#task1').click();
  }
  await page.waitForSelector('#planDeadlines');assert.ok(comparisons>0);await page.locator('#saveAgenda').click();await page.waitForSelector('#agendaScreen');
  assert.deepEqual(agenda.read(owner).agenda.map(row=>row.id),['progress-a','progress-b','progress-c']);
+});
+
+test('Plan merges sorted backlog as the left list and saved Agenda as the right list using only their heads',async t=>{
+ const owner='two_sorted_lists';store.create(owner,{tasks:[{id:'merge-a',name:'Agenda A',estimatedTimeMs:60000},{id:'merge-c',name:'Agenda C',estimatedTimeMs:60000}]});
+ agenda.save(owner,{revision:agenda.read(owner).revision,tasks:[{id:'merge-a',dueAt:null},{id:'merge-c',dueAt:null}]});
+ store.create(owner,{tasks:[{id:'merge-b',name:'Backlog B',estimatedTimeMs:60000},{id:'merge-d',name:'Backlog D',estimatedTimeMs:60000}]});store.rank(owner,{ids:['merge-b','merge-d']});
+ const page=await pageFor(t,owner);await page.locator('#planBtn').click();
+ const expected=[['Backlog B','Agenda A'],['Backlog B','Agenda C'],['Backlog D','Agenda C']];
+ for(const [index,pair] of expected.entries()){
+  await page.waitForSelector('#taskCompare:not(.hidden)');assert.deepEqual(await page.locator('#task1,#task2').allTextContents(),pair);await page.locator(index===1?'#task1':'#task2').click();
+ }
+ await page.waitForSelector('#planDeadlines');await page.locator('#saveAgenda').click();await page.waitForSelector('#agendaScreen');
+ assert.deepEqual(agenda.read(owner).agenda.map(row=>row.id),['merge-a','merge-b','merge-c','merge-d']);assert.equal(agenda.read(owner).backlog.length,0);
 });

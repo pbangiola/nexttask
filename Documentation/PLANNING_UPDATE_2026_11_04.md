@@ -68,3 +68,9 @@ are sorted and merged into the saved order; saved tasks are not compared against
 each other again. Completed comparisons are retained if the user leaves before
 saving deadlines. “Reorder importance” explicitly starts a fresh full sort.
 Separate tasks with the same name retain separate identities.
+
+The merge uses the backlog as its left list and Agenda as its right list.
+Backlog sorting reuses recorded importance comparisons where available. The
+Agenda retains its saved importance order. Each merge compares only the two
+current heads, advances the chosen side, and appends the remainder. Saved
+relative ranks or prior comparison evidence resolve known choices automatically.

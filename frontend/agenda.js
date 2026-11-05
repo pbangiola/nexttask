@@ -33,10 +33,11 @@ window.Agenda = (() => {
             shell('Plan','planLoading').append('Loading tasks…');
             const state=await load();if(run!==generation)return;
             const force=options?.rerank===true;
-            const ranked=state.items.filter(row=>row.importance_rank!=null).sort((a,b)=>a.importance_rank-b.importance_rank).map(row=>({...row,name:row.displayName}));
-            const unranked=state.items.filter(row=>row.importance_rank==null).map(row=>({...row,name:row.displayName}));
+            const backlogIds=new Set(state.backlog.map(row=>row.id));
+            const backlog=state.backlog.map(row=>({...row,name:row.displayName}));
+            const agenda=state.agenda.filter(row=>!backlogIds.has(row.id)).sort((a,b)=>a.importance_rank-b.importance_rank).map(row=>({...row,name:row.displayName}));
             const overdue=state.items.some(row=>row.due_at!=null&&row.due_at<Date.now());
-            if(!state.items.length||!force&&!unranked.length&&!state.backlog.length&&!overdue)return showAgenda();
+            if(!state.items.length||!force&&!state.backlog.length&&!overdue)return showAgenda();
             const c=shell('Which task is more important?','planSorting');
             c.append('Rank your backlog and Agenda together.');
             const sort=++sortRunId,header=el('taskCompare').querySelector('h2');
@@ -47,9 +48,31 @@ window.Agenda = (() => {
             beginImportanceSort(rows,'agenda');
             if(force)rows=await interactiveMergeSort(rows,sort);
             else{
-                const added=await interactiveMergeSort(unranked,sort);
+                const evidence=window.PlanDomain.importance([...state.nodes.values()],state.comparisons||[]);
+                async function choose(left,right){
+                    if(left.importance_rank!=null&&right.importance_rank!=null)return left.importance_rank<right.importance_rank?'left':'right';
+                    if(evidence.precedes(left.id,right.id))return 'left';
+                    if(evidence.precedes(right.id,left.id))return 'right';
+                    show(el('taskCompare'));
+                    return new Promise(resolve=>askImportance(left,right,side=>{hide(el('taskCompare'));resolve(side);}));
+                }
+                async function merge(left,right){
+                    const result=[];let i=0,j=0;
+                    while(i<left.length&&j<right.length){
+                        if(run!==generation||sort!==sortRunId)return [];
+                        const side=await choose(left[i],right[j]);
+                        result.push(side==='left'?left[i++]:right[j++]);
+                    }
+                    return [...result,...left.slice(i),...right.slice(j)];
+                }
+                async function sortBacklog(list){
+                    if(list.length<2)return list;
+                    const mid=Math.floor(list.length/2);
+                    return merge(await sortBacklog(list.slice(0,mid)),await sortBacklog(list.slice(mid)));
+                }
+                const sortedBacklog=await sortBacklog(backlog);
                 if(run!==generation||sort!==sortRunId)return;
-                rows=ranked.length&&added.length?await mergeWithChoices([...ranked],[...added],sort):[...ranked,...added];
+                rows=await merge(sortedBacklog,agenda);
             }
             if(run!==generation||sort!==sortRunId)return;
             hide(el('taskCompare'));

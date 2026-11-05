@@ -75,7 +75,7 @@
         }
         visit(null);
         const expressedOrder=order.filter(id=>known.has(id));
-        return {order, known, ranks:new Map(order.map(id => [id, known.has(id) ? expressedOrder.indexOf(id)+1 : null]))};
+        return {order, known, precedes:(a,b)=>a!==b&&reachable(a,b), ranks:new Map(order.map(id => [id, known.has(id) ? expressedOrder.indexOf(id)+1 : null]))};
     }
     function intervals(input, now, reserve = 0) {
         const result = [...input].map(w => ({start:Math.max(now,w.start), end:w.end})).filter(w=>w.end>w.start).sort((a,b)=>a.start-b.start);
