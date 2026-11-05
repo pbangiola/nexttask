@@ -113,8 +113,37 @@ test('completed Work tasks stay out of backlog and repeated Plan entries after r
  assert.equal(store.snapshot(owner).nodes.find(row=>row.id==='completed-a').status,'completed');
  await page.locator('#stopWorkingBtn').click();await page.getByRole('button',{name:'End Work Session',exact:true}).click();await page.waitForFunction(()=>!window.TaskGraph.pending());
  for(let visit=0;visit<3;visit++){
-  await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.locator('#planBtn').click();await page.waitForSelector('#planDeadlines');
+  await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.locator('#planBtn').click();
+  if(visit>0){await page.waitForSelector('#agendaScreen');assert.doesNotMatch(await page.locator('#agendaScreen').textContent(),/Finish this task/);continue;}
+  await page.waitForSelector('#planDeadlines');
   assert.doesNotMatch(await page.locator('#planDeadlines').textContent(),/Finish this task/);assert.equal(await page.locator('#planDeadlines input').count(),1);
   await page.locator('#saveAgenda').click();await page.waitForSelector('#agendaScreen');assert.equal(agenda.read(owner).backlog.length,0);assert.equal(agenda.read(owner).agenda.length,1);
  }
+});
+
+test('opening Plan repeatedly reuses saved importance instead of sorting the same backlog again',async t=>{
+ const owner='saved_sort';store.create(owner,{tasks:[{id:'saved-sort-a',name:'make dinner',estimatedTimeMs:60000},{id:'saved-sort-b',name:'one more job',estimatedTimeMs:60000}]});
+ const page=await pageFor(t,owner);await page.locator('#planBtn').click();await page.locator('#task1').click();await page.waitForSelector('#planDeadlines');await page.locator('#saveAgenda').click();await page.waitForSelector('#agendaScreen');
+ const ids=agenda.read(owner).agenda.map(row=>row.id);
+ for(let visit=0;visit<3;visit++){
+  await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.locator('#planBtn').click();await page.waitForSelector('#agendaScreen');assert.equal(await page.locator('#taskCompare:not(.hidden)').count(),0);assert.deepEqual(agenda.read(owner).agenda.map(row=>row.id),ids);
+ }
+ // Carry-over work needs deadline review, but no repeat importance comparisons.
+ agenda.backlog(owner,ids);await page.evaluate(()=>showModeSelect());await page.locator('#planBtn').click();await page.waitForSelector('#planDeadlines');assert.equal(await page.locator('#taskCompare:not(.hidden)').count(),0);
+ await page.locator('#saveAgenda').click();await page.waitForSelector('#agendaScreen');await page.getByRole('button',{name:'Reorder importance',exact:true}).click();await page.waitForSelector('#taskCompare:not(.hidden)');assert.deepEqual((await page.locator('#task1,#task2').allTextContents()).sort(),['make dinner','one more job']);
+});
+
+test('Plan preserves answered comparisons until Save Agenda and compares only new tasks against the saved order',async t=>{
+ const owner='sort_progress';store.create(owner,{tasks:[{id:'progress-a',name:'First saved',estimatedTimeMs:60000},{id:'progress-b',name:'Second saved',estimatedTimeMs:60000}]});
+ const page=await pageFor(t,owner);await page.locator('#planBtn').click();await page.locator('#task1').click();await page.waitForSelector('#planDeadlines');
+ // Leaving the deadline screen does not throw away completed sorting work.
+ await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.locator('#planBtn').click();await page.waitForSelector('#planDeadlines');assert.equal(await page.locator('#taskCompare:not(.hidden)').count(),0);
+ await page.locator('#saveAgenda').click();await page.waitForSelector('#agendaScreen');
+ store.create(owner,{tasks:[{id:'progress-c',name:'New unsorted task',estimatedTimeMs:60000}]});
+ await page.evaluate(()=>showModeSelect());await page.locator('#planBtn').click();await page.waitForSelector('#taskCompare:not(.hidden)');
+ let comparisons=0;while(await page.locator('#taskCompare:not(.hidden)').count()){
+  const pair=await page.locator('#task1,#task2').allTextContents();assert.ok(pair.includes('New unsorted task'));comparisons++;await page.locator('#task1').click();
+ }
+ await page.waitForSelector('#planDeadlines');assert.ok(comparisons>0);await page.locator('#saveAgenda').click();await page.waitForSelector('#agendaScreen');
+ assert.deepEqual(agenda.read(owner).agenda.map(row=>row.id),['progress-a','progress-b','progress-c']);
 });

@@ -58,3 +58,13 @@ segment timings. Revision triggers cover schedule, backlog and calendar writes.
 Existing task IDs, owners, hierarchy, completion history, intervals, and the
 Railway volume are retained. The migration runs when this backend starts;
 pushing the feature branch alone does not establish a Railway deployment.
+
+## Saved sorting progress
+
+Entering Plan reuses the saved sequential importance order. With no new backlog
+or overdue deadlines, Plan opens the current Agenda directly. Carry-over tasks
+with saved ranks go to deadline review without repeated comparisons. New tasks
+are sorted and merged into the saved order; saved tasks are not compared against
+each other again. Completed comparisons are retained if the user leaves before
+saving deadlines. “Reorder importance” explicitly starts a fresh full sort.
+Separate tasks with the same name retain separate identities.

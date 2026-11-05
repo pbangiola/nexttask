@@ -27,21 +27,31 @@ window.Agenda = (() => {
         for(const group of [state.items,state.agenda,state.backlog])for(const row of group)row.displayName=names(row);
         return {...state,nodes};
     }
-    async function plan() {
+    async function plan(options={}) {
         const run=++generation;
         try {
             shell('Plan','planLoading').append('Loading tasks…');
             const state=await load();if(run!==generation)return;
+            const force=options?.rerank===true;
+            const ranked=state.items.filter(row=>row.importance_rank!=null).sort((a,b)=>a.importance_rank-b.importance_rank).map(row=>({...row,name:row.displayName}));
+            const unranked=state.items.filter(row=>row.importance_rank==null).map(row=>({...row,name:row.displayName}));
+            const overdue=state.items.some(row=>row.due_at!=null&&row.due_at<Date.now());
+            if(!state.items.length||!force&&!unranked.length&&!state.backlog.length&&!overdue)return showAgenda();
             const c=shell('Which task is more important?','planSorting');
             c.append('Rank your backlog and Agenda together.');
             const sort=++sortRunId,header=el('taskCompare').querySelector('h2');
             header.textContent='Which task is more important?';
             c.appendChild(button('Cancel',()=>{generation++;sortRunId++;hide(el('taskCompare'));header.textContent='Which task is more important?';showModeSelect();}));
             let rows=state.items.map(row=>({...row,name:row.displayName}));
+            if(force)finishImportanceSort();
             beginImportanceSort(rows,'agenda');
-            rows=await interactiveMergeSort(rows,sort);
+            if(force)rows=await interactiveMergeSort(rows,sort);
+            else{
+                const added=await interactiveMergeSort(unranked,sort);
+                if(run!==generation||sort!==sortRunId)return;
+                rows=ranked.length&&added.length?await mergeWithChoices([...ranked],[...added],sort):[...ranked,...added];
+            }
             if(run!==generation||sort!==sortRunId)return;
-            finishImportanceSort();
             hide(el('taskCompare'));
             const entries=rows.map(row=>({id:row.id,name:row.name,estimatedTimeMs:row.estimated_ms}));
             collectMissingEstimates(entries,async()=>{
@@ -54,7 +64,7 @@ window.Agenda = (() => {
     }
     function deadlines(rows,state) {
         const c=shell('Review deadlines','planDeadlines');
-        const note=document.createElement('p');note.textContent='Confirm deadlines for the backlog and overdue tasks. Leave a date blank for no deadline. Importance stays in the order you just chose.';c.appendChild(note);
+        const note=document.createElement('p');note.textContent='Confirm deadlines for the backlog and overdue tasks. Leave a date blank for no deadline. Your saved importance order is preserved.';c.appendChild(note);
         const fields=[];
         for(const [index,row] of rows.entries()) {
             const label=document.createElement('label');label.className='agenda-deadline';
@@ -68,7 +78,7 @@ window.Agenda = (() => {
             const tasks=fields.map(({row,input})=>({id:row.id,dueAt:input.value?new Date(input.value).getTime():null}));
             if(tasks.some(row=>row.dueAt!==null&&(!Number.isFinite(row.dueAt)||row.dueAt<Date.now())))return alert('Choose a future deadline or no deadline for tasks with past deadlines.');
             save.disabled=true;
-            try{await request('/agenda','PUT',{revision:state.revision,tasks,requestId});await showAgenda();}catch(e){error(e);}
+            try{await request('/agenda','PUT',{revision:state.revision,tasks,requestId});finishImportanceSort();await showAgenda();}catch(e){error(e);}
         },'saveAgenda');
         c.append(save,button('Manage tasks and projects',()=>window.NextPlan.open('inbox',null)),button('Cancel',showModeSelect));
     }
@@ -80,7 +90,7 @@ window.Agenda = (() => {
         nav.append(button('Agenda',showAgenda,'agendaView'),button('Calendar',()=>calendar(),'calendarView'),button('Export Calendar (.ics)',()=>{
             const url=URL.createObjectURL(new Blob([window.AgendaScheduler.ics(merged(state))],{type:'text/calendar;charset=utf-8'}));
             const a=document.createElement('a');a.href=url;a.download='nexttask-agenda.ics';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
-        },'exportCalendar'),button('Replan',plan),button('Manage tasks and projects',()=>window.NextPlan.open('inbox',null)),button('Work / Plan',showModeSelect));c.appendChild(nav);
+        },'exportCalendar'),button('Replan',plan),button('Reorder importance',()=>plan({rerank:true})),button('Manage tasks and projects',()=>window.NextPlan.open('inbox',null)),button('Work / Plan',showModeSelect));c.appendChild(nav);
     }
     async function showAgenda() {
         try {

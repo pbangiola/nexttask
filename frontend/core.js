@@ -43,7 +43,11 @@ let importanceDraft;
 try{importanceDraft=JSON.parse(localStorage.getItem(importanceDraftKey));}catch(_){}
 function beginImportanceSort(items,context='tasks'){
     const signature=items.map(n=>n.id+':'+(n.parent_id||n.parentId||'')).join('|');
-    if(importanceDraft?.signature!==signature)importanceDraft={signature,ids:items.map(n=>n.id),context,choices:{}};
+    if(importanceDraft?.signature!==signature){
+        const ids=new Set(items.map(item=>item.id)),previous=importanceDraft?.context==='agenda'&&context==='agenda'?importanceDraft.choices:{};
+        const choices=Object.fromEntries(Object.entries(previous||{}).filter(([pair,winner])=>ids.has(winner)&&pair.split('|').every(id=>ids.has(id))));
+        importanceDraft={signature,ids:items.map(n=>n.id),context,choices};
+    }
     localStorage.setItem(importanceDraftKey,JSON.stringify(importanceDraft));
 }
 function finishImportanceSort(){importanceDraft=null;localStorage.removeItem(importanceDraftKey);}
