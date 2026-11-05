@@ -5,30 +5,30 @@
         ? window.location.origin
         : 'https://nexttask-production.up.railway.app';
     const APP_SCRIPTS = [
-        'frontend/initialization.js?v=20261104-plan-6',
-        'frontend/task-entry.js?v=20261104-plan-6',
-        'frontend/guest-graph.js?v=20261104-plan-6',
-        'frontend/task-graph.js?v=20261104-plan-6',
-        'frontend/task-graph-timing.js?v=20261104-plan-6',
-        'frontend/persistence.js?v=20261104-plan-6',
-        'frontend/ui.js?v=20261104-plan-6',
-        'frontend/core.js?v=20261104-plan-6',
-        'frontend/timing.js?v=20261104-plan-6',
-        'frontend/project-queue.js?v=20261104-plan-6',
-        'frontend/focus-durability.js?v=20261104-plan-6',
-        'frontend/work-planner.js?v=20261104-plan-6',
-        'frontend/planner.js?v=20261104-plan-6',
-        'frontend/project-queue-filter.js?v=20261104-plan-6',
-        'frontend/project-editor.js?v=20261104-plan-6',
-        'frontend/duplicate-review.js?v=20261104-plan-6',
-        'frontend/project-csv.js?v=20261104-plan-6',
-        'frontend/planner-bridge.js?v=20261104-plan-6',
-        'frontend/beta-insights.js?v=20261104-plan-6',
-        'frontend/plan-domain.js?v=20261104-plan-6',
-        'frontend/plan.js?v=20261104-plan-6',
-        'frontend/agenda-scheduler.js?v=20261104-plan-6',
-        'frontend/agenda.js?v=20261104-plan-6',
-        'frontend/navigation.js?v=20261104-plan-6'
+        'frontend/initialization.js?v=20261105-dependencies-1',
+        'frontend/task-entry.js?v=20261105-dependencies-1',
+        'frontend/guest-graph.js?v=20261105-dependencies-1',
+        'frontend/task-graph.js?v=20261105-dependencies-1',
+        'frontend/task-graph-timing.js?v=20261105-dependencies-1',
+        'frontend/persistence.js?v=20261105-dependencies-1',
+        'frontend/ui.js?v=20261105-dependencies-1',
+        'frontend/core.js?v=20261105-dependencies-1',
+        'frontend/timing.js?v=20261105-dependencies-1',
+        'frontend/project-queue.js?v=20261105-dependencies-1',
+        'frontend/focus-durability.js?v=20261105-dependencies-1',
+        'frontend/work-planner.js?v=20261105-dependencies-1',
+        'frontend/planner.js?v=20261105-dependencies-1',
+        'frontend/project-queue-filter.js?v=20261105-dependencies-1',
+        'frontend/project-editor.js?v=20261105-dependencies-1',
+        'frontend/duplicate-review.js?v=20261105-dependencies-1',
+        'frontend/project-csv.js?v=20261105-dependencies-1',
+        'frontend/planner-bridge.js?v=20261105-dependencies-1',
+        'frontend/beta-insights.js?v=20261105-dependencies-1',
+        'frontend/plan-domain.js?v=20261105-dependencies-1',
+        'frontend/plan.js?v=20261105-dependencies-1',
+        'frontend/agenda-scheduler.js?v=20261105-dependencies-1',
+        'frontend/agenda.js?v=20261105-dependencies-1',
+        'frontend/navigation.js?v=20261105-dependencies-1'
     ];
 
     const nativeFetch = window.fetch.bind(window);
@@ -220,3 +220,4 @@
 
     window.addEventListener('load', boot, { once: true });
 })();
+

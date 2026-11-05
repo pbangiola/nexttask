@@ -44,14 +44,14 @@ window.NextPlan=(()=>{
             if(view==='inbox')return !n.parent_id&&n.node_type==='task'&&n.independently_actionable!==0;
             if(view==='projects')return n.node_type==='project'&&!n.parent_id;
             if(view==='project')return n.parent_id===project;
-            if(view==='today')return n.node_type==='task'&&[n.due_at,n.deadline_at,item(n.id)?.dueAt,item(n.id)?.deadlineAt,n.scheduled_start_at,item(n.id)?.start].some(at=>at!=null&&at<=end);
-            if(view==='upcoming')return n.node_type==='task'&&[n.due_at,n.deadline_at,item(n.id)?.dueAt,item(n.id)?.deadlineAt,n.scheduled_start_at,item(n.id)?.start].some(at=>at!=null&&at>now);
+            if(view==='today')return n.node_type==='task'&&[n.deadline_at,item(n.id)?.deadlineAt,n.scheduled_start_at,item(n.id)?.start].some(at=>at!=null&&at<=end);
+            if(view==='upcoming')return n.node_type==='task'&&[n.deadline_at,item(n.id)?.deadlineAt,n.scheduled_start_at,item(n.id)?.start].some(at=>at!=null&&at>now);
             return true;
         });
         if(search)rows=rows.filter(n=>[n.name,n.description,n.notes,path(n),...(n.tags||[])].join(' ').toLowerCase().includes(search.toLowerCase()));
-        if(filter!=='all')rows=rows.filter(n=>filter==='ready'?item(n.id)?.ready:filter==='blocked'?(item(n.id)?.blockedBy.length||0)>0:filter==='overdue'?[n.due_at,n.deadline_at,item(n.id)?.dueAt,item(n.id)?.deadlineAt].some(at=>at!=null&&at<now):n.node_type==='project');
+        if(filter!=='all')rows=rows.filter(n=>filter==='ready'?item(n.id)?.ready:filter==='blocked'?(item(n.id)?.blockedBy.length||0)>0:filter==='overdue'?[n.deadline_at,item(n.id)?.deadlineAt].some(at=>at!=null&&at<now):n.node_type==='project');
         const order=state.forecast.schedule.map(i=>i.id),rank=state.forecast.importanceOrder;
-        rows.sort((a,b)=>sort==='name'?a.name.localeCompare(b.name):sort==='due'?(a.deadline_at??a.due_at??Infinity)-(b.deadline_at??b.due_at??Infinity):sort==='importance'?rank.indexOf(a.id)-rank.indexOf(b.id):(order.includes(a.id)?order.indexOf(a.id):100000+a.position)-(order.includes(b.id)?order.indexOf(b.id):100000+b.position));
+        rows.sort((a,b)=>sort==='name'?a.name.localeCompare(b.name):sort==='due'?(a.deadline_at??Infinity)-(b.deadline_at??Infinity):sort==='importance'?rank.indexOf(a.id)-rank.indexOf(b.id):(order.includes(a.id)?order.indexOf(a.id):100000+a.position)-(order.includes(b.id)?order.indexOf(b.id):100000+b.position));
         return rows;
     }
     function row(n,compact=false){
@@ -63,7 +63,7 @@ window.NextPlan=(()=>{
         const meta=document.createElement('div');meta.className='meta';
         const compared=state.comparisons.some(c=>(c.higher_id===n.id||c.lower_id===n.id)&&node(c.higher_id)?.parent_id===node(c.lower_id)?.parent_id);
         const bits=[compared?'Compared':'Unsorted',n.node_type==='project'?`${n.progress.completed}/${n.progress.total} components complete`:n.status,`${minute(n.progress.remainingMs)} min remaining`,`${minute(n.progress.actualMs)} min worked`];
-        if(path(n))bits.unshift(path(n));if(n.due_at)bits.push('Due '+date(n.due_at));if(n.deadline_at)bits.push('Deadline '+date(n.deadline_at));if(n.recurrence_days)bits.push(`Every ${n.recurrence_days} days`);bits.push(...n.tags.map(t=>'#'+t));meta.textContent=bits.join(' · ');content.append(meta);
+        if(path(n))bits.unshift(path(n));if(n.deadline_at)bits.push('Deadline '+date(n.deadline_at));if(n.recurrence_days)bits.push(`Every ${n.recurrence_days} days`);bits.push(...n.tags.map(t=>'#'+t));meta.textContent=bits.join(' · ');content.append(meta);
         if(n.node_type==='project'&&n.progress.total){const progress=document.createElement('progress');progress.max=n.progress.total;progress.value=n.progress.completed;progress.setAttribute('aria-label','Completed components');content.append(progress);}
         if(forecast){const reason=document.createElement('div');reason.className='reason';reason.textContent=(forecast.start!=null?date(forecast.start)+' · ':'')+(forecast.blockedBy.length?'Waiting for '+forecast.blockedBy.join(', '):forecast.reason);content.append(reason);}
         element.append(content);
@@ -112,7 +112,7 @@ window.NextPlan=(()=>{
         const tools=document.createElement('div');tools.className='plan-tools';
         const query=document.createElement('input');query.type='search';query.placeholder='Search titles, notes, projects, tags';query.setAttribute('aria-label','Search tasks');query.value=search;
         query.oninput=()=>{search=query.value;renderContent();};tools.append(query);
-        for(const [name,value,choices,change]of [['Filter',filter,{all:'All states',ready:'Ready',blocked:'Blocked',overdue:'Overdue',projects:'Projects'},v=>filter=v],['Sort',sort,{sequence:'Time sequence',importance:'Expressed importance',due:'Due / deadline',name:'Name'},v=>sort=v]]){const select=document.createElement('select');select.setAttribute('aria-label',name);for(const [key,label]of Object.entries(choices)){const option=new Option(label,key);option.selected=value===key;select.append(option);}select.onchange=()=>{change(select.value);renderContent();};tools.append(select);}
+        for(const [name,value,choices,change]of [['Filter',filter,{all:'All states',ready:'Ready',blocked:'Blocked',overdue:'Overdue',projects:'Projects'},v=>filter=v],['Sort',sort,{sequence:'Time sequence',importance:'Expressed importance',due:'Deadline',name:'Name'},v=>sort=v]]){const select=document.createElement('select');select.setAttribute('aria-label',name);for(const [key,label]of Object.entries(choices)){const option=new Option(label,key);option.selected=value===key;select.append(option);}select.onchange=()=>{change(select.value);renderContent();};tools.append(select);}
         tools.append(btn('Sort importance',rank));panel.append(tools);
         const bulk=document.createElement('div');bulk.id='planBulk';bulk.className='plan-actions';panel.append(bulk);renderBulk();
         const warnings=state.forecast.warnings;
@@ -166,7 +166,7 @@ window.NextPlan=(()=>{
         const timestamp=input=>input.value?new Date(input.value).getTime():null;
         add('estimatedTimeMs','Estimated total minutes','number',common('estimated_ms')>0?common('estimated_ms')/60000:'',input=>ms(input)??0);
         add('remaining_ms','Remaining minutes override','number',common('remaining_ms')==null?'':common('remaining_ms')/60000,ms);
-        for(const [key,label]of [['due_at','Preferred due date'],['deadline_at','Hard deadline'],['earliest_start_at','Earliest start'],['scheduled_start_at','Scheduled start']])add(key,label,'datetime-local',local(common(key)),timestamp);
+        for(const [key,label]of [['deadline_at','Deadline'],['earliest_start_at','Earliest start'],['scheduled_start_at','Scheduled start']])add(key,label,'datetime-local',local(common(key)),timestamp);
         add('tags','Tags (comma separated)','text',rows.every(n=>JSON.stringify(n.tags)===JSON.stringify(rows[0].tags))?rows[0].tags.join(', '):'',input=>input.value.split(',').map(s=>s.trim()).filter(Boolean));
         for(const [key,label,type]of [['location','Location','text'],['assignee','Assignee','text'],['description','Description','textarea'],['notes','Notes','textarea'],['success_criteria','Success criteria','textarea']])add(key,label,type,common(key)||'',input=>input.value);
         add('splittable','Allow work across multiple intervals','checkbox',common('splittable'),input=>input.checked);
@@ -197,8 +197,7 @@ window.NextPlan=(()=>{
         const estimate=field(form,'Estimated total minutes (blank = unknown)','number',n.estimated_ms>0?n.estimated_ms/60000:'','estimate');estimate.min=0;estimate.step='any';if(n.node_type==='project')estimate.disabled=true;const projectTask=!id&&n.node_type==='task'&&!!n.parent_id;if(projectTask){estimate.required=true;estimate.min=0.000001;}
         const description=field(form,'Description','textarea',n.description,'description');description.rows=2;
         const dates=document.createElement('div');dates.className='plan-fields';form.append(dates);
-        const due=field(dates,'Preferred due date','datetime-local',local(n.due_at),'due');
-        const deadline=field(dates,'Hard deadline','datetime-local',local(n.deadline_at),'deadline');
+        const deadline=field(dates,'Deadline','datetime-local',local(n.deadline_at),'deadline');
         const needsDeadline=!id&&n.node_type==='task';deadline.required=needsDeadline;
         const noDeadline=needsDeadline?field(dates,'No deadline','checkbox','','noDeadline'):null;
         const syncDeadline=()=>{if(!noDeadline)return;deadline.disabled=noDeadline.checked;deadline.required=!noDeadline.checked;if(noDeadline.checked)deadline.value='';};
@@ -226,7 +225,7 @@ window.NextPlan=(()=>{
         form.onsubmit=async e=>{e.preventDefault();save.disabled=true;try{
             const timestamp=input=>input.value?new Date(input.value).getTime():null;
             const payload={name:title.value.trim(),nodeType:n.node_type,parentId:parent.value||null,estimatedTimeMs:Math.round(Number(estimate.value)*60000),description:description.value,notes:notes.value,location:location.value,assignee:assignee.value,success_criteria:success.value,position:Number(position.value),
-                due_at:timestamp(due),deadline_at:timestamp(deadline),earliest_start_at:timestamp(earliest),scheduled_start_at:timestamp(scheduled),remaining_ms:remaining.value===''?null:Math.round(Number(remaining.value)*60000),splittable:split.checked,
+                deadline_at:timestamp(deadline),earliest_start_at:timestamp(earliest),scheduled_start_at:timestamp(scheduled),remaining_ms:remaining.value===''?null:Math.round(Number(remaining.value)*60000),splittable:split.checked,
                 prerequisites:[...prereq.selectedOptions].map(o=>o.value),tags:tags.value.split(',').map(s=>s.trim()).filter(Boolean),recurrence_days:recurrence.value?Number(recurrence.value):null,recurrence_zone:state.settings.timezone};
             if(needsDeadline&&payload.deadline_at!=null&&payload.deadline_at<Date.now())throw new Error('Choose a future deadline or No deadline.');
             const createdId=id||createId('task');
@@ -383,9 +382,20 @@ window.NextPlan=(()=>{
         async refresh(){if(window.taskSorterMode!=='guest')this.data=await request();},
         allowed(task){
             if(!this.data)return true;
-            const nodes=this.data.nodes.map(n=>{const queued=sortedTasks.find(t=>t.id===n.id);return queued?{...n,status:queued.completed?'completed':queued.status}:n;});
+            const nodes=this.data.nodes.map(n=>{const queued=sortedTasks.find(t=>t.id===n.id);return {...n,status:queued?(queued.completed?'completed':queued.status):n.status};});
             if(!nodes.some(n=>n.id===task.id))return true;
-            try{const g=window.PlanDomain.graph(nodes,this.data.dependencies);const n=g.byId.get(task.id);return !g.blocked(task.id).length&&[n,...g.ancestors(n.id)].every(n=>(n.earliest_start_at||0)<=Date.now()&&(n.scheduled_start_at||0)<=Date.now());}catch(_){return false;}
+            try{const g=window.PlanDomain.graph(nodes,this.data.dependencies);
+                // Project prerequisites complete when their queued components do.
+                // The local queue has newer completion state than this snapshot.
+                function completeProject(id){
+                    const parent=g.byId.get(id);
+                    if(parent.node_type!=='project')return;
+                    const children=g.children.get(id).map(id=>g.byId.get(id)).filter(n=>n.status!=='cancelled');
+                    children.forEach(child=>completeProject(child.id));
+                    if(!parent.archived&&!['completed','cancelled'].includes(parent.status)&&children.length&&children.every(n=>n.status==='completed'))parent.status='completed';
+                }
+                nodes.filter(n=>!n.parent_id).forEach(n=>completeProject(n.id));
+                const n=g.byId.get(task.id);return !g.blocked(task.id).length&&[n,...g.ancestors(n.id)].every(n=>(n.earliest_start_at||0)<=Date.now()&&(n.scheduled_start_at||0)<=Date.now());}catch(_){return false;}
         }
     };
     window.PlanExecution=execution;
@@ -409,3 +419,4 @@ window.NextPlan=(()=>{
     }
     return {open,edit,work,recordImportance,async capture(parentId,onCreated){await open('project',parentId);await edit(null,'task','',onCreated);},context(){return {search,filter,sort,selected:[...selected]};},restoreContext(value){if(!value)return;search=value.search||'';filter=value.filter||'all';sort=value.sort||'sequence';selected=new Set(value.selected||[]);}};
 })();
+

@@ -190,13 +190,14 @@ window.Agenda = (() => {
             const state=await load();
             await window.PlanExecution.refresh();
             const executable=row=>row.executable;
-            const backlog=state.backlog.filter(executable),ids=new Set(backlog.map(row=>row.id));
-            const agenda=state.agenda.filter(row=>executable(row)&&!ids.has(row.id));
+            const order=rows=>window.AgendaScheduler.dependencyOrder(rows,state.items,[...state.nodes.values()],state.dependencies);
+            const backlog=order(state.backlog).filter(executable),ids=new Set(backlog.map(row=>row.id));
+            const agenda=order(state.agenda).filter(row=>executable(row)&&!ids.has(row.id));
             const choices=window.AgendaScheduler.resume(backlog,agenda,hasHardStop()?hardStopAtMs:null);
             if(!choices.length){const c=shell('No executable tasks','resumeEmpty');c.append('Use Plan to add tasks or resolve blocked work.',button('Work / Plan',showModeSelect));return;}
             const start=async chosen=>{
                 window.FocusDurability.newWork();window.currentWorkProjectContext=null;
-                const queue=[chosen,...[...backlog,...agenda].filter(row=>row.id!==chosen.id)];
+                const queue=order([chosen,...state.backlog,...state.agenda]);
                 sortedTasks=queue.map(row=>workTask(row,state.nodes));activeTaskId=chosen.id;
                 await window.FocusDurability.prepare();await showFocus(sortedTasks[0]);
             };
@@ -214,3 +215,4 @@ window.Agenda = (() => {
     }
     return {plan,show:showAgenda,calendar,resume,load};
 })();
+

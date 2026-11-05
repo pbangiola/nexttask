@@ -55,10 +55,10 @@ test('legacy reserve settings no longer reduce available capacity',()=>{
  assert.equal(plan(nodes,[],[],{now:0,windows:[{start:0,end:4*H}],reserve:0.5}).hardConstraintsSatisfied,true);
  assert.equal(plan(nodes,[],[],{now:0,windows:[{start:0,end:4*H}],reserve:0}).hardConstraintsSatisfied,true);
 });
-test('preferred due dates flow through projects and prerequisites without becoming hard constraints',()=>{
- const nodes=[{id:'p',name:'p',node_type:'project',status:'pending',due_at:3*H},task('a',{parent_id:'p'}),task('source')];
+test('deadlines flow through projects and prerequisites as a single constraint',()=>{
+ const nodes=[{id:'p',name:'p',node_type:'project',status:'pending',deadline_at:3*H},task('a',{parent_id:'p'}),task('source')];
  const r=plan(nodes,[edge('source','a')],[],options),a=r.items.find(i=>i.id==='a'),source=r.items.find(i=>i.id==='source');
- assert.equal(a.dueAt,3*H);assert.equal(a.deadlineAt,null);assert.equal(source.latestStart,H);assert.equal(r.hardConstraintsSatisfied,true);
+ assert.equal(a.deadlineAt,3*H);assert.equal(a.dueAt,undefined);assert.equal(source.latestStart,H);assert.equal(r.hardConstraintsSatisfied,true);
 });
 
 test('calendar planning starts now without availability or importance comparisons',()=>{
@@ -138,3 +138,4 @@ test('importance traverses ranked parent blocks and ignores cross-parent legacy 
  const result=importance(nodes,comparisons);assert.deepEqual(result.order,['p','p1','p2','q','q1']);assert.equal(result.known.has('q1'),false);
  nodes.find(n=>n.id==='p1').parent_id='q';assert.equal(importance(nodes,comparisons.slice(0,2)).known.has('p1'),false,'moving a task invalidates comparisons with its former siblings');
 });
+
