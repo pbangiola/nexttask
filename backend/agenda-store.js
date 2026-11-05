@@ -16,11 +16,11 @@ function read(owner){
     const backlog=new Map(db.prepare('SELECT * FROM agenda_backlog WHERE user_id=?').all(owner).map(row=>[row.task_id,row.position]));
     const graph=domain.graph(state.nodes,state.dependencies),order=state.forecast.importanceOrder;
     const items=state.nodes.filter(row=>row.node_type==='task'&&row.independently_actionable!==0&&!row.archived&&!['completed','cancelled'].includes(row.status)&&!graph.ancestors(row.id).some(parent=>parent.archived||['completed','cancelled'].includes(parent.status)))
-        .map(row=>({...row,...saved.get(row.id),id:row.id,due_at:row.deadline_at??row.due_at,elapsed_ms:row.actual_ms,
+        .map(row=>({...row,...saved.get(row.id),id:row.id,due_at:row.deadline_at,elapsed_ms:row.actual_ms,
             estimated_ms:row.remaining_ms==null?row.estimated_ms:row.remaining_ms+row.actual_ms,
             executable:graph.blocked(row.id).length===0&&[row,...graph.ancestors(row.id)].every(n=>(n.earliest_start_at||0)<=Date.now()&&(n.scheduled_start_at||0)<=Date.now()),
             backlog_position:backlog.get(row.id)??null}));
-    return {revision:state.version,items,comparisons:state.comparisons,backlog:items.filter(row=>!saved.has(row.id)||backlog.has(row.id)).sort((a,b)=>(a.backlog_position??100000+order.indexOf(a.id))-(b.backlog_position??100000+order.indexOf(b.id))),
+    return {revision:state.version,items,dependencies:state.dependencies,comparisons:state.comparisons,backlog:items.filter(row=>!saved.has(row.id)||backlog.has(row.id)).sort((a,b)=>(a.backlog_position??100000+order.indexOf(a.id))-(b.backlog_position??100000+order.indexOf(b.id))),
         agenda:items.filter(row=>saved.has(row.id)).sort((a,b)=>a.agenda_position-b.agenda_position),events:events(owner)};
 }
 function save(owner,input){return db.transaction(()=>{
@@ -54,3 +54,4 @@ function addEvent(owner,input){
 }
 function deleteEvent(owner,id){db.prepare('DELETE FROM calendar_events WHERE id=? AND user_id=?').run(id,owner);return read(owner);}
 module.exports={read,save,backlog,addEvent,deleteEvent,events,ranks};
+

@@ -164,7 +164,7 @@
             const effort=nodes.filter(n=>n.node_type==='task'&&!closed(n)).reduce((sum,n)=>sum+(n.remaining_ms??Math.max(0,(n.estimated_ms||0)-(n.actual_ms??n.elapsed_ms??0))),0);
             const weeklyCapacity=hours.reduce((sum,p)=>sum+(p.endMinute-p.startMinute)*MINUTE,0)*(1-reserve);
             const effortDays=weeklyCapacity>0?Math.ceil(effort/weeklyCapacity)*7+14:56;
-            const latest=nodes.filter(n=>!closed(n)).reduce((last,n)=>Math.max(last,n.earliest_start_at||0,n.scheduled_start_at||0,n.due_at||0,n.deadline_at||0),now);
+            const latest=nodes.filter(n=>!closed(n)).reduce((last,n)=>Math.max(last,n.earliest_start_at||0,n.scheduled_start_at||0,n.deadline_at||0),now);
             horizonEnd=Math.min(now+366*5*DAY,Math.max(now+Math.max(56,effortDays)*DAY,latest+14*DAY));
             planningWindows=mergeWindows([...rawWindows,...weeklyWindows(hours,{now,end:horizonEnd,timezone})]);
         }
@@ -176,12 +176,11 @@
         const importancePosition=new Map([...work].sort((a,b)=>ranks.order.indexOf(a.id)-ranks.order.indexOf(b.id)).map((n,index)=>[n.id,index+1]));
         const remaining = n => n.remaining_ms ?? (n.estimated_ms>0?Math.max(0,n.estimated_ms-(n.actual_ms??n.elapsed_ms??0)):null);
         const duration = new Map(work.map(n=>[n.id,remaining(n)]));
-        const deadlines=new Map(),targets=new Map(),release=new Map(),benefit=new Map();
+        const deadlines=new Map(),release=new Map(),benefit=new Map();
         const min = list => list.filter(v=>v!=null).reduce((a,b)=>Math.min(a,b),Infinity);
         for(const n of work) {
             const family=[n,...g.ancestors(n.id)];
             deadlines.set(n.id,Math.min(min(family.map(n=>n.deadline_at)),n.scheduled_start_at!=null&&duration.get(n.id)!=null?n.scheduled_start_at+duration.get(n.id):Infinity));
-            targets.set(n.id,min(family.map(n=>n.due_at)));
             release.set(n.id,Math.max(now,...family.map(n=>n.earliest_start_at||0),n.scheduled_start_at||0));
             benefit.set(n.id,options.importanceOrder?.includes(n.id)?options.importanceOrder.indexOf(n.id)+1:ranks.order.indexOf(n.id)+1);
         }
@@ -189,7 +188,7 @@
         while(changed) {
             changed=false;
             for(const n of work)for(const id of g.predecessors.get(n.id))if(duration.has(id)) {
-                for(const map of [deadlines, targets, benefit])if(map.get(id)>map.get(n.id)){map.set(id,map.get(n.id));changed=true;}
+                for(const map of [deadlines, benefit])if(map.get(id)>map.get(n.id)){map.set(id,map.get(n.id));changed=true;}
             }
         }
         const unavailable = new Set();
@@ -229,7 +228,7 @@
         while(moved){
             moved=false;
             for(let i=1;i<order.length;i++){
-                const current=order[i],slot=schedule.find(slot=>slot.id===current.id),bound=Math.min(deadlines.get(current.id),targets.get(current.id));
+                const current=order[i],slot=schedule.find(slot=>slot.id===current.id),bound=deadlines.get(current.id);
                 if(!Number.isFinite(bound)||(slot&&slot.end<=bound))continue;
                 const candidate=[...order];[candidate[i-1],candidate[i]]=[candidate[i],candidate[i-1]];
                 const trial=simulate(candidate),advanced=trial.find(slot=>slot.id===current.id);
@@ -238,7 +237,7 @@
                     if(n.id===current.id||benefit.get(n.id)>=benefit.get(current.id))return false;
                     const finish=trial.find(slot=>slot.id===n.id)?.end??Infinity;
                     const previous=schedule.find(slot=>slot.id===n.id)?.end??Infinity;
-                    return finish>Math.min(deadlines.get(n.id),targets.get(n.id))&&finish>previous;
+                    return finish>deadlines.get(n.id)&&finish>previous;
                 });
                 if(sacrificed)continue;
                 order=candidate;schedule=trial;moved=true;break;
@@ -246,7 +245,7 @@
         }
         const done=new Set(schedule.map(slot=>slot.id)),latest=new Map(),warnings=[];
         for(const n of usable){
-            const limit=Math.min(deadlines.get(n.id),targets.get(n.id));
+            const limit=deadlines.get(n.id);
             if(Number.isFinite(limit)){
                 const segments=fit(windows,now,duration.get(n.id),n.splittable!==false,limit,true);
                 latest.set(n.id,segments?.[0]?.start??limit-duration.get(n.id));
@@ -263,13 +262,13 @@
             const slot=schedule.find(s=>s.id===n.id),latestStart=latest.get(n.id)??null;
             const ancestors=g.ancestors(n.id), ownRank=importancePosition.get(n.id)??null;
             return {id:n.id,remainingMs:duration.get(n.id),importanceRank:ownRank,effectiveImportance:Number.isFinite(benefit.get(n.id))?benefit.get(n.id):null,
-                deadlineAt:Number.isFinite(deadlines.get(n.id))?deadlines.get(n.id):null,dueAt:Number.isFinite(targets.get(n.id))?targets.get(n.id):null,latestStart,slackMs:latestStart==null?null:latestStart-now,
+                deadlineAt:Number.isFinite(deadlines.get(n.id))?deadlines.get(n.id):null,latestStart,slackMs:latestStart==null?null:latestStart-now,
                 ready:g.blocked(n.id).length===0&&release.get(n.id)<=now,blockedBy:g.blocked(n.id),...slot,
                 reason:g.blocked(n.id).length?'Complete prerequisites first':release.get(n.id)>now?'Waiting for scheduled or earliest start':latestStart!=null&&slot&&slot.end>=latestStart?'Limited freedom before a deadline':ownRank==null&&Number.isFinite(benefit.get(n.id))?'Advances an important project or dependent task':ownRank!=null?'Advances your expressed importance':'Importance placement is uncertain',
                 parentPath:ancestors.reverse().map(n=>n.name)};
         });
-        for(const item of items){const node=g.byId.get(item.id);if(item.end&&Number.isFinite(targets.get(item.id))&&item.end>targets.get(item.id))warnings.push(`${node.name}: preferred due date missed.`);}
         return {now,schedule,items,warnings,availabilityMode,horizonEnd,hardConstraintsSatisfied:hardBaseline.ok&&work.filter(n=>Number.isFinite(deadlines.get(n.id))).every(n=>done.has(n.id)),provisional:true,importanceOrder:ranks.order};
     }
     return {graph,importance,plan,fit,intervals,validateWorkingHours,weeklyWindows};
 });
+

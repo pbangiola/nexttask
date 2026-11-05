@@ -1,10 +1,25 @@
 'use strict';
 // Shared by the browser and server so previews and saved schedules agree.
 (function (root, factory) {
-    if (typeof module === 'object' && module.exports) module.exports = factory();
-    else root.AgendaScheduler = factory();
-})(typeof window === 'object' ? window : globalThis, () => {
+    if (typeof module === 'object' && module.exports) module.exports = factory(require('./plan-domain'));
+    else root.AgendaScheduler = factory(root.PlanDomain);
+})(typeof window === 'object' ? window : globalThis, domain => {
     const duration = task => Math.max(0, Number(task.estimated_ms ?? task.estimatedTimeMs ?? 0) - Number(task.elapsed_ms ?? task.actualTimeMs ?? 0));
+    // A prerequisite inherits its dependent's place, including across the
+    // backlog/Agenda boundary. Keep dependents queued until they become ready.
+    function dependencyOrder(priorities, items, nodes, dependencies = []) {
+        const graph = domain.graph(nodes, dependencies);
+        const available = new Map(items.map(row => [row.id, row]));
+        const seen = new Set(), result = [];
+        function visit(id) {
+            if (seen.has(id) || !available.has(id)) return;
+            seen.add(id);
+            for (const source of graph.predecessors.get(id) || []) visit(source);
+            result.push(available.get(id));
+        }
+        priorities.forEach(row => visit(row.id));
+        return result;
+    }
     function resume(backlog, agenda, hardStop = null, now = Date.now()) {
         if (backlog.length) {
             const due = agenda.find(task=>task.start_at != null && task.start_at < now && !backlog.some(row=>row.id===task.id));
@@ -26,5 +41,6 @@
         // RFC 5545 folds at 75 octets, preserving Unicode code points.
         return lines.map(line=>{let out='',bytes=0;for(const c of line){const n=new TextEncoder().encode(c).length;if(bytes+n>75){out+='\r\n ';bytes=1;}out+=c;bytes+=n;}return out;}).join('\r\n')+'\r\n';
     }
-    return {resume,duration,ics};
+    return {resume,duration,ics,dependencyOrder};
 });
+

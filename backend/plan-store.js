@@ -36,6 +36,13 @@ for(const table of ['tasks','plan_details','plan_dependencies','plan_comparisons
     INSERT INTO plan_revisions(user_id,revision) VALUES(${row}.user_id,1) ON CONFLICT(user_id) DO UPDATE SET revision=revision+1; END;`);
 }
 for(const op of ['INSERT','DELETE']){const row=op==='DELETE'?'OLD':'NEW';db.exec(`CREATE TRIGGER IF NOT EXISTS plan_revision_tags_${op} AFTER ${op} ON plan_tags BEGIN INSERT INTO plan_revisions(user_id,revision) SELECT user_id,1 FROM tasks WHERE id=${row}.task_id AND user_id IS NOT NULL ON CONFLICT(user_id) DO UPDATE SET revision=revision+1; END;`);}
+// Retire the preferred-date concept without losing existing user dates.
+// Keep the old column and accept it as a legacy alias for a single deadline.
+db.transaction(()=>{
+    if(db.prepare('SELECT 1 FROM schema_migrations WHERE version=7').get())return;
+    db.exec('UPDATE plan_details SET deadline_at=COALESCE(deadline_at,due_at),due_at=NULL WHERE due_at IS NOT NULL');
+    db.prepare('INSERT INTO schema_migrations(version,applied_at) VALUES(7,?)').run(Date.now());
+})();
 function owned(owner,id) { return users.getNode(owner,id); }
 function revision(owner){return db.prepare('SELECT revision FROM plan_revisions WHERE user_id=?').get(owner)?.revision||0;}
 function integer(value,label,nullable=true){if(value==null&&nullable)return null;if(!Number.isSafeInteger(value)||value<0)throw new Error(label+' must be nonnegative integer milliseconds');return value;}
@@ -66,9 +73,10 @@ function snapshot(owner,now=Date.now()){
     return {version:revision(owner),nodes,dependencies,comparisons,windows,settings:config,forecast:domain.plan(nodes,dependencies,comparisons,{now,windows,reserve:config.reserve,timezone:config.timezone,workingHoursEnabled:config.workingHoursEnabled,workingHours:config.workingHours,importanceOrder:require('./agenda-store').ranks(owner),events:require('./agenda-store').events(owner)})};
 }
 function details(owner,id,input){
+    if('due_at' in input){input={...input,...('deadline_at' in input?{}:{deadline_at:input.due_at})};delete input.due_at;}
     db.prepare('INSERT OR IGNORE INTO plan_details(task_id,user_id) VALUES(?,?)').run(id,owner);
     for(const key of ['description','notes','location','assignee','success_criteria'])if(key in input)db.prepare(`UPDATE plan_details SET ${key}=? WHERE task_id=? AND user_id=?`).run(text(input[key],key),id,owner);
-    for(const key of ['earliest_start_at','scheduled_start_at','due_at','deadline_at','remaining_ms'])if(key in input)db.prepare(`UPDATE plan_details SET ${key}=? WHERE task_id=? AND user_id=?`).run(integer(input[key],key),id,owner);
+    for(const key of ['earliest_start_at','scheduled_start_at','deadline_at','remaining_ms'])if(key in input)db.prepare(`UPDATE plan_details SET ${key}=? WHERE task_id=? AND user_id=?`).run(integer(input[key],key),id,owner);
     if('remaining_ms' in input)db.prepare('UPDATE plan_details SET remaining_base_actual=(SELECT COALESCE(SUM(duration_ms),0) FROM work_intervals WHERE task_id=? AND ended_at IS NOT NULL) WHERE task_id=?').run(id,id);
     for(const key of ['archived','splittable'])if(key in input){if(typeof input[key]!=='boolean')throw new Error(key+' must be boolean');db.prepare(`UPDATE plan_details SET ${key}=? WHERE task_id=? AND user_id=?`).run(input[key]?1:0,id,owner);}
     if('tags' in input){if(!Array.isArray(input.tags)||input.tags.length>100||input.tags.some(t=>typeof t!=='string'||t.length>100))throw new Error('Invalid tags');db.prepare('DELETE FROM plan_tags WHERE task_id=?').run(id);for(const tag of new Set(input.tags.map(t=>t.trim()).filter(Boolean)))db.prepare('INSERT INTO plan_tags VALUES(?,?)').run(id,tag);}
@@ -102,8 +110,8 @@ function materializeRecurrences(owner){
         const id=randomUUID();
         users.createNode(owner,{id,name:row.name,parentId:row.parent_id,estimatedTimeMs:row.estimated_ms});
         details(owner,id,{description:row.description,notes:row.notes,location:row.location,assignee:row.assignee,success_criteria:row.success_criteria,
-            earliest_start_at:calendarShift(row.earliest_start_at??(row.scheduled_start_at==null&&row.due_at==null&&row.deadline_at==null?row.completed:null),row.recurrence_days,row.recurrence_zone),
-            scheduled_start_at:calendarShift(row.scheduled_start_at,row.recurrence_days,row.recurrence_zone),due_at:calendarShift(row.due_at,row.recurrence_days,row.recurrence_zone),deadline_at:calendarShift(row.deadline_at,row.recurrence_days,row.recurrence_zone),splittable:row.splittable!==0});
+            earliest_start_at:calendarShift(row.earliest_start_at??(row.scheduled_start_at==null&&row.deadline_at==null?row.completed:null),row.recurrence_days,row.recurrence_zone),
+            scheduled_start_at:calendarShift(row.scheduled_start_at,row.recurrence_days,row.recurrence_zone),deadline_at:calendarShift(row.deadline_at,row.recurrence_days,row.recurrence_zone),splittable:row.splittable!==0});
         db.prepare('UPDATE plan_details SET recurrence_days=?,recurrence_zone=?,recurrence_root=?,occurrence=? WHERE task_id=?').run(row.recurrence_days,row.recurrence_zone,root,next,id);
         db.prepare('INSERT INTO plan_tags SELECT ?,tag FROM plan_tags WHERE task_id=?').run(id,row.id);
         db.prepare('INSERT INTO plan_dependencies SELECT user_id,?,prerequisite_id FROM plan_dependencies WHERE task_id=?').run(id,row.id);
@@ -203,3 +211,4 @@ module.exports={
     });},
     calendarShift,materializeRecurrences
 };
+

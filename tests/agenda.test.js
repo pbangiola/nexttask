@@ -191,3 +191,28 @@ test('Plan bulk entry requires an explicit deadline choice and mandatory placeme
  assert.equal((await saving).status(),200);assert.ok(comparisons>=2);assert.ok(agenda.read(owner).items.every(row=>row.due_at===null));
  const rejected=await api(owner,'/tasks','POST',{capture:true,tasks:[{id:'capture-bypass',name:'Missing deadline choice',estimatedTimeMs:60000}]});assert.equal(rejected.status,400);
 });
+
+
+test('Resume promotes a project prerequisite and advances into its dependent before unrelated work',async t=>{
+ const owner='resume_project_dependency';
+ store.create(owner,{tasks:[
+  {id:'resume-prereq-project',name:'Prerequisite project',nodeType:'project'},
+  {id:'resume-prereq-leaf',name:'Prepare materials',parentId:'resume-prereq-project',estimatedTimeMs:60000},
+  {id:'resume-dependent',name:'Build main task',estimatedTimeMs:60000},
+  {id:'resume-unrelated',name:'Unrelated task',estimatedTimeMs:60000}
+ ]});
+ store.update(owner,'resume-dependent',{prerequisites:['resume-prereq-project']});
+ const before=agenda.read(owner);
+ agenda.save(owner,{revision:before.revision,tasks:['resume-dependent','resume-unrelated','resume-prereq-leaf'].map(id=>({id,dueAt:null}))});
+ agenda.backlog(owner,['resume-dependent']);
+ const page=await pageFor(t,owner);
+ await page.locator('#workBtn').click();await page.locator('#resumeExistingListBtn').click();
+ await page.getByRole('button',{name:"No, I don't have a set stop time."}).click();
+ await page.waitForFunction(()=>document.querySelector('#resumeChoiceScreen,#focusScreen'));
+ if(await page.locator('#resumeChoiceScreen').count())await page.getByRole('button',{name:'Prerequisite project / Prepare materials',exact:true}).click();
+ await page.waitForSelector('#focusScreen');assert.match(await page.locator('#focusScreen h2').textContent(),/Prepare materials/);
+ await page.getByRole('button',{name:'Done, Next!',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#focusScreen h2')?.textContent==='Build main task');
+ assert.equal(store.snapshot(owner).nodes.find(n=>n.id==='resume-prereq-project').status,'completed');
+ assert.equal(store.snapshot(owner).nodes.find(n=>n.id==='resume-unrelated').status,'pending');
+});

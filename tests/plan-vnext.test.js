@@ -51,7 +51,7 @@ test('recurrence preserves history, calendar-day timezone behavior, and occurren
  const owner='plan_repeat';store.create(owner,{tasks:[{id:'repeat',name:'Daily care',estimatedTimeMs:300000,recurrence_days:1,recurrence_zone:'America/Chicago',tags:['care'],due_at:Date.parse('2026-03-07T15:00:00Z')}]});
  store.update(owner,'repeat',{status:'completed',requestId:'finish-repeat'});store.update(owner,'repeat',{status:'completed',requestId:'finish-repeat'});
  const first=store.snapshot(owner),again=store.snapshot(owner);assert.equal(first.nodes.length,2);assert.deepEqual(first.nodes.map(n=>n.id),again.nodes.map(n=>n.id));
- const occurrence=first.nodes.find(n=>n.id!=='repeat');assert.equal(occurrence.due_at,Date.parse('2026-03-08T14:00:00Z'));assert.deepEqual(occurrence.tags,['care']);assert.equal(occurrence.earliest_start_at,null,'a dated recurrence must not acquire an inferred start after its due time');assert.equal(first.nodes.find(n=>n.id==='repeat').status,'completed');
+ const occurrence=first.nodes.find(n=>n.id!=='repeat');assert.equal(occurrence.deadline_at,Date.parse('2026-03-08T14:00:00Z'));assert.equal(occurrence.due_at,null);assert.deepEqual(occurrence.tags,['care']);assert.equal(occurrence.earliest_start_at,null,'a dated recurrence must not acquire an inferred start after its due time');assert.equal(first.nodes.find(n=>n.id==='repeat').status,'completed');
 });
 test('availability is validated atomically; importance comparisons never mutate queue or hierarchy',()=>{
  const owner='plan_landscape',now=Date.now();store.create(owner,{tasks:[{id:'land-a',name:'A',estimatedTimeMs:60000},{id:'land-b',name:'B',estimatedTimeMs:60000}]});
@@ -188,9 +188,9 @@ test('browser calendar works before setup and selected tasks support bulk metada
  await page.getByRole('button',{name:'Edit selected',exact:true}).click();
  const dialog=page.locator('dialog');await dialog.getByLabel('Change Estimated total minutes',{exact:true}).check();await dialog.getByLabel('Estimated total minutes',{exact:true}).fill('12');
  await dialog.getByLabel('Change Tags (comma separated)',{exact:true}).check();await dialog.getByLabel('Tags (comma separated)',{exact:true}).fill('review, home');
- await dialog.getByLabel('Change Preferred due date',{exact:true}).check();await dialog.getByLabel('Preferred due date',{exact:true}).fill('');
+ await dialog.getByLabel('Change Deadline',{exact:true}).check();await dialog.getByLabel('Deadline',{exact:true}).fill('');
  await dialog.getByRole('button',{name:'Apply changes',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('dialog'));
- let state=store.snapshot(owner);for(const id of ['bb-a','bb-b']){const n=state.nodes.find(n=>n.id===id);assert.equal(n.estimated_ms,720000);assert.equal(n.due_at,null);assert.deepEqual(n.tags,['home','review']);}
+ let state=store.snapshot(owner);for(const id of ['bb-a','bb-b']){const n=state.nodes.find(n=>n.id===id);assert.equal(n.estimated_ms,720000);assert.equal(n.due_at,null);assert.equal(n.deadline_at,null);assert.deepEqual(n.tags,['home','review']);}
  assert.equal(state.nodes.find(n=>n.id==='bb-a').notes,'Keep Alpha');assert.equal(state.nodes.find(n=>n.id==='bb-keep').estimated_ms,180000);
  await page.getByLabel('Search tasks').fill('Bulk ');await page.getByLabel('Select all visible items',{exact:true}).check();
  assert.equal(await page.getByLabel('Select Bulk Alpha',{exact:true}).isChecked(),true);assert.equal(await page.getByLabel('Select Bulk Beta',{exact:true}).isChecked(),true);
@@ -365,3 +365,4 @@ test('legacy project Add Task requires timing then an unavoidable sibling compar
  await page.locator('dialog').getByRole('button',{name:'Required new task',exact:true}).click();await page.locator('#projectEditorTasks').waitFor();
  const state=store.snapshot(owner),task=state.nodes.find(n=>n.name==='Required new task');assert.equal(task.estimated_ms,600000);assert.equal(task.deadline_at,null);assert.ok(state.comparisons.some(c=>c.higher_id===task.id&&c.lower_id==='required-peer'));
 });
+
