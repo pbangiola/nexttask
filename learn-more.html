@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Why this app? — Task Sorter</title><link rel="stylesheet" href="frontend/design.css?v=feedback2"></head>
+<body><main class="reading"><nav class="article-nav" aria-label="Navigation"><a href="index.html">Welcome</a><a href="index.html#get-started">Get Started</a></nav>
+<h1>Why this app?</h1>
+<p>If you&#39;re like me, your daily to-do list lives in your head, looking like this:</p>
+<div class="diagram-scroll" tabindex="0" role="region" aria-label="Task mindmap"><img class="landscape-diagram" src="frontend/diagrams/task-landscape.svg" alt="Task mindmap"></div>
+<p>It&#39;s not chaotic, really, but it&#39;s a little overwhelming. It&#39;s not really clear where to start. You might write it down on task app a bullet journal or whiteboard, but then you either can&#39;t see the whole picture, leave it anchored in one place, or put it down and can&#39;t find it later.</p>
+<p>More important, you end up doing the wrong work first, and never finding time for the big stones.</p>
+<h2>Task Sorter is different.</h2>
+<ul>
+<li>It&#39;s on your phone so you don&#39;t lose it.
+</li>
+<li>When you enter your tasks, Task Sorter walks you through a sorting algorithm so you rank the tasks from msot to least important.
+</li>
+<li>You enter how long the tasks take.
+</li>
+<li>You tell us how long you have to work.
+</li>
+</ul>
+<p>Then Task Sorter walks you through the tasks, one at a time, and tracks your time to keep you focused.</p>
+<p>Tasks that are unimportant but urgent displace tasks that that are important, sometimes  completely.</p>
+<div class="diagram-scroll" tabindex="0" role="region" aria-label="Task schedule"><img class="gantt-diagram" src="frontend/diagrams/illustrative-day.svg" alt="Task schedule"></div>
+<h3>So there are five related ideas to distinguish</h3>
+<p>Importance ≠ Priority ≠ Start Date ≠ End Date minus duration ≠ Deadline</p>
+<ul>
+<li>Importance is about the impact the task has.
+</li>
+<li>Priority is about what order the tasks happen in.
+</li>
+<li>Start Date is about when you actually start the task
+</li>
+<li>End Date is when the task is complete. But not all tasks happen in one single burst.
+</li>
+<li>Deadline is about when the task must be completed, either for compliance or some other reason.
+</li>
+</ul>
+<h3>Task Sorter contains (will contain) six related tools to coerce unordered tasks into a priortized list</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Tools"><table><thead><tr><th scope="col"></th><th scope="col">Sorted</th><th scope="col">Unsorted</th><th scope="col">Unordered</th></tr></thead><tbody>
+<tr><th scope="row">Grouped</th><td>Projects</td><td>Project Planning</td><td>Routines</td></tr>
+<tr><th scope="row">Ungrouped</th><td>Backlog</td><td>Task Sorting (core merge)</td><td>Hardstops</td></tr>
+</tbody></table></div>
+<ol>
+<li>Task Sorting: At the heart of the app is my sorting algorithm. This isn&#39;t any fancy computing, and there&#39;s nothing artificial about it. We&#39;ve hard coded a recipe that forces you to prioritize your tasks from most to least, using only comparisons between this and that. Instead of an overwhelming list, it&#39;s very simple:
+<div class="diagram-scroll" tabindex="0" role="region" aria-label="Task sorting"><img class="sorting-diagram" src="frontend/diagrams/pairwise-sorting.svg" alt="Task sorting"></div>
+</li>
+<li>Backlog: Anything you don&#39;t finish gets automatically saved. Next time you login, click &quot;Resume&quot;, and your next task will pop up.
+</li>
+<li>Hardstops: When you have a hard stop to your work session like lunch with the boss or just 5pm, you record it before you start working. When the hard stop rolls around, Task Sorter saves your progress and sounds an alarm for you to move on. It can even
+</li>
+<li>Routines: Some tasks and hardstops repeat, and you don&#39;t need to reenter them. If you want, TaskSorter will stop you and remind you to leave work at 3:07 every Tuesday, so you can get your son by 3:50 and your daughter before 4:15 without sitting on your to-do list staring at you all week. And when she&#39;s strapped in, tap done, and Task Sorter will merge reminding you to grab a gallon of milk and some chicken breasts before &quot;Make Dinner&quot; starts at 5:15.
+</li>
+<li>Project Planning: Not every task is a one-off. Task Sorter supports nested tasks so that you can create projects with sub projects and sub-sub projects, all prioritized and ready to pop up when needed.
+</li>
+<li>Projects: Your saved projects sit in your sorted backlog right next to your small tasks. So if you check off &quot;check morning email&quot; at 9:15, &quot;Get a coffee and think about Q4 priorities&quot; can slot itself in for an hour before &quot;meeting to plan client meeting planning meeting&quot; starts at 10:30.
+</li>
+</ol>
+<p>And all of these different tools sit peacefully in the background, doing their job while you focus on the task at hand.</p>
+</main></body></html>

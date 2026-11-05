@@ -79,7 +79,7 @@
     }
 
     function isProjectLike(node) {
-        return node && node.status!=='cancelled' && (node.node_type === 'project' || hasOpenChildren(node));
+        return isOpen(node) && (node.node_type === 'project' || hasOpenChildren(node));
     }
 
     function leafStats(node) {
@@ -104,6 +104,7 @@
     }
 
     async function loadTree() {
+        await window.PlanExecution?.refresh();
         await ensureUser();
         workTreeCache = await fetchTaskTree();
         return workTreeCache;
@@ -115,7 +116,7 @@
         checkbox.type = 'checkbox'; checkbox.checked = sortSelectedWork;
         checkbox.style.width = 'auto';
         checkbox.onchange = () => { sortSelectedWork = checkbox.checked; };
-        label.append(checkbox, document.createTextNode(' Sort selected work before Focus'));
+        label.append(checkbox, document.createTextNode(' Sort selected work by importance before Focus'));
         return label;
     }
 
@@ -135,6 +136,7 @@
         clearDynamic(); hideStaticScreens(); show(el('startOverBtn'));
         prepareSortingDisplay(sorting);
         save('sorting');
+        beginImportanceSort(executable,'tree');
         const ordered = await interactiveMergeSort(executable, runId);
         if (runId !== sortRunId) return false;
         clearInterval(timerInterval); completeTask(sorting, Date.now());
@@ -142,6 +144,8 @@
         sortedTasks = [sorting, ...flattenTree([...ordered,...other])];
         hide(el('taskCompare'));
         await save('dashboard');
+        await window.NextPlan?.recordImportance(ordered);
+        finishImportanceSort();
     }
 
     async function startNodes(nodes,startImmediately=true) {
@@ -188,6 +192,7 @@
     }
 
     function showExistingSelection() {
+        window.AppNavigation?.go('resume');
         hideStaticScreens();
         hide(el('stopWorkingBtn'));
         show(el('startOverBtn'));
@@ -235,6 +240,7 @@
     }
 
     function showProjectOverview(projectId, pushHistory = true) {
+        window.AppNavigation?.go('work-project',{project:projectId});
         const node = findNode(workTreeCache, projectId);
         if (!node || !isProjectLike(node)) {
             alert('That project could not be found.');
@@ -334,7 +340,7 @@
             showWorkChoice();
         }
     }
-    window.WorkPlanner = { resume: resumeSelection };
+    window.WorkPlanner = { resume: resumeSelection, async review(sort=false){await loadTree();sortSelectedWork=sort;await startNodes(workTreeCache,false);}, async resumeSort(ids){await loadTree();const nodes=ids.map(id=>findNode(workTreeCache,id));if(nodes.some(n=>!isOpen(n))){finishImportanceSort();showDashboard();return;}sortSelectedWork=true;await orderSelectedWork(nodes);showDashboard();}, async overview(id){await loadTree();showProjectOverview(id,false);} };
 
     // Work uses display names with project prefixes, but persistence must keep the
     // canonical backend node name, parent and sibling position intact.

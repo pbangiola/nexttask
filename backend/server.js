@@ -6,10 +6,13 @@ const userStore = require('./user-store');
 const userRoutes = require('./user-routes');
 const taskGraphRoutes = require('./task-graph-routes');
 const publicAssets = require('./public-assets');
+const planRoutes = require('./plan-routes');
 
 function createApp(clerkOptions = {}) {
     const app = express();
-    const BACKEND_VERSION = 'nexttask-integrated-beta-1';
+    const localDemo = process.env.NEXTTASK_LOCAL_DEMO === '1';
+    if (localDemo && (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT_ID)) throw new Error('Local demo authentication is disabled on hosted environments.');
+    const BACKEND_VERSION = 'nexttask-plan-vnext-1';
 
     const defaultAllowedOrigins = [
         'https://pbangiola.github.io',
@@ -26,27 +29,31 @@ function createApp(clerkOptions = {}) {
 
     const allowedOrigins = new Set([...defaultAllowedOrigins, ...configuredOrigins]);
 
-    app.use(cors({
+    app.use((req,res,next) => cors({
         origin(origin, callback) {
             if (!origin) return callback(null, true);
+            try { if (new URL(origin).host === req.get('host')) return callback(null,true); } catch (_) {}
+            if (process.env.RAILWAY_PUBLIC_DOMAIN && origin === `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`) return callback(null, true);
             const normalizedOrigin = origin.replace(/\/$/, '');
             if (allowedOrigins.has(normalizedOrigin)) return callback(null, true);
             return callback(new Error(`CORS blocked request from ${origin}`));
         },
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization']
-    }));
+    })(req,res,next));
 
     app.use(express.json({ limit: '1mb' }));
     publicAssets(app);
 
     app.get('/api/config', (req, res) => {
+        if (localDemo) return res.json({localDemo:true});
         const publishableKey = process.env.CLERK_PUBLISHABLE_KEY;
         if (!publishableKey) return res.status(500).json({ error: 'Clerk publishable key is not configured' });
         return res.json({ clerkPublishableKey: publishableKey });
     });
 
     function requireClerkUser(req, res, next) {
+        if (req.isLocalDemo) return next();
         const auth = getAuth(req);
         if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ error: 'Unauthorized' });
         req.clerkUserId = auth.userId;
@@ -84,12 +91,18 @@ function createApp(clerkOptions = {}) {
 
     // Authenticate only the private API surface. Public diagnostics and denied
     // static paths never depend on Clerk being configured or reachable.
+    if (localDemo) app.use('/api', (req,res,next) => {
+        if (!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) return res.status(403).json({error:'Local demo is loopback only'});
+        req.clerkUserId='local_demo';req.isLocalDemo=true;next();
+    });
     app.use('/api', (req, res, next) => {
+        if (req.isLocalDemo) return next();
         if (!req.headers.authorization && !req.headers.cookie) {
             return res.status(401).json({ error: 'Unauthorized' });
         }
         return next();
-    }, clerkMiddleware(clerkOptions), requireClerkUser);
+    }, (req,res,next) => req.isLocalDemo ? next() : clerkMiddleware(clerkOptions)(req,res,next), (req,res,next) => req.isLocalDemo ? next() : requireClerkUser(req,res,next));
+    app.use('/api', planRoutes);
     app.use('/api', userRoutes);
     app.use('/api', taskGraphRoutes);
 
@@ -133,8 +146,8 @@ function createApp(clerkOptions = {}) {
 
     app.use((error, req, res, next) => {
         if (error.message?.startsWith('CORS blocked')) return res.status(403).json({ error: error.message });
-        console.error(error);
-        return res.status(500).json({ error: 'Unexpected server error' });
+        if (error.type !== 'entity.parse.failed') console.error(error);
+        return res.status(error.type === 'entity.parse.failed' ? 400 : 500).json({ error: error.type === 'entity.parse.failed' ? 'Malformed JSON' : 'Unexpected server error' });
     });
 
     app.use((req, res) => res.status(404).json({ error: 'Not found' }));

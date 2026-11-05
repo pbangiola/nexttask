@@ -2,3 +2,5 @@ node_modules/
 *.db
 *.db-wal
 *.db-shm
+
+.nexttask-demo/

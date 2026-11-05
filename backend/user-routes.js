@@ -6,6 +6,7 @@ const { getAuth } = require('@clerk/express');
 const router = express.Router();
 
 router.use('/users/:userId', (req, res, next) => {
+    if (req.isLocalDemo) return req.params.userId === req.clerkUserId ? next() : res.status(403).json({error:'Wrong demo owner'});
     const auth = getAuth(req);
     if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ error: 'Unauthorized' });
     if (String(req.params.userId) !== String(auth.userId)) {

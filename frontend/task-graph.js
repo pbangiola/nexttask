@@ -98,7 +98,12 @@ window.TaskGraph = (() => {
             }
             notify('Saved');
         })();
-        try { return await processing; } finally { processing = null; }
+        try { return await processing; } finally {
+            processing = null;
+            // A caller resumed by the last acknowledgement may already have
+            // appended its next action while this drain was settling.
+            if(state.actions.length && !failure && !invalid) queueMicrotask(()=>drain().catch(()=>{}));
+        }
     }
     function commit(label, steps, ack) {
         assertOwner();

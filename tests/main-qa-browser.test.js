@@ -107,7 +107,7 @@ function intervalRows(owner) { return raw.prepare('SELECT * FROM work_intervals 
 function sessionRows(owner) { return raw.prepare('SELECT * FROM work_sessions WHERE user_id=?').all(owner); }
 
 async function planProjects(page) {
-    await page.getByRole('button',{name:'Plan',exact:true}).click();
+    await page.evaluate(()=>window.ProjectPlanner.open());
     await page.locator('#plannerReview').click(); await page.locator('#reviewProjects').click();
 }
 async function fixture(owner) {
@@ -137,7 +137,7 @@ test('B2: untimed add and blocker collect estimates before durable insertion, ca
 test('B3: mixed project entry, both sort choices, optional container estimate and duplicate occurrences',async t=>{
     for(const skip of [true,false]) {
         const {page,owner}=await pageFor(t); page.on('dialog',d=>d.accept());
-        await page.getByRole('button',{name:'Plan',exact:true}).click(); await page.locator('#plannerCreate').click(); await page.locator('#projectName').fill('qa'); await page.locator('#projectContinue').click();
+        await page.evaluate(()=>window.ProjectPlanner.open()); await page.locator('#plannerCreate').click(); await page.locator('#projectName').fill('qa'); await page.locator('#projectContinue').click();
         await page.waitForSelector('#partsText'); await page.locator('#partsText').fill('Plain\nTimed, 2m\nTimed, 3m'); await page.locator('#partsSkipSort').setChecked(skip); await page.locator('#partsContinue').click();
         if(!skip) {while(await page.locator('#taskCompare:not(.hidden)').count()) await page.locator('#task1').click();}
         await page.waitForSelector('#timingEntryScreen'); await page.locator('#timingEntryScreen input').fill('1'); await page.getByRole('button',{name:'Save & Continue'}).click(); await page.waitForSelector('#editProject');
@@ -165,18 +165,18 @@ test('B4/B5/B6/B7: shared ID editor preserves history/duplicate estimates and re
     await page.getByRole('button',{name:'Back',exact:true}).last().click(); await page.getByRole('button',{name:'Back',exact:true}).last().click(); await page.waitForSelector('#projectList');
     await stopServer(); await startServer(Number(new URL(base).port));
     await page.reload(); await page.waitForSelector('#modeSelect:not(.hidden)');
-    await page.getByRole('button',{name:'Work',exact:true}).click(); await page.locator('#resumeExistingListBtn').click(); await page.getByRole('button',{name:"No, I don't have a set stop time."}).click(); await page.getByRole('button',{name:'Oars —',exact:false}).click(); await page.getByRole('button',{name:'Manage',exact:true}).click(); await page.getByRole('button',{name:'Left oar shaping',exact:true}).click();
+    await page.evaluate(id=>window.WorkPlanner.overview(id),owner+'_oars'); await page.getByRole('button',{name:'Manage',exact:true}).click(); await page.getByRole('button',{name:'Left oar shaping',exact:true}).click();
     assert.match(await page.locator('#dynamicContainer').textContent(),/165 min/);
     await page.getByRole('button',{name:'Back',exact:true}).last().click(); await page.getByRole('button',{name:'Back',exact:true}).last().click(); await page.waitForSelector('#workProjectOverviewScreen'); assert.match(await page.locator('#workProjectOverviewScreen').textContent(),/345 minutes/);
 });
 test('B8: project context never follows a standalone active task, including recovery',async t=>{
     const {page,owner}=await pageFor(t); await fixture(owner);
-    await page.getByRole('button',{name:'Work',exact:true}).click(); await page.locator('#resumeExistingListBtn').click(); await page.getByRole('button',{name:"No, I don't have a set stop time."}).click(); await page.getByRole('button',{name:'Oars —',exact:false}).click(); await page.getByRole('button',{name:'Start This Project'}).click(); await page.waitForSelector('#focusScreen'); await idle(page);
+    await page.evaluate(id=>window.WorkPlanner.overview(id),owner+'_oars'); await page.getByRole('button',{name:'Start This Project'}).click(); await page.waitForSelector('#focusScreen'); await idle(page);
     assert.match(await page.locator('.project-work-toolbar').textContent(),/Oars/);
     await page.getByRole('button',{name:'Add New Task'}).click(); await page.locator('#addTaskPage input').fill('Standalone, 1m'); await page.getByRole('button',{name:'Choose Work Position'}).click(); await page.getByRole('button',{name:'Do this next'}).click(); await page.waitForSelector('#focusScreen'); await idle(page);
     await page.getByRole('button',{name:'Done, Next!'}).click(); await page.waitForFunction(()=>document.querySelector('#focusScreen h2')?.textContent.includes('Standalone')); await idle(page);
     assert.equal(await page.locator('.project-work-toolbar').count(),0);
-    await page.reload(); await page.waitForSelector('#dashboardScreen'); await idle(page); await page.getByRole('button',{name:'Get to Work',exact:true}).click(); await page.waitForSelector('#focusScreen'); assert.equal(await page.locator('.project-work-toolbar').count(),0);
+    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen'); await idle(page); await page.getByRole('button',{name:'Get to Work',exact:true}).click(); await page.waitForSelector('#focusScreen'); assert.equal(await page.locator('.project-work-toolbar').count(),0);
 });
 test('B1/B3 full untimed work journey sorts one screen, estimates only missing entries, reload stays paused',async t=>{
     const {page,owner}=await pageFor(t);
@@ -189,7 +189,7 @@ test('B1/B3 full untimed work journey sorts one screen, estimates only missing e
     assert.equal(intervalRows(owner).length,0);assert.equal(raw.prepare("SELECT estimated_ms FROM tasks WHERE user_id=? AND name='2'").get(owner).estimated_ms,120000);
     await page.getByRole('button',{name:'Get to Work',exact:true}).click();await page.waitForSelector('#focusScreen');await idle(page);
     assert.equal(intervalRows(owner).filter(r=>r.ended_at===null).length,1);
-    await page.reload();await page.waitForSelector('#dashboardScreen');await idle(page);assert.ok(intervalRows(owner).every(r=>r.ended_at!==null));assert.equal(await page.locator('#timingEntryScreen,#deadlinePage,#focusScreen').count(),0);
+    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);assert.ok(intervalRows(owner).every(r=>r.ended_at!==null));assert.equal(await page.locator('#timingEntryScreen,#deadlinePage,#focusScreen').count(),0);
 });
 test('B2 untimed Add Task and project Add Task await the shared estimate continuation',async t=>{
     const {page,owner}=await pageFor(t);await newList(page);await idle(page);
@@ -197,7 +197,7 @@ test('B2 untimed Add Task and project Add Task await the shared estimate continu
     assert.equal(raw.prepare("SELECT COUNT(*) n FROM tasks WHERE user_id=? AND name='Inserted'").get(owner).n,0);
     await page.getByRole('button',{name:'Do this next'}).click();await page.waitForSelector('#focusScreen');await idle(page);assert.equal(raw.prepare("SELECT estimated_ms FROM tasks WHERE user_id=? AND name='Inserted'").get(owner).estimated_ms,240000);
     await page.locator('#stopWorkingBtn').click();await page.getByRole('button',{name:'End Work Session'}).click();await page.waitForSelector('#dashboardScreen');await idle(page);
-    await page.evaluate(()=>resetAll());await page.waitForSelector('#modeSelect:not(.hidden)');await fixture(owner);await planProjects(page);await page.getByRole('button',{name:'Oars',exact:true}).click();await page.locator('#editProject').click();await page.locator('#projectEditorAddTask').click();await page.locator('#projectEditorTaskName').fill('New child');await page.locator('#projectEditorTaskNext').click();await page.locator('#timingEntryScreen input').fill('5');await page.getByRole('button',{name:'Save & Continue'}).click();await page.getByRole('button',{name:'Add at end'}).click();await page.waitForSelector('#projectEditorTasks');
+    await page.evaluate(()=>resetAll());await page.waitForSelector('#modeSelect:not(.hidden)');await fixture(owner);await planProjects(page);await page.getByRole('button',{name:'Oars',exact:true}).click();await page.locator('#editProject').click();await page.locator('#projectEditorAddTask').click();await page.locator('dialog input[name=title]').fill('New child');await page.locator('dialog input[name=estimate]').fill('5');await page.locator('dialog input[name=deadline]').fill('2027-02-01T12:00');await page.locator('dialog button[type=submit]').click();await page.waitForFunction(()=>!document.querySelector('dialog')||document.querySelector('dialog h3')?.textContent==='What’s more important?');for(let attempt=0;attempt<20;attempt++){await page.waitForFunction(()=>document.querySelector('#projectEditorTasks')||document.querySelector('dialog button:not(:disabled)'));if(await page.locator('#projectEditorTasks').count())break;await page.locator('dialog button:not(:disabled)').first().click();}await page.waitForSelector('#projectEditorTasks');await page.waitForSelector('#projectEditorTasks');
     assert.equal(raw.prepare("SELECT estimated_ms FROM tasks WHERE user_id=? AND name='New child'").get(owner).estimated_ms,300000);
 });
 test('B6/B7 move and undo refresh nested editor totals, root navigation survives order/deleted rows',async t=>{
@@ -216,12 +216,12 @@ test('B6/B7 move and undo refresh nested editor totals, root navigation survives
 });
 test('B4/B8 stale browser estimates/context yield to canonical edited rows and a fresh standalone list',async t=>{
     const {page,owner}=await pageFor(t);await fixture(owner);
-    await page.getByRole('button',{name:'Work',exact:true}).click();await page.locator('#resumeExistingListBtn').click();await page.getByRole('button',{name:"No, I don't have a set stop time."}).click();await page.getByRole('button',{name:'Oars —',exact:false}).click();await page.getByRole('button',{name:'Start This Project'}).click();await page.waitForSelector('#focusScreen');await idle(page);
+    await page.evaluate(id=>window.WorkPlanner.overview(id),owner+'_oars');await page.getByRole('button',{name:'Start This Project'}).click();await page.waitForSelector('#focusScreen');await idle(page);
     await api(owner,`/users/${owner}/nodes/${owner}_left0`,'PUT',{name:'Server edit',estimatedTimeMs:30*60000});
     await page.evaluate(()=>{clearInterval(timerInterval);const s=JSON.parse(localStorage.getItem(LOCAL_STATE_KEY));s.sortedTasks.forEach(t=>t.estimatedTimeMs=999);s.currentWorkProjectContext={id:'wrong',name:'Wrong'};localStorage.setItem(LOCAL_STATE_KEY,JSON.stringify(s));});
-    await page.reload();await page.waitForSelector('#dashboardScreen');await idle(page);
+    await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.evaluate(()=>showDashboard());await page.waitForSelector('#dashboardScreen');await idle(page);
     assert.match(await page.locator('#dashboardScreen').textContent(),/Server edit — 30 min/);assert.doesNotMatch(await page.locator('#dashboardScreen').textContent(),/Wrong/);
     await page.evaluate(()=>resetAll());await page.waitForSelector('#modeSelect:not(.hidden)');await newList(page);await idle(page);assert.equal(await page.locator('.project-work-toolbar').count(),0);
     await page.locator('#stopWorkingBtn').click();await page.getByRole('button',{name:'End Work Session'}).click();await page.waitForSelector('#dashboardScreen');await idle(page);
-    await page.evaluate(()=>resetAll());await page.waitForSelector('#modeSelect:not(.hidden)');await page.getByRole('button',{name:'Work',exact:true}).click();await page.locator('#resumeExistingListBtn').click();await page.getByRole('button',{name:"No, I don't have a set stop time."}).click();await page.getByRole('button',{name:'Entire Task List'}).click();await page.waitForSelector('#focusScreen');await idle(page);assert.equal(await page.locator('.project-work-toolbar').count(),0);
+    await page.evaluate(()=>resetAll());await page.waitForSelector('#modeSelect:not(.hidden)');await page.getByRole('button',{name:'Work',exact:true}).click();await page.locator('#resumeExistingListBtn').click();await page.getByRole('button',{name:"No, I don't have a set stop time."}).click();await page.waitForSelector('#focusScreen');await idle(page);assert.equal(await page.locator('.project-work-toolbar').count(),0);
 });

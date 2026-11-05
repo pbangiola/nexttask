@@ -2,12 +2,12 @@ name: Integrated beta verification
 on:
   pull_request:
   push:
-    branches: [main, codex/integrated-beta]
+    branches: [main, codex/integrated-beta, codex/plan-vnext]
 permissions:
   contents: read
 jobs:
   beta:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

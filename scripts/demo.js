@@ -1,0 +1,10 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path');
+if(process.env.RAILWAY_ENVIRONMENT_ID||process.env.NODE_ENV==='production')throw new Error('Local demo authentication cannot run on Railway or in production.');
+process.env.NEXTTASK_LOCAL_DEMO='1';
+process.env.RAILWAY_VOLUME_MOUNT_PATH=path.resolve(process.env.NEXTTASK_DEMO_DATA||'.nexttask-demo');
+fs.mkdirSync(process.env.RAILWAY_VOLUME_MOUNT_PATH,{recursive:true});
+require('./seed-vnext')('local_demo');
+const {createApp}=require('../backend/server');
+const port=Number(process.env.PORT||3000);
+createApp().listen(port,'127.0.0.1',()=>console.log(`NextTask local demo: http://localhost:${port} (loopback only; saved in ${process.env.RAILWAY_VOLUME_MOUNT_PATH})`));

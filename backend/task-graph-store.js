@@ -110,6 +110,8 @@ const startInterval = db.transaction((userId, input) => {
         return prior;
     }
     requireActionable(task);
+    require('./plan-policy').assertStart(userId, task.id);
+    if (db.prepare('SELECT 1 FROM work_intervals WHERE user_id=? AND task_id<>? AND ended_at IS NULL').get(userId,task.id)) throw new Error('Another task is already running. Pause it first.');
     if (sessionId) {
         if (requireSession(userId, sessionId).status !== 'open') throw new Error('Work session is closed');
         if (!db.prepare('SELECT 1 FROM work_session_items WHERE work_session_id=? AND task_id=?').get(sessionId, task.id)) {
@@ -130,7 +132,7 @@ const startInterval = db.transaction((userId, input) => {
 
 module.exports = {
     getActionableTasks(userId) {
-        return db.prepare("SELECT * FROM tasks WHERE user_id=? AND node_type='task' AND independently_actionable=1 AND status IN ('pending','active') ORDER BY position,created").all(String(userId));
+        return db.prepare("SELECT * FROM tasks WHERE user_id=? AND node_type='task' AND independently_actionable=1 AND status IN ('pending','active') ORDER BY position,created").all(String(userId)).filter(task => { try { require('./plan-policy').assertStart(String(userId),task.id); return true; } catch (_) { return false; } });
     },
     createSession(userId, input = {}) {
         return db.transaction(() => {

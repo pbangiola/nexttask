@@ -220,11 +220,14 @@ const replaceTaskList = db.transaction((sessionId, tasks, session) => {
             }
         }
         upsertTaskStmt.run(row);
+        if(row.blocked_by_task_id && db.prepare("SELECT 1 FROM sqlite_master WHERE name='plan_dependencies'").get())db.prepare('INSERT OR IGNORE INTO plan_dependencies VALUES(?,?,?)').run(row.user_id,row.id,row.blocked_by_task_id);
     });
 
     // Main's tree-integrity reconciliation remains the owner of project rollups.
     // Use the same connection so completion and ancestor metrics commit together.
+    require('./plan-policy').validate(String(sessionId));
     require('./tree-integrity').reconcile(String(sessionId));
+    require('./plan-policy').refreshBlocked(String(sessionId));
 });
 
 module.exports = {

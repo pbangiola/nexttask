@@ -37,6 +37,40 @@ function firstIncompleteTask() { return incompleteTasks().find(task => window.Fo
 function currentTask() { return sortedTasks.find(task => task.id === activeTaskId && !task.completed) || firstIncompleteTask(); }
 
 
+// Keep answered comparisons separate from completion and queue position.
+const importanceDraftKey='nexttaskWorkImportance_'+userId;
+let importanceDraft;
+try{importanceDraft=JSON.parse(localStorage.getItem(importanceDraftKey));}catch(_){}
+function beginImportanceSort(items,context='tasks'){
+    const signature=items.map(n=>n.id+':'+(n.parent_id||n.parentId||'')).join('|');
+    if(importanceDraft?.signature!==signature){
+        const ids=new Set(items.map(item=>item.id)),previous=importanceDraft?.context==='agenda'&&context==='agenda'?importanceDraft.choices:{};
+        const choices=Object.fromEntries(Object.entries(previous||{}).filter(([pair,winner])=>ids.has(winner)&&pair.split('|').every(id=>ids.has(id))));
+        importanceDraft={signature,ids:items.map(n=>n.id),context,choices};
+    }
+    localStorage.setItem(importanceDraftKey,JSON.stringify(importanceDraft));
+}
+function finishImportanceSort(){importanceDraft=null;localStorage.removeItem(importanceDraftKey);}
+function askImportance(a,b,choose){
+    const key=[a.id,b.id].sort().join('|'),known=importanceDraft?.choices[key];
+    if(known===a.id||known===b.id){queueMicrotask(()=>choose(known===a.id?'left':'right'));return;}
+    el('task1').textContent=a.name;el('task2').textContent=b.name;
+    function answer(side){if(importanceDraft){importanceDraft.choices[key]=side==='left'?a.id:b.id;localStorage.setItem(importanceDraftKey,JSON.stringify(importanceDraft));}choose(side);}
+    el('task1').onclick=()=>answer('left');el('task2').onclick=()=>answer('right');
+}
+async function resumeImportanceSort(){
+    if(!importanceDraft)return;
+    if(importanceDraft.context==='tree'){await window.WorkPlanner.resumeSort(importanceDraft.ids);return;}
+    const tasks=importanceDraft.ids.map(id=>sortedTasks.find(n=>n.id===id));
+    if(tasks.some(n=>!n||n.completed)){finishImportanceSort();showDashboard();return;}
+    const at=Date.now(),overhead=createTask('Sort Tasks',{estimatedTimeMs:estimatedSortingTimeMs(tasks.length),status:'active',started:at,lastChanged:at});
+    overhead.isSortingOverhead=true;overhead.independentlyActionable=false;sortedTasks.push(overhead);
+    activeTaskId=overhead.id;const runId=++sortRunId;prepareSortingDisplay(overhead);await save('sorting');
+    const ordered=await interactiveMergeSort(tasks,runId);if(runId!==sortRunId)return;
+    completeTask(overhead,Date.now());sortedTasks=[...sortedTasks.filter(n=>!tasks.includes(n)),...ordered];activeTaskId=firstIncompleteTask()?.id||null;
+    await save('dashboard');await window.NextPlan?.recordImportance(ordered);finishImportanceSort();collectMissingEstimates(ordered,()=>showDashboard(),()=>showTaskInput());
+}
+
 //Initialize task sorting
 async function startSorting() {
     const parsed = parseTaskEntries(el('tasks').value);
@@ -86,6 +120,7 @@ async function startSorting() {
 
     let sortedWorkTasks = workTasks;
     if (!el('skipSortCheckbox').checked) {
+        beginImportanceSort(workTasks);
         sortedWorkTasks = await interactiveMergeSort(workTasks, runId);
         if (runId !== sortRunId) return;
     }
@@ -96,7 +131,9 @@ async function startSorting() {
     sortedTasks = [sortTask, ...sortedWorkTasks];
     activeTaskId = firstIncompleteTask()?.id || null;
     hide(el('taskCompare'));
-    save('dashboard');
+    await save('dashboard');
+    if(!el('skipSortCheckbox').checked)await window.NextPlan?.recordImportance(sortedWorkTasks);
+    finishImportanceSort();
     collectMissingEstimates(sortedWorkTasks, () => showDashboard(), () => showTaskInput());
 }
 
@@ -140,10 +177,7 @@ function mergeWithChoices(left, right, runId) {
                 finish([...merged, ...left, ...right]);
                 return;
             }
-            task1.textContent = left[0].name;
-            task2.textContent = right[0].name;
-            task1.onclick = () => chooseMerge('left');
-            task2.onclick = () => chooseMerge('right');
+            askImportance(left[0],right[0],chooseMerge);
         }
 
         // For short runs, the shortcut comparisons cost more than they save and
@@ -159,11 +193,7 @@ function mergeWithChoices(left, right, runId) {
         // item in left, so concatenate right + left.
         function checkRightEntirelyBeforeLeft() {
             if (runId !== sortRunId) { finish([]); return; }
-            task1.textContent = left[0].name;
-            task2.textContent = right[right.length - 1].name;
-
-            task1.onclick = () => checkLeftEntirelyBeforeRight();
-            task2.onclick = () => finish([...right, ...left]);
+            askImportance(left[0],right[right.length-1],side=>side==='left'?checkLeftEntirelyBeforeRight():finish([...right,...left]));
         }
 
         // Long-run shortcut 2: compare first(right) with last(left). If the user
@@ -172,11 +202,7 @@ function mergeWithChoices(left, right, runId) {
         // and we fall back to the normal merge.
         function checkLeftEntirelyBeforeRight() {
             if (runId !== sortRunId) { finish([]); return; }
-            task1.textContent = right[0].name;
-            task2.textContent = left[left.length - 1].name;
-
-            task1.onclick = () => nextMergeComparison();
-            task2.onclick = () => finish([...left, ...right]);
+            askImportance(right[0],left[left.length-1],side=>side==='left'?nextMergeComparison():finish([...left,...right]));
         }
 
         checkRightEntirelyBeforeLeft();

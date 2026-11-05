@@ -107,7 +107,7 @@ function intervalRows(owner) { return raw.prepare('SELECT * FROM work_intervals 
 function sessionRows(owner) { return raw.prepare('SELECT * FROM work_sessions WHERE user_id=?').all(owner); }
 
 async function planProjects(page) {
-    await page.getByRole('button',{name:'Plan',exact:true}).click();
+    await page.evaluate(()=>window.ProjectPlanner.open());
     await page.waitForFunction(()=>document.querySelector('#plannerReview,#summaryDone,#projectList,#reviewProjects'));
     if(await page.locator('#summaryDone').count())await page.locator('#summaryDone').click();
     if(await page.locator('#plannerReview').count())await page.locator('#plannerReview').click();
@@ -121,7 +121,7 @@ async function fixture(owner) {
     for(const [i,m] of [90,90].entries()) await create('right'+i,'Right '+i,'task','right',m);
     await api(owner,`/users/${owner}/nodes?tree=1`);
 }
-test('project discovery includes empty/completed projects in Plan and Work after fresh authenticated contexts',async t=>{
+test('project management retains completed history while Work resume shows incomplete projects',async t=>{
     const {page,owner}=await pageFor(t);
     await api(owner,`/users/${owner}/nodes`,'POST',{id:'empty-discover',name:'Empty saved project',nodeType:'project'});
     await api(owner,`/users/${owner}/nodes`,'POST',{id:'done-discover',name:'Completed saved project',nodeType:'project'});
@@ -133,18 +133,18 @@ test('project discovery includes empty/completed projects in Plan and Work after
     assert.match(await page.locator('#projectEditorTasks').textContent(),/Finished child/);
     await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');
     await page.getByRole('button',{name:'Work',exact:true}).click();await page.locator('#resumeExistingListBtn').click();await page.getByRole('button',{name:"No, I don't have a set stop time."}).click();
-    await page.getByRole('button',{name:/Completed saved project —/}).click();assert.equal(await page.getByRole('button',{name:'Start This Project',exact:true}).isDisabled(),true);await page.getByRole('button',{name:'Manage',exact:true}).click();assert.match(await page.locator('#projectEditorTasks').textContent(),/Finished child/);
+    await page.locator('#resumeEmpty').waitFor();assert.equal(await page.locator('#focusScreen').count(),0);assert.equal(raw.prepare("SELECT status FROM tasks WHERE id='done-child'").get().status,'completed');
     const fresh=await pageFor(t,owner);await planProjects(fresh.page);await expectProjects(fresh.page);
     const other=await pageFor(t);await planProjects(other.page);assert.equal(await other.page.getByRole('button',{name:'Empty saved project',exact:true}).count(),0);
 });
 async function expectProjects(page){await page.getByRole('button',{name:'Empty saved project',exact:true}).waitFor();await page.getByRole('button',{name:'Completed saved project',exact:true}).waitFor();}
-test('direct task editor offers recursive decomposition without estimates and supports completion/delete/move',async t=>{
+test('direct task editor requires timed decomposition and supports completion/delete/move',async t=>{
     const {page,owner}=await pageFor(t);await fixture(owner);
     await page.evaluate(id=>window.ProjectEditor.open(id),owner+'_oars');await page.getByRole('button',{name:'Left oar shaping',exact:true}).click();
     const row=page.locator('.planner-order-row').filter({has:page.locator(`input[value="${owner}_left0"]`)});await row.getByRole('button',{name:'Edit',exact:true}).click();
-    await page.locator('#projectEditorAddSubtask').click();await page.locator('#projectEditorTaskName').fill('Untimed grandchild');await page.locator('#projectEditorTaskDefer').check();await page.locator('#projectEditorTaskNext').click();await page.getByRole('button',{name:'Add at end',exact:true}).click();
-    await page.locator('#projectEditorDecomposeSkip').click();assert.match(await page.locator('#projectEditorTasks').textContent(),/Untimed grandchild/);
-    const child=raw.prepare('SELECT * FROM tasks WHERE user_id=? AND name=?').get(owner,'Untimed grandchild');assert.equal(child.estimated_ms,0);assert.equal(child.parent_id,owner+'_left0');
+    await page.locator('#projectEditorAddSubtask').click();await page.locator('dialog input[name=title]').fill('Timed grandchild');await page.locator('dialog input[name=estimate]').fill('1');await page.locator('dialog input[name=deadline]').fill('2027-02-01T12:00');await page.locator('dialog button[type=submit]').click();await page.waitForFunction(()=>!document.querySelector('dialog')||document.querySelector('dialog h3')?.textContent==='What’s more important?');for(let attempt=0;attempt<20;attempt++){await page.waitForFunction(()=>document.querySelector('#projectEditorTasks')||document.querySelector('dialog button:not(:disabled)'));if(await page.locator('#projectEditorTasks').count())break;await page.locator('dialog button:not(:disabled)').first().click();}await page.waitForSelector('#projectEditorTasks');
+    assert.match(await page.locator('#projectEditorTasks').textContent(),/Timed grandchild/);
+    const child=raw.prepare('SELECT * FROM tasks WHERE user_id=? AND name=?').get(owner,'Timed grandchild');assert.equal(child.estimated_ms,60000);assert.equal(child.parent_id,owner+'_left0');
     const childRow=page.locator('.planner-order-row').filter({has:page.locator(`input[value="${child.id}"]`)});await childRow.getByRole('button',{name:'Complete',exact:true}).click();await page.waitForFunction(id=>document.querySelector(`[data-node-id="${id}"]`)?.textContent.includes('completed'),child.id);
     assert.equal(raw.prepare('SELECT status FROM tasks WHERE id=?').get(owner+'_left1').status,'pending');
     const completeRow=page.locator(`[data-node-id="${child.id}"]`);await completeRow.getByRole('button',{name:'Delete',exact:true}).click();await page.locator('#confirmProjectTaskDelete').click();await page.waitForSelector('#projectEditorTasks');await page.waitForFunction(id=>!document.querySelector(`[data-node-id="${id}"]`),child.id);assert.equal(raw.prepare('SELECT status FROM tasks WHERE id=?').get(child.id).status,'cancelled');
@@ -156,7 +156,7 @@ test('urgency requires an explicit estimate and deadline and is independent of i
 });
 test('UI create/save/delete/edit/decompose/move/complete restores exact totals after reload and server restart',async t=>{
     const {page,owner}=await pageFor(t);
-    await page.getByRole('button',{name:'Plan',exact:true}).click();await page.locator('#plannerCreate').click();await page.locator('#projectName').fill('Repair acceptance');await page.locator('#projectContinue').click();
+    await page.evaluate(()=>window.ProjectPlanner.open());await page.locator('#plannerCreate').click();await page.locator('#projectName').fill('Repair acceptance');await page.locator('#projectContinue').click();
     await page.locator('#partsText').fill('Ten, 10m\nTwenty, 20m\nThirty, 30m');await page.locator('#partsSkipSort').check();await page.locator('#partsContinue').click();await page.locator('#editProject').click();await page.waitForSelector('#projectEditorTasks');
     const byName=name=>raw.prepare('SELECT * FROM tasks WHERE user_id=? AND name=?').get(owner,name);
     const root=byName('Repair acceptance'),ten=byName('Ten'),twenty=byName('Twenty'),thirty=byName('Thirty');
@@ -165,7 +165,7 @@ test('UI create/save/delete/edit/decompose/move/complete restores exact totals a
     const row=id=>page.locator(`[data-node-id="${id}"]`);
     await row(twenty.id).getByRole('button',{name:'Delete',exact:true}).click();await page.locator('#confirmProjectTaskDelete').click();await page.waitForFunction(()=>document.querySelector('#dynamicContainer')?.textContent.includes('40 min planned'));assert.equal(estimate(root.id),40*60000);
     await row(thirty.id).getByRole('button',{name:'Edit',exact:true}).click();await page.locator('#projectEditorEditMinutes').fill('45');await page.locator('#projectEditorEditSave').click();await page.waitForFunction(()=>document.querySelector('#dynamicContainer')?.textContent.includes('55 min planned'));assert.equal(estimate(root.id),55*60000);
-    await row(thirty.id).getByRole('button',{name:'Edit',exact:true}).click();await page.locator('#projectEditorAddSubtask').click();await page.locator('#projectEditorTaskName').fill('Fifteen grandchild');await page.locator('#projectEditorTaskMinutes').fill('15');await page.locator('#projectEditorTaskNext').click();await page.getByRole('button',{name:'Add at end',exact:true}).click();await page.locator('#projectEditorDecomposeSkip').click();
+    await row(thirty.id).getByRole('button',{name:'Edit',exact:true}).click();await page.locator('#projectEditorAddSubtask').click();await page.locator('dialog input[name=title]').fill('Fifteen grandchild');await page.locator('dialog input[name=estimate]').fill('15');await page.locator('dialog input[name=deadline]').fill('2027-02-01T12:00');await page.locator('dialog button[type=submit]').click();await page.waitForFunction(()=>!document.querySelector('dialog')||document.querySelector('dialog h3')?.textContent==='What’s more important?');for(let attempt=0;attempt<20;attempt++){await page.waitForFunction(()=>document.querySelector('#projectEditorTasks')||document.querySelector('dialog button:not(:disabled)'));if(await page.locator('#projectEditorTasks').count())break;await page.locator('dialog button:not(:disabled)').first().click();}await page.waitForSelector('#projectEditorTasks');
     assert.equal(estimate(root.id),25*60000);assert.equal(estimate(thirty.id),15*60000);assert.equal(byName('Fifteen grandchild').parent_id,thirty.id);
     await page.getByRole('button',{name:'Back',exact:true}).last().click();await page.waitForSelector('#projectEditorProjects');
     const dest=(await api(owner,`/users/${owner}/nodes`,'POST',{id:owner+'_destination',name:'Move destination',nodeType:'project'})).node;
@@ -175,10 +175,10 @@ test('UI create/save/delete/edit/decompose/move/complete restores exact totals a
     await stopServer();await startServer(Number(new URL(base).port));await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await planProjects(page);await page.getByRole('button',{name:'Move destination',exact:true}).click();await page.locator('#editProject').click();await page.getByRole('button',{name:'Thirty',exact:true}).click();assert.match(await row(child.id).textContent(),/completed/);assert.equal(estimate(root.id),10*60000);assert.equal(estimate(dest.id),15*60000);
 });
 test('Plan can save untimed parts and editing can defer estimates until execution',async t=>{
-    const {page,owner}=await pageFor(t);await page.getByRole('button',{name:'Plan',exact:true}).click();await page.locator('#plannerCreate').click();await page.locator('#projectName').fill('Estimate later');await page.locator('#projectContinue').click();await page.locator('#partsText').fill('Untimed part');await page.locator('#partsSkipSort').check();await page.locator('#partsDeferEstimates').check();await page.locator('#partsContinue').click();await page.locator('#editProject').click();
+    const {page,owner}=await pageFor(t);await page.evaluate(()=>window.ProjectPlanner.open());await page.locator('#plannerCreate').click();await page.locator('#projectName').fill('Estimate later');await page.locator('#projectContinue').click();await page.locator('#partsText').fill('Untimed part');await page.locator('#partsSkipSort').check();await page.locator('#partsDeferEstimates').check();await page.locator('#partsContinue').click();await page.locator('#editProject').click();
     await page.waitForSelector('#projectEditorTasks');assert.match(await page.locator('#dynamicContainer').textContent(),/remaining estimate Unestimated/);const leaf=raw.prepare('SELECT * FROM tasks WHERE user_id=? AND name=?').get(owner,'Untimed part');assert.equal(leaf.estimated_ms,0);
     await page.locator(`[data-node-id="${leaf.id}"]`).getByRole('button',{name:'Edit',exact:true}).click();await page.locator('#projectEditorEditName').fill('Renamed without estimate');await page.locator('#projectEditorEditSave').click();await page.waitForSelector('#projectEditorTasks');assert.equal(raw.prepare('SELECT estimated_ms FROM tasks WHERE id=?').get(leaf.id).estimated_ms,0);
-    await page.evaluate(()=>showModeSelect());await page.getByRole('button',{name:'Work',exact:true}).click();await page.locator('#resumeExistingListBtn').click();await page.getByRole('button',{name:"No, I don't have a set stop time."}).click();await page.getByRole('button',{name:/Estimate later —/}).click();await page.getByRole('button',{name:'Start This Project',exact:true}).click();await page.waitForSelector('#deadlinePage');assert.equal(intervalRows(owner).length,0,'untimed work never starts an interval');await page.evaluate(()=>{window.currentWorkProjectContext.startedAtMs=Date.now()-600000;});await page.locator('#deadlinePage input').fill('2');await page.getByRole('button',{name:'Start Task',exact:true}).click();await page.waitForSelector('#focusScreen');await idle(page);assert.equal(raw.prepare('SELECT estimated_ms FROM tasks WHERE id=?').get(leaf.id).estimated_ms,120000);await page.waitForFunction(()=>document.querySelector('.project-work-toolbar')?.dataset.estimatedMs==='120000');assert.equal(await page.locator('.project-work-toolbar').getAttribute('data-elapsed-ms'),'0');assert.match(await page.locator('.project-work-toolbar').textContent(),/saved actual/);
+    await page.evaluate(id=>window.WorkPlanner.overview(id),leaf.parent_id);await page.getByRole('button',{name:'Start This Project',exact:true}).click();await page.waitForSelector('#deadlinePage');assert.equal(intervalRows(owner).length,0,'untimed work never starts an interval');await page.evaluate(()=>{window.currentWorkProjectContext.startedAtMs=Date.now()-600000;});await page.locator('#deadlinePage input').fill('2');await page.getByRole('button',{name:'Start Task',exact:true}).click();await page.waitForSelector('#focusScreen');await idle(page);assert.equal(raw.prepare('SELECT estimated_ms FROM tasks WHERE id=?').get(leaf.id).estimated_ms,120000);await page.waitForFunction(()=>document.querySelector('.project-work-toolbar')?.dataset.estimatedMs==='120000');assert.equal(await page.locator('.project-work-toolbar').getAttribute('data-elapsed-ms'),'0');assert.match(await page.locator('.project-work-toolbar').textContent(),/saved actual/);
 });
 test('metrics retain former-leaf actual once and exclude deleted estimates from the summary',async t=>{
     const {page}=await pageFor(t);

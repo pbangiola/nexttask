@@ -51,7 +51,7 @@ function ensureSession(id,owner){
     if(db.prepare('SELECT 1 FROM users WHERE id=? AND id<>?').get(sid,owner)||db.prepare('SELECT 1 FROM tasks WHERE session_id=? AND (user_id IS NULL OR user_id<>?) LIMIT 1').get(sid,owner))throw new Error('Session does not belong to this user');
     db.prepare("INSERT INTO sessions(id,updated_at,total_available_time_ms,end_constraint) VALUES(?,?,0,'') ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at").run(sid,Date.now());return sid;
 }
-function transaction(owner,operation){return db.transaction(()=>{ensureUser(owner);const result=operation();integrity.reconcile(owner);return result;})();}
+function transaction(owner,operation){return db.transaction(()=>{ensureUser(owner);const result=operation();require('./plan-policy').validate(owner);integrity.reconcile(owner);require('./plan-policy').refreshBlocked(owner);return result;})();}
 function create(owner,input={}){
     const id=String(input.id||'').trim(),name=String(input.name||'').trim();if(!id||!name)throw new Error('id and name are required');
     if(db.prepare('SELECT 1 FROM tasks WHERE id=?').get(id))throw new Error('Task node already exists');
