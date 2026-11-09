@@ -78,7 +78,7 @@ relative ranks or prior comparison evidence resolve known choices automatically.
 ## Plan task capture
 
 Quick entry, the full new-task form, project task entry and bulk entry all require
-an explicit deadline choice: a future date or “No deadline.” New tasks must pass
+an explicit deadline choice: a valid date (including a past date) or “No deadline.” New tasks must pass
 importance placement before capture returns. The saved Agenda seeds insertion
 comparisons; new tasks merge into it and the schedule is saved automatically when
 existing dates are valid. With no Agenda yet, tasks remain an ordered backlog.

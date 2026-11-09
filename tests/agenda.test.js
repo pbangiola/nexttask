@@ -216,3 +216,24 @@ test('Resume promotes a project prerequisite and advances into its dependent bef
  assert.equal(store.snapshot(owner).nodes.find(n=>n.id==='resume-prereq-project').status,'completed');
  assert.equal(store.snapshot(owner).nodes.find(n=>n.id==='resume-unrelated').status,'pending');
 });
+
+test('past-due deadlines remain valid in capture and saved Agenda, while invalid dates still roll back',async()=>{
+ const owner='retained_overdue',past=Date.now()-86400000;
+ const captured=await api(owner,'/tasks','POST',{capture:true,tasks:[{id:'retain-past',name:'Already overdue',estimatedTimeMs:60000,deadline_at:past}]});assert.equal(captured.status,200);
+ const before=agenda.read(owner);const saved=agenda.save(owner,{revision:before.revision,tasks:[{id:'retain-past',dueAt:past}]});
+ assert.equal(saved.agenda[0].due_at,past);assert.equal(store.snapshot(owner).nodes.find(row=>row.id==='retain-past').deadline_at,past);
+ assert.throws(()=>agenda.save(owner,{revision:saved.revision,tasks:[{id:'retain-past',dueAt:-1}]}),/valid deadline/);
+ assert.equal(agenda.read(owner).agenda[0].due_at,past);
+});
+
+test('Plan preserves past deadlines, prioritizes the must-complete window, and reopens without deadline-reset prompts',async t=>{
+ const owner='past_deadline_browser',now=Date.now(),past=Math.floor((now-86400000)/60000)*60000;
+ store.create(owner,{tasks:[{id:'past-browser-overdue',name:'Overdue high importance',estimatedTimeMs:60000,deadline_at:past},{id:'past-browser-window',name:'Must complete now',estimatedTimeMs:120000,deadline_at:now+120000}]});
+ const page=await pageFor(t,owner);await page.locator('#planBtn').click();await page.locator('#task1').click();await page.waitForSelector('#planDeadlines');
+ assert.equal(await page.locator('#planDeadlines input').first().inputValue(),new Date(past).toISOString().slice(0,16));
+ await page.locator('#saveAgenda').click();await page.waitForSelector('#agendaScreen');
+ const saved=agenda.read(owner);assert.deepEqual(saved.agenda.map(row=>row.id),['past-browser-window','past-browser-overdue']);assert.equal(saved.items.find(row=>row.id==='past-browser-overdue').due_at,past);
+ await page.reload();await page.waitForSelector('#modeSelect:not(.hidden)');await page.locator('#planBtn').click();await page.waitForSelector('#agendaScreen');
+ assert.equal(await page.locator('#planDeadlines').count(),0);assert.equal(agenda.read(owner).items.find(row=>row.id==='past-browser-overdue').due_at,past);
+ assert.match(await page.locator('#agendaScreen').textContent(),/Overdue/);
+});
