@@ -176,11 +176,13 @@
         const importancePosition=new Map([...work].sort((a,b)=>ranks.order.indexOf(a.id)-ranks.order.indexOf(b.id)).map((n,index)=>[n.id,index+1]));
         const remaining = n => n.remaining_ms ?? (n.estimated_ms>0?Math.max(0,n.estimated_ms-(n.actual_ms??n.elapsed_ms??0)):null);
         const duration = new Map(work.map(n=>[n.id,remaining(n)]));
-        const deadlines=new Map(),release=new Map(),benefit=new Map();
+        const deadlines=new Map(),futureDeadlines=new Map(),release=new Map(),benefit=new Map();
         const min = list => list.filter(v=>v!=null).reduce((a,b)=>Math.min(a,b),Infinity);
         for(const n of work) {
             const family=[n,...g.ancestors(n.id)];
             deadlines.set(n.id,Math.min(min(family.map(n=>n.deadline_at)),n.scheduled_start_at!=null&&duration.get(n.id)!=null?n.scheduled_start_at+duration.get(n.id):Infinity));
+            const fixedEnd=n.scheduled_start_at!=null&&duration.get(n.id)!=null?n.scheduled_start_at+duration.get(n.id):null;
+            futureDeadlines.set(n.id,min([...family.map(node=>node.deadline_at),fixedEnd].filter(at=>at!=null&&at>=now)));
             release.set(n.id,Math.max(now,...family.map(n=>n.earliest_start_at||0),n.scheduled_start_at||0));
             benefit.set(n.id,options.importanceOrder?.includes(n.id)?options.importanceOrder.indexOf(n.id)+1:ranks.order.indexOf(n.id)+1);
         }
@@ -188,7 +190,7 @@
         while(changed) {
             changed=false;
             for(const n of work)for(const id of g.predecessors.get(n.id))if(duration.has(id)) {
-                for(const map of [deadlines, benefit])if(map.get(id)>map.get(n.id)){map.set(id,map.get(n.id));changed=true;}
+                for(const map of [deadlines, futureDeadlines, benefit])if(map.get(id)>map.get(n.id)){map.set(id,map.get(n.id));changed=true;}
             }
         }
         const unavailable = new Set();
@@ -202,8 +204,29 @@
         changed=true;
         while(changed){changed=false;for(const n of work)if([...g.predecessors.get(n.id)].some(id=>unavailable.has(id)||(['cancelled'].includes(g.byId.get(id).status))))if(!unavailable.has(n.id)){unavailable.add(n.id);changed=true;}}
         const usable=work.filter(n=>!unavailable.has(n.id));
+        function latestStarts(bounds){
+            const latest=new Map();
+            for(const n of usable){
+                const limit=bounds.get(n.id);
+                if(Number.isFinite(limit)){
+                    const segments=fit(windows,now,duration.get(n.id),n.splittable!==false,limit,true);
+                    latest.set(n.id,segments?.[0]?.start??limit-duration.get(n.id));
+                }
+            }
+            // Reserve prerequisite effort before its dependent's latest start.
+            for(let pass=0;pass<usable.length;pass++)for(const n of usable)for(const predecessor of g.predecessors.get(n.id)){
+                if(!latest.has(n.id)||!duration.has(predecessor))continue;
+                const source=g.byId.get(predecessor),limit=latest.get(n.id);
+                const segments=fit(windows,now,duration.get(predecessor),source.splittable!==false,limit,true);
+                latest.set(predecessor,Math.min(latest.get(predecessor)??Infinity,segments?.[0]?.start??limit-duration.get(predecessor)));
+            }
+            return latest;
+        }
+        const latest=latestStarts(deadlines),futureLatest=latestStarts(futureDeadlines);
+        const mustComplete=id=>Number.isFinite(futureDeadlines.get(id))&&futureLatest.get(id)<=now;
+        const urgency=id=>mustComplete(id)?0:deadlines.get(id)<now?1:2;
         const orderIndex=new Map(ranks.order.map((id,index)=>[id,index]));
-        const priority=(a,b)=>benefit.get(a.id)-benefit.get(b.id)||orderIndex.get(a.id)-orderIndex.get(b.id);
+        const priority=(a,b)=>urgency(a.id)-urgency(b.id)||benefit.get(a.id)-benefit.get(b.id)||orderIndex.get(a.id)-orderIndex.get(b.id);
         function simulate(order){
             const done=new Set(),slots=[];let cursor=now;
             const pending=[...order];
@@ -228,43 +251,32 @@
         while(moved){
             moved=false;
             for(let i=1;i<order.length;i++){
-                const current=order[i],slot=schedule.find(slot=>slot.id===current.id),bound=deadlines.get(current.id);
+                const current=order[i],slot=schedule.find(slot=>slot.id===current.id),bound=futureDeadlines.get(current.id);
                 if(!Number.isFinite(bound)||(slot&&slot.end<=bound))continue;
                 const candidate=[...order];[candidate[i-1],candidate[i]]=[candidate[i],candidate[i-1]];
                 const trial=simulate(candidate),advanced=trial.find(slot=>slot.id===current.id);
                 if(!advanced||(slot&&advanced.start>=slot.start))continue;
                 const sacrificed=order.some(n=>{
-                    if(n.id===current.id||benefit.get(n.id)>=benefit.get(current.id))return false;
+                    if(n.id===current.id||!mustComplete(n.id)&&benefit.get(n.id)>=benefit.get(current.id))return false;
                     const finish=trial.find(slot=>slot.id===n.id)?.end??Infinity;
                     const previous=schedule.find(slot=>slot.id===n.id)?.end??Infinity;
-                    return finish>deadlines.get(n.id)&&finish>previous;
+                    return finish>futureDeadlines.get(n.id)&&finish>previous;
                 });
                 if(sacrificed)continue;
                 order=candidate;schedule=trial;moved=true;break;
             }
         }
-        const done=new Set(schedule.map(slot=>slot.id)),latest=new Map(),warnings=[];
-        for(const n of usable){
-            const limit=deadlines.get(n.id);
-            if(Number.isFinite(limit)){
-                const segments=fit(windows,now,duration.get(n.id),n.splittable!==false,limit,true);
-                latest.set(n.id,segments?.[0]?.start??limit-duration.get(n.id));
-            }
-        }
-        // Prerequisite latest starts also respect the dependent's latest start.
-        for(let pass=0;pass<usable.length;pass++)for(const n of usable)for(const predecessor of g.predecessors.get(n.id)){
-            if(latest.has(n.id)&&duration.has(predecessor))latest.set(predecessor,Math.min(latest.get(predecessor)??Infinity,latest.get(n.id)-duration.get(predecessor)));
-        }
+        const done=new Set(schedule.map(slot=>slot.id)),warnings=[];
         for(const n of work)if(!done.has(n.id))warnings.push(`${n.name}: ${unavailable.has(n.id)?'unknown estimate, closed parent, or unresolved prerequisite':'no placement found within available time'}.`);
-        for(const slot of schedule)if(slot.end>deadlines.get(slot.id))warnings.push(`${g.byId.get(slot.id).name}: deadline missed to protect more important work or because time is insufficient.`);
+        for(const slot of schedule)if(slot.end>deadlines.get(slot.id))warnings.push(deadlines.get(slot.id)<now?`${g.byId.get(slot.id).name}: overdue deadline retained.`:`${g.byId.get(slot.id).name}: deadline missed to protect more important work or because time is insufficient.`);
         const hardBaseline={ok:work.filter(n=>Number.isFinite(deadlines.get(n.id))).every(n=>{const slot=schedule.find(slot=>slot.id===n.id);return slot&&slot.end<=deadlines.get(n.id);})};
         const items=work.map(n=>{
             const slot=schedule.find(s=>s.id===n.id),latestStart=latest.get(n.id)??null;
             const ancestors=g.ancestors(n.id), ownRank=importancePosition.get(n.id)??null;
             return {id:n.id,remainingMs:duration.get(n.id),importanceRank:ownRank,effectiveImportance:Number.isFinite(benefit.get(n.id))?benefit.get(n.id):null,
-                deadlineAt:Number.isFinite(deadlines.get(n.id))?deadlines.get(n.id):null,latestStart,slackMs:latestStart==null?null:latestStart-now,
+                deadlineAt:Number.isFinite(deadlines.get(n.id))?deadlines.get(n.id):null,urgency:mustComplete(n.id)?'must-complete':deadlines.get(n.id)<now?'overdue':'ordinary',latestStart,slackMs:latestStart==null?null:latestStart-now,
                 ready:g.blocked(n.id).length===0&&release.get(n.id)<=now,blockedBy:g.blocked(n.id),...slot,
-                reason:g.blocked(n.id).length?'Complete prerequisites first':release.get(n.id)>now?'Waiting for scheduled or earliest start':latestStart!=null&&slot&&slot.end>=latestStart?'Limited freedom before a deadline':ownRank==null&&Number.isFinite(benefit.get(n.id))?'Advances an important project or dependent task':ownRank!=null?'Advances your expressed importance':'Importance placement is uncertain',
+                reason:g.blocked(n.id).length?'Complete prerequisites first':release.get(n.id)>now?'Waiting for scheduled or earliest start':mustComplete(n.id)?'Must start now to meet a future deadline':deadlines.get(n.id)<now?'Overdue; scheduled ahead of ordinary work':latestStart!=null&&slot&&slot.end>=latestStart?'Limited freedom before a deadline':ownRank==null&&Number.isFinite(benefit.get(n.id))?'Advances an important project or dependent task':ownRank!=null?'Advances your expressed importance':'Importance placement is uncertain',
                 parentPath:ancestors.reverse().map(n=>n.name)};
         });
         return {now,schedule,items,warnings,availabilityMode,horizonEnd,hardConstraintsSatisfied:hardBaseline.ok&&work.filter(n=>Number.isFinite(deadlines.get(n.id))).every(n=>done.has(n.id)),provisional:true,importanceOrder:ranks.order};

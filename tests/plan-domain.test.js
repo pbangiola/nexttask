@@ -139,3 +139,44 @@ test('importance traverses ranked parent blocks and ignores cross-parent legacy 
  nodes.find(n=>n.id==='p1').parent_id='q';assert.equal(importance(nodes,comparisons.slice(0,2)).known.has('p1'),false,'moving a task invalidates comparisons with its former siblings');
 });
 
+
+test('priority follows must-complete windows, overdue work, then importance with future-due insertion',()=>{
+ const now=10*H;
+ const nodes=[
+  task('ordinary-high-first'),task('window-high',{deadline_at:now+H}),task('overdue-high',{deadline_at:now-H}),
+  task('ordinary-high-second'),task('future-due-low',{deadline_at:now+6*H}),task('overdue-low',{deadline_at:now-2*H}),
+  task('ordinary-low'),task('window-low',{deadline_at:now+H})
+ ];
+ const result=plan(nodes,[],[],{now,importanceOrder:nodes.map(n=>n.id)});
+ assert.deepEqual(result.schedule.map(row=>row.id),['window-high','window-low','overdue-high','overdue-low','ordinary-high-first','future-due-low','ordinary-high-second','ordinary-low']);
+ assert.deepEqual(result.items.map(row=>row.importanceRank),[1,2,3,4,5,6,7,8]);
+ assert.equal(result.items.find(row=>row.id==='window-low').urgency,'must-complete');
+ assert.equal(result.items.find(row=>row.id==='overdue-high').urgency,'overdue');
+});
+
+test('a lower-importance future deadline can displace higher-importance overdue work only when needed',()=>{
+ const now=10*H,nodes=[task('overdue-high',{estimated_ms:4*H,deadline_at:now-H}),task('future-low',{deadline_at:now+2*H})];
+ let result=plan(nodes,[],[],{now,importanceOrder:nodes.map(n=>n.id)});
+ assert.deepEqual(result.schedule.map(row=>row.id),['future-low','overdue-high']);
+ assert.ok(result.schedule[0].end<=nodes[1].deadline_at);
+ nodes[1].deadline_at=now+6*H;
+ result=plan(nodes,[],[],{now,importanceOrder:nodes.map(n=>n.id)});
+ assert.deepEqual(result.schedule.map(row=>row.id),['overdue-high','future-low']);
+});
+
+test('overdue tasks keep importance order rather than sorting by how old their deadline is',()=>{
+ const now=10*H,nodes=[task('ordinary-high'),task('recent-overdue',{deadline_at:now-H}),task('old-overdue',{deadline_at:now-9*H})];
+ const result=plan(nodes,[],[],{now,importanceOrder:nodes.map(n=>n.id)});
+ assert.deepEqual(result.schedule.map(row=>row.id),['recent-overdue','old-overdue','ordinary-high']);
+ assert.ok(result.warnings.some(message=>message.includes('overdue deadline retained')));
+});
+
+test('future-deadline prerequisites and calendar reservations stay ahead of overdue work when necessary',()=>{
+ const now=10*H;
+ const nodes=[task('overdue',{estimated_ms:4*H,deadline_at:now-H}),task('source'),task('dependent',{estimated_ms:2*H,deadline_at:now+3*H})];
+ const result=plan(nodes,[edge('source','dependent')],[],{now,importanceOrder:nodes.map(n=>n.id)});
+ assert.deepEqual(result.schedule.map(row=>row.id),['source','dependent','overdue']);assert.equal(result.schedule[1].end,now+3*H);
+ const reserved=plan([task('late',{deadline_at:now-H}),task('future',{estimated_ms:2*H,deadline_at:now+4*H})],[],[],{now,importanceOrder:['late','future'],events:[{start_at:now+H,end_at:now+3*H}]});
+ assert.deepEqual(reserved.schedule.map(row=>row.id),['future','late']);
+ assert.deepEqual(reserved.schedule[0].segments,[{start:now,end:now+H},{start:now+3*H,end:now+4*H}]);
+});

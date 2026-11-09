@@ -36,8 +36,11 @@ window.Agenda = (() => {
             const backlogIds=new Set(state.backlog.map(row=>row.id));
             const backlog=state.backlog.map(row=>({...row,name:row.displayName}));
             const agenda=state.agenda.filter(row=>!backlogIds.has(row.id)).sort((a,b)=>a.importance_rank-b.importance_rank).map(row=>({...row,name:row.displayName}));
-            const overdue=state.items.some(row=>row.due_at!=null&&row.due_at<Date.now());
-            if(!state.items.length||!force&&!state.backlog.length&&!overdue)return showAgenda();
+            if(!state.items.length)return showAgenda();
+            if(!force&&!state.backlog.length){
+                await request('/agenda','PUT',{revision:state.revision,requestId:createId('agenda_refresh'),tasks:agenda.map(row=>({id:row.id,dueAt:row.due_at??null}))});
+                return (options.onSaved||showAgenda)();
+            }
             const c=shell('Which task is more important?','planSorting');
             c.append('Rank your backlog and Agenda together.');
             const sort=++sortRunId,header=el('taskCompare').querySelector('h2');
@@ -80,7 +83,7 @@ window.Agenda = (() => {
             collectMissingEstimates(entries,async()=>{
                 try {
                     for(const entry of entries){const row=rows.find(row=>row.id===entry.id);if(row.estimated_ms!==entry.estimatedTimeMs){await request(`/tasks/${encodeURIComponent(row.id)}`,'PUT',{remaining_ms:entry.estimatedTimeMs});state.revision=(await request('/agenda')).revision;row.estimated_ms=entry.estimatedTimeMs;}}
-                    if(options.autoSave&&rows.every(row=>row.due_at==null||row.due_at>=Date.now())){
+                    if(options.autoSave){
                         await request('/agenda','PUT',{revision:state.revision,requestId:createId('capture_agenda'),tasks:rows.map(row=>({id:row.id,dueAt:row.due_at??null}))});
                         finishImportanceSort();await (options.onSaved||showAgenda)();
                     }else deadlines(rows,state,options.onSaved);
@@ -90,7 +93,7 @@ window.Agenda = (() => {
     }
     function deadlines(rows,state,onSaved) {
         const c=shell('Review deadlines','planDeadlines');
-        const note=document.createElement('p');note.textContent='Confirm deadlines for the backlog and overdue tasks. Leave a date blank for no deadline. Your saved importance order is preserved.';c.appendChild(note);
+        const note=document.createElement('p');note.textContent='Review deadlines for the backlog. Past-due deadlines can stay as they are. Leave a date blank for no deadline. Your saved importance order is preserved.';c.appendChild(note);
         const fields=[];
         for(const [index,row] of rows.entries()) {
             const label=document.createElement('label');label.className='agenda-deadline';
@@ -102,7 +105,7 @@ window.Agenda = (() => {
         const requestId=createId('agenda_request');
         const save=button('Save Agenda',async()=>{
             const tasks=fields.map(({row,input})=>({id:row.id,dueAt:input.value?new Date(input.value).getTime():null}));
-            if(tasks.some(row=>row.dueAt!==null&&(!Number.isFinite(row.dueAt)||row.dueAt<Date.now())))return alert('Choose a future deadline or no deadline for tasks with past deadlines.');
+            if(tasks.some(row=>row.dueAt!==null&&(!Number.isFinite(row.dueAt)||row.dueAt<0)))return alert('Choose a valid deadline or no deadline.');
             save.disabled=true;
             try{await request('/agenda','PUT',{revision:state.revision,tasks,requestId});finishImportanceSort();await (onSaved||showAgenda)();}catch(e){error(e);}
         },'saveAgenda');
@@ -129,7 +132,7 @@ window.Agenda = (() => {
                 const name=document.createElement('strong');name.textContent=row.name;
                 const info=document.createElement('p');info.textContent=`${date(row.start_at)} – ${date(row.end_at)}`+(row.kind==='task'?` · Importance ${row.importance_rank}`:' · Calendar event');
                 item.append(name,info);
-                if(row.kind==='task'&&row.due_at!=null){const p=document.createElement('p');p.textContent=`Deadline: ${date(row.due_at)}`+(row.end_at>row.due_at?' · Deadline conflict: protected more important work or insufficient time.':'');if(row.end_at>row.due_at)p.className='agenda-conflict';item.appendChild(p);}
+                if(row.kind==='task'&&row.due_at!=null){const p=document.createElement('p');p.textContent=`Deadline: ${date(row.due_at)}`+(row.due_at<Date.now()?' · Overdue':row.end_at>row.due_at?' · Deadline conflict: protected future commitments or insufficient time.':'');if(row.end_at>row.due_at)p.className='agenda-conflict';item.appendChild(p);}
                 if(row.kind==='event')item.appendChild(button('Delete event',async()=>{try{await request(`/calendar-events/${encodeURIComponent(row.id)}`,'DELETE');showAgenda();}catch(e){error(e);}}));
                 list.appendChild(item);
             }

@@ -29,7 +29,7 @@ function save(owner,input){return db.transaction(()=>{
     if(input.revision!==before.revision)throw new Error('Agenda changed. Reload Plan before saving.');
     const ids=before.items.map(row=>row.id);
     if(!Array.isArray(input.tasks)||input.tasks.length!==ids.length||new Set(input.tasks.map(row=>row.id)).size!==ids.length||input.tasks.some(row=>!ids.includes(row.id)))throw new Error('Task list changed. Reload Plan before saving.');
-    for(const row of input.tasks){if(row.dueAt!=null&&(!Number.isSafeInteger(row.dueAt)||row.dueAt<Date.now()))throw new Error('Choose a new deadline or no deadline.');store.update(owner,row.id,{deadline_at:row.dueAt??null,due_at:null});}
+    for(const row of input.tasks){if(row.dueAt!=null&&(!Number.isSafeInteger(row.dueAt)||row.dueAt<0||row.dueAt>8640000000000000))throw new Error('Choose a valid deadline or no deadline.');store.update(owner,row.id,{deadline_at:row.dueAt??null,due_at:null});}
     const state=store.snapshot(owner),now=Date.now(),config=state.settings;
     const forecast=domain.plan(state.nodes,state.dependencies,state.comparisons,{now,windows:state.windows,...config,importanceOrder:input.tasks.map(row=>row.id),events:events(owner)});
     db.prepare('DELETE FROM agenda_tasks WHERE user_id=?').run(owner);db.prepare('DELETE FROM agenda_backlog WHERE user_id=?').run(owner);

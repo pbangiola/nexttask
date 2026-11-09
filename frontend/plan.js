@@ -227,7 +227,6 @@ window.NextPlan=(()=>{
             const payload={name:title.value.trim(),nodeType:n.node_type,parentId:parent.value||null,estimatedTimeMs:Math.round(Number(estimate.value)*60000),description:description.value,notes:notes.value,location:location.value,assignee:assignee.value,success_criteria:success.value,position:Number(position.value),
                 deadline_at:timestamp(deadline),earliest_start_at:timestamp(earliest),scheduled_start_at:timestamp(scheduled),remaining_ms:remaining.value===''?null:Math.round(Number(remaining.value)*60000),splittable:split.checked,
                 prerequisites:[...prereq.selectedOptions].map(o=>o.value),tags:tags.value.split(',').map(s=>s.trim()).filter(Boolean),recurrence_days:recurrence.value?Number(recurrence.value):null,recurrence_zone:state.settings.timezone};
-            if(needsDeadline&&payload.deadline_at!=null&&payload.deadline_at<Date.now())throw new Error('Choose a future deadline or No deadline.');
             const createdId=id||createId('task');
             await change(id?'/tasks/'+encodeURIComponent(id):'/tasks',id?'PUT':'POST',id?payload:{capture:true,tasks:[{...payload,id:createdId}]});d.close();
             if(!id&&payload.nodeType==='task')await finishCapture([createdId],onCreated?()=>onCreated(createdId):null);
@@ -262,7 +261,7 @@ window.NextPlan=(()=>{
             e.preventDefault();const parsed=window.TaskEntry.parse(input.value);
             if(parsed.invalid.length||!parsed.entries.length||view==='project'&&parsed.entries.some(n=>n.estimatedTimeMs<=0)){error.textContent='Check task durations and names. Project tasks require an estimate.';return;}
             const due=none.checked?null:new Date(deadline.value).getTime();
-            if(due!==null&&(!Number.isFinite(due)||due<Date.now())){error.textContent='Choose a future deadline or No deadline.';return;}
+            if(due!==null&&(!Number.isFinite(due)||due<0)){error.textContent='Choose a valid deadline or No deadline.';return;}
             save.disabled=true;
             try{
                 const tasks=parsed.entries.map(n=>({...n,id:createId('task'),parentId:view==='project'?project:null,deadline_at:due}));
